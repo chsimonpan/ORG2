@@ -53,6 +53,8 @@ interface UseWorkstationSidebarContextMenuParams {
   copyReferenceLabel: string;
   /** Teammate cloud rows have no local Session; remove means local hide. */
   handleCloudRemoteItemRemove?: (item: NavigationMenuItem) => boolean;
+  onLinkToWorkItem?: (sessionId: string) => void;
+  onLinkToProject?: (sessionId: string) => void;
   tCommon: (key: string, defaultValue?: string) => string;
 }
 
@@ -78,6 +80,8 @@ export function useWorkstationSidebarContextMenu({
   handleCopyReference,
   copyReferenceLabel,
   handleCloudRemoteItemRemove,
+  onLinkToWorkItem,
+  onLinkToProject,
   tCommon,
 }: UseWorkstationSidebarContextMenuParams): (
   event: MouseEvent,
@@ -156,6 +160,17 @@ export function useWorkstationSidebarContextMenu({
           text: tCommon("sessions:chat.exportAsMarkdown", "Export as Markdown"),
           action: () => handleExportMarkdown(item.id),
         });
+        primaryItems.push({
+          text: tCommon(
+            "sessions:chat.linkToProject",
+            "Link to Project / Create Project"
+          ),
+          action: () => onLinkToProject?.(item.id),
+        });
+        primaryItems.push({
+          text: tCommon("sessions:chat.linkToWorkItem", "Link to Work Item"),
+          action: () => onLinkToWorkItem?.(item.id),
+        });
       }
       // Move (tag) the session into a managed cloud org, independent of
       // repo-scope auto-sharing. Owner's own pushable sessions only.
@@ -215,6 +230,8 @@ export function useWorkstationSidebarContextMenu({
       isCopyReferenceEligible,
       copyReferenceLabel,
       handleCloudRemoteItemRemove,
+      onLinkToWorkItem,
+      onLinkToProject,
     ]
   );
 

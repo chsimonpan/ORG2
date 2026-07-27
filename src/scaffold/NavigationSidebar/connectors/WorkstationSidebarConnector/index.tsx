@@ -1,3 +1,4 @@
+import { emit } from "@tauri-apps/api/event";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Search } from "lucide-react";
 import React, { useCallback, useMemo, useRef, useState } from "react";
@@ -6,6 +7,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import { ROUTES } from "@src/config/routes";
 import { normalizeSetupWalkthroughProgress } from "@src/config/settingsSchema/setupWalkthroughProgress";
+import LinkSessionToProjectModal from "@src/engines/ChatPanel/panels/LinkSessionToProjectModal";
+import LinkSessionToWorkItemModal from "@src/engines/ChatPanel/panels/LinkSessionToWorkItemModal";
 import { createLogger } from "@src/hooks/logger";
 import { useAppNavigation } from "@src/hooks/navigation/useAppNavigation";
 import { useSessionView } from "@src/hooks/ui/tabs/useSessionView";
@@ -166,7 +169,9 @@ export function buildOrg2TreeItems(
       id: session.session_id,
       key: `org2-tree-session-${session.session_id}`,
       label: session.name || session.user_input || session.session_id,
-      shortcut: session.workItemId ? `工作项：${session.workItemId}` : "session",
+      shortcut: session.workItemId
+        ? `工作项：${session.workItemId}`
+        : "session",
       treeDepth: 2,
       trailingElement: createOrg2SessionStatusIndicator(session.status),
     });
@@ -268,6 +273,13 @@ export const WorkstationSidebarConnector: React.FC = () => {
     useState<WorkstationSidebarKey>("workstation");
   const [channelsOpen, setChannelsOpen] = useState(false);
   const [activeSessionMoreMenuId, setActiveSessionMoreMenuId] = useState("");
+  const [activeFolderMoreMenuId, setActiveFolderMoreMenuId] = useState("");
+  const [linkWorkItemSessionId, setLinkWorkItemSessionId] = useState<
+    string | null
+  >(null);
+  const [linkProjectSessionId, setLinkProjectSessionId] = useState<
+    string | null
+  >(null);
   const [projectsSelectedMenuItemId, setProjectsSelectedMenuItemId] =
     useState("");
   const [workItemsOpen, setWorkItemsOpen] = useState(false);
@@ -607,6 +619,8 @@ export const WorkstationSidebarConnector: React.FC = () => {
     handleExportMarkdown,
     handleOpenInNewTab,
     handleOpenInMyStation,
+    onLinkToWorkItem: setLinkWorkItemSessionId,
+    onLinkToProject: setLinkProjectSessionId,
     handleTogglePin,
     handleToggleSubagentExpansion,
     handleCloudRemoteItemRemove,
@@ -969,6 +983,22 @@ export const WorkstationSidebarConnector: React.FC = () => {
         moveToOrg={moveToOrg}
         rename={rename}
         sessionMap={sessionMap}
+      />
+      <LinkSessionToProjectModal
+        open={Boolean(linkProjectSessionId)}
+        sessionId={linkProjectSessionId}
+        onClose={() => setLinkProjectSessionId(null)}
+        onLinked={() =>
+          void emit("orgii-data-changed", new Date().toISOString())
+        }
+      />
+      <LinkSessionToWorkItemModal
+        open={Boolean(linkWorkItemSessionId)}
+        sessionId={linkWorkItemSessionId}
+        onClose={() => setLinkWorkItemSessionId(null)}
+        onLinked={() =>
+          void emit("orgii-data-changed", new Date().toISOString())
+        }
       />
     </>
   );
