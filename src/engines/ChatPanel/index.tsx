@@ -486,6 +486,7 @@ const ChatPanel: React.FC<ChatPanelProps> = memo(
       handleOpenExportSessionJson,
       handleOpenLinkWorkItem,
       handleOpenCloudShareSettings,
+      handleOpenLinkProject,
       showCloudShareSettings,
       sessionModals,
     } = useChatPanelSessionModals({
@@ -572,6 +573,7 @@ const ChatPanel: React.FC<ChatPanelProps> = memo(
         handleCopyEventJson={handleCopyEventJson}
         handleOpenExportSessionJson={handleOpenExportSessionJson}
         handleOpenLinkWorkItem={handleOpenLinkWorkItem}
+        handleOpenLinkProject={handleOpenLinkProject}
         handleOpenCloudShareSettings={handleOpenCloudShareSettings}
         handleOpenRawTranscript={sessionView.showRaw}
         handleMoveToWorkstation={handleMoveToWorkstation}

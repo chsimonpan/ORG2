@@ -1075,6 +1075,9 @@
       "menuItem": "Track as Project",
       "success": "Session is now tracked as a Project"
     },
+    "linkProject": {
+      "menuItem": "Link to Project…"
+    },
     "linkWorkItem": {
       "menuItem": "Link to Work Item…",
       "title": "Link session to Work Item",

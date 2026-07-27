@@ -13,6 +13,11 @@ const steps = [
     command: process.execPath,
     args: ["scripts/setup/json-merge-driver.mjs"],
   },
+  {
+    title: "Remove obsolete ORGII Codex provenance hook",
+    command: process.execPath,
+    args: ["scripts/setup/repair-codex-hooks.cjs"],
+  },
 ];
 
 function formatDuration(startedAt) {

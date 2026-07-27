@@ -199,6 +199,13 @@ export async function trackSessionAsProject(sessionId: string): Promise<{
   return rpc.agentSession.trackSessionAsProject({ sessionId });
 }
 
+export async function linkSessionToProject(input: {
+  sessionId: string;
+  projectSlug: string;
+}): Promise<SessionMeta> {
+  return rpc.agentSession.linkSessionToProject(input);
+}
+
 export async function respondQuestion(
   sessionId: string,
   requestId: string,

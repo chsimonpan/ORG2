@@ -9,6 +9,7 @@ import { SessionImportExportModal } from "@src/scaffold/NavigationSidebar/connec
 import type { Session } from "@src/store/session/sessionAtom/types";
 
 import SessionRawTranscriptDialog from "../components/SessionRawTranscriptDialog";
+import LinkSessionToProjectModal from "../panels/LinkSessionToProjectModal";
 import LinkSessionToWorkItemModal from "../panels/LinkSessionToWorkItemModal";
 
 type ExportActiveSession = ComponentProps<
@@ -33,6 +34,7 @@ export function useSessionActionModals({
 }: UseSessionActionModalsOptions) {
   const [isExportModalOpen, setExportModalOpen] = useState(false);
   const [isLinkWorkItemModalOpen, setLinkWorkItemModalOpen] = useState(false);
+  const [isLinkProjectModalOpen, setLinkProjectModalOpen] = useState(false);
   const [rawTranscriptSessionId, setRawTranscriptSessionId] = useState<
     string | null
   >(null);
@@ -49,6 +51,15 @@ export function useSessionActionModals({
       return;
     }
     setLinkWorkItemModalOpen(true);
+    closeHeaderActionsMenu();
+  }, [closeHeaderActionsMenu, currentSessionId, t]);
+
+  const handleOpenLinkProject = useCallback(() => {
+    if (!currentSessionId) {
+      Message.warning(t("common:toasts.openSessionBeforeLinking"));
+      return;
+    }
+    setLinkProjectModalOpen(true);
     closeHeaderActionsMenu();
   }, [closeHeaderActionsMenu, currentSessionId, t]);
 
@@ -79,6 +90,12 @@ export function useSessionActionModals({
         onClose={() => setLinkWorkItemModalOpen(false)}
         onLinked={handleSessionLinkedToWorkItem}
       />
+      <LinkSessionToProjectModal
+        open={isLinkProjectModalOpen}
+        sessionId={currentSessionId ?? null}
+        onClose={() => setLinkProjectModalOpen(false)}
+        onLinked={handleSessionLinkedToWorkItem}
+      />
       <SessionImportExportModal
         visible={isExportModalOpen}
         mode="export"
@@ -105,6 +122,7 @@ export function useSessionActionModals({
   return {
     handleOpenCloudShareSettings,
     handleOpenExportSessionJson,
+    handleOpenLinkProject,
     handleOpenLinkWorkItem,
     handleOpenRawTranscript,
     sessionModals,

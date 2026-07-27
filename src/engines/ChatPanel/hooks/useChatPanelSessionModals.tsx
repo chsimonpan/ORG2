@@ -17,7 +17,7 @@ interface UseChatPanelSessionModalsOptions {
   activeChatTab: ChatPanelTab | null;
   activeSession: ExportActiveSession;
   closeHeaderActionsMenu: () => void;
-  /** Full session row for the share dialog (design §6.3 header mount). */
+  /** Full session row for the share dialog (design \u00a76.3 header mount). */
   currentSession: Session | null;
   currentSessionId: string | null;
   t: TFunction<["sessions", "common", "projects", "navigation"]>;

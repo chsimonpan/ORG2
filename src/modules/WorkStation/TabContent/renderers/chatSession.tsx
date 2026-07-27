@@ -24,8 +24,8 @@ import { useSessionHeaderActions } from "@src/engines/ChatPanel/hooks/useSession
 import { useSessionViewMode } from "@src/engines/ChatPanel/hooks/useSessionViewMode";
 import SessionViewersIndicator from "@src/features/Org2Cloud/SessionViewersIndicator";
 import { usePublishWorkstationTabHeader } from "@src/hooks/workStation";
-import { getChatPanelBackgroundStyle } from "@src/modules/shared/layouts/viewContainerTokens";
 import { TabBarTrailingIconButton } from "@src/modules/WorkStation/shared";
+import { getChatPanelBackgroundStyle } from "@src/modules/shared/layouts/viewContainerTokens";
 import { sessionByIdAtom } from "@src/store/session";
 import type { SessionContinuation } from "@src/store/session/sessionTabPlacementAtom";
 import {
@@ -147,6 +147,7 @@ const ChatSessionTabRenderer: React.FC<UnifiedTabContentProps> = memo(
           handleOpenExportSessionJson={
             sessionActions.handleOpenExportSessionJson
           }
+          handleOpenLinkProject={sessionActions.handleOpenLinkProject}
           handleOpenLinkWorkItem={sessionActions.handleOpenLinkWorkItem}
           handleOpenRawTranscript={sessionView.showRaw}
           handleOpenSearch={headerActions.handleOpenSearch}

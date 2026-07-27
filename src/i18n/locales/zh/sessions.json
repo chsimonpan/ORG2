@@ -1066,6 +1066,9 @@
       "menuItem": "追踪为项目",
       "success": "会话已作为项目追踪"
     },
+    "linkProject": {
+      "menuItem": "关联到项目…"
+    },
     "linkWorkItem": {
       "menuItem": "关联到工作项…",
       "title": "将会话关联到工作项",
