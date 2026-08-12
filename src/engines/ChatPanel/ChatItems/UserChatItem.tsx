@@ -383,7 +383,10 @@ const UserChatItem = ({
                 <button
                   type="button"
                   data-testid="chat-message-restore-checkpoint"
-                  title={t("chat.restoreCheckpoint", "Restore checkpoint")}
+                  title={t(
+                    "chat.restoreCheckpoint",
+                    "Restore to here — removes subsequent conversation; choose whether to revert or keep file changes"
+                  )}
                   className="flex cursor-pointer items-center justify-center rounded-md border-none bg-transparent p-0.5 text-text-3 hover:text-danger-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-6/30"
                   onClick={(e) => {
                     e.stopPropagation();

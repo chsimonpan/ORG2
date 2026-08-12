@@ -17,7 +17,6 @@ import CloudSessionHoverCard from "@src/components/SessionHoverCard/CloudSession
 import { ROUTES } from "@src/config/routes";
 import LinkSessionToProjectModal from "@src/engines/ChatPanel/panels/LinkSessionToProjectModal";
 import LinkSessionToWorkItemModal from "@src/engines/ChatPanel/panels/LinkSessionToWorkItemModal";
-
 import CloudSessionShareDialog from "@src/features/Org2Cloud/CloudSessionShareDialog";
 import { useCloudSessionShareDialog } from "@src/features/Org2Cloud/CloudSessionShareDialog/useCloudSessionShareDialog";
 import CloudShareImportDialog from "@src/features/Org2Cloud/CloudShareImportDialog";
@@ -47,7 +46,6 @@ import {
   isSessionExcludedFromPersonal,
   sessionOrgTagsAtom,
 } from "@src/features/TeamCollaboration/sessionOrgTagsAtom";
-
 import { createLogger } from "@src/hooks/logger";
 import { useAppNavigation } from "@src/hooks/navigation/useAppNavigation";
 import { useProjectDataChanged } from "@src/hooks/project";
@@ -81,10 +79,6 @@ import {
   workstationActiveSessionIdAtom,
 } from "@src/store/session";
 import {
-  activeWorkspaceNameAtom,
-  workspaceFoldersAtom,
-} from "@src/store/ui/workspaceFoldersAtom";
-import {
   CHAT_PANEL_SURFACE_KIND,
   activeStationChatVisibleAtom,
   chatPanelContentModeAtom,
@@ -100,6 +94,10 @@ import {
 } from "@src/store/ui/sidebarAtom";
 import { type StationMode, stationModeAtom } from "@src/store/ui/simulatorAtom";
 import { spotlightOpenAtom } from "@src/store/ui/uiAtom";
+import {
+  activeWorkspaceNameAtom,
+  workspaceFoldersAtom,
+} from "@src/store/ui/workspaceFoldersAtom";
 import {
   WORK_MANAGEMENT_PROJECTS_VIEW,
   WORK_MANAGEMENT_SECTION,
@@ -668,7 +666,6 @@ export const WorkstationSidebarConnector: React.FC = () => {
   useEffect(() => {
     if (!sessionSidebarRevealRequest) return;
 
-
     setSidebarCollapsed(false);
     const parentSessionId =
       sessionSidebarRevealRequest.parentSessionId ??
@@ -1181,14 +1178,12 @@ export const WorkstationSidebarConnector: React.FC = () => {
       <NavigationSidebar
         items={[]}
         activeKey={activeSidebarKey}
-
         onChange={handleSidebarLayerChange}
         menuItems={
           activeSidebarKey === "workstation"
             ? [...decoratedOrg2TreeItems, ...sidebarMenuItems]
             : sidebarMenuItems
         }
-
         pinnedMenuItems={pinnedMenuItems}
         selectedKey={resolvedSelectedMenuItemId}
         onMenuItemClick={resolvedMenuItemClick}
@@ -1300,11 +1295,7 @@ export const WorkstationSidebarConnector: React.FC = () => {
   );
 };
 
-export type Org2TreeLevel =
-  | "workspace"
-  | "project"
-  | "session"
-  | "unlinked";
+export type Org2TreeLevel = "workspace" | "project" | "session" | "unlinked";
 
 const ORG2_TREE_LEVEL_BADGES: Record<
   Org2TreeLevel,
@@ -1317,6 +1308,10 @@ const ORG2_TREE_LEVEL_BADGES: Record<
   project: {
     label: "P",
     className: "border-sky-400/60 bg-sky-500/20 text-sky-200",
+  },
+  task: {
+    label: "T",
+    className: "border-amber-400/60 bg-amber-500/20 text-amber-100",
   },
   session: {
     label: "S",
@@ -1343,19 +1338,23 @@ function createOrg2TreeBadge(level: Org2TreeLevel): React.ReactNode {
 export function buildOrg2TreeItems(
   sessions: readonly import("@src/store/session").Session[]
 ): NavigationMenuItem[] {
-  const projects = new Map<string, NavigationMenuItem[]>();
+  const projects = new Map<string, Map<string, NavigationMenuItem[]>>();
   for (const session of sessions) {
-    const projectKey = session.projectSlug || session.projectId || "Unlinked";
-    const projectBucket = projects.get(projectKey) ?? [];
-    projectBucket.push({
-      // 复用普通 session 列表的 id，点击、hover 行动作、右键菜单都走同一套逻辑。
+    // projectId is the only authoritative Journey binding. A slug/path/cwd is
+    // display metadata and must never be used to infer project ownership.
+    const projectKey = session.projectId || "Unlinked";
+    const taskKey = session.workItemId || "Unlinked task";
+    const projectBucket =
+      projects.get(projectKey) ?? new Map<string, NavigationMenuItem[]>();
+    const taskBucket = projectBucket.get(taskKey) ?? [];
+    taskBucket.push({
       id: session.session_id,
       key: `org2-tree-session-${session.session_id}`,
       label: session.name || session.user_input || session.session_id,
-      // Work Item is optional metadata, never an organisational parent.
-      shortcut: session.workItemId ? `工作项：${session.workItemId}` : "session",
+      shortcut: "session",
       iconElement: createOrg2TreeBadge("session"),
     });
+    projectBucket.set(taskKey, taskBucket);
     projects.set(projectKey, projectBucket);
   }
   return [
@@ -1365,23 +1364,36 @@ export function buildOrg2TreeItems(
       label: "工作区层级",
       shortcut: "工作区",
       iconElement: createOrg2TreeBadge("workspace"),
-      // ORG2 hierarchy: workspace scope → project → session → journey.
-      // A Work Item may label a session but cannot become its parent.
-      children: Array.from(projects.entries()).map(
-        ([projectName, sessionItems]) => {
-          const isUnlinkedProject = projectName === "Unlinked";
-          return {
-            id: `org2-tree-project-${projectName}`,
-            key: `org2-tree-project-${projectName}`,
-            label: projectName,
-            shortcut: isUnlinkedProject ? "Unlinked" : "project",
-            iconElement: createOrg2TreeBadge(
-              isUnlinkedProject ? "unlinked" : "project"
-            ),
-            children: sessionItems,
-          };
-        }
-      ),
+      // Authoritative hierarchy: workspace → explicitly-bound project →
+      // work item/task → session. Unbound records remain visible, but are
+      // never guessed into a project from slug/path/remote/cwd.
+      children: Array.from(projects.entries()).map(([projectId, tasks]) => {
+        const isUnlinkedProject = projectId === "Unlinked";
+        return {
+          id: `org2-tree-project-${projectId}`,
+          key: `org2-tree-project-${projectId}`,
+          label: isUnlinkedProject ? "未绑定项目（拒绝推断）" : projectId,
+          shortcut: isUnlinkedProject ? "Unlinked" : "journey project_id",
+          iconElement: createOrg2TreeBadge(
+            isUnlinkedProject ? "unlinked" : "project"
+          ),
+          children: Array.from(tasks.entries()).map(
+            ([taskId, sessionItems]) => {
+              const isUnlinkedTask = taskId === "Unlinked task";
+              return {
+                id: `org2-tree-task-${projectId}-${taskId}`,
+                key: `org2-tree-task-${projectId}-${taskId}`,
+                label: isUnlinkedTask ? "未绑定 Work Item / Task" : taskId,
+                shortcut: isUnlinkedTask ? "Unlinked" : "task",
+                iconElement: createOrg2TreeBadge(
+                  isUnlinkedTask ? "unlinked" : "task"
+                ),
+                children: sessionItems,
+              };
+            }
+          ),
+        };
+      }),
     },
   ];
 }

@@ -13,20 +13,21 @@ export interface ProjectJourneyPageProps {
 /** Read-only project wrapper over the shared Journey graph container. */
 const ProjectJourneyPage: React.FC<ProjectJourneyPageProps> = ({
   projectId,
-  projectSlug,
   projectName,
 }) => {
-  const identity = projectId ?? projectSlug;
+  // Journey ownership requires an explicit canonical project id. Slugs are
+  // labels only and must never be promoted into ownership by inference.
+  const identity = projectId;
   if (!identity)
     return (
       <div className="p-3 text-xs text-warning-6" role="alert">
-        项目旅程不可用：缺少项目标识，拒绝猜测旅程图。
+        项目旅程不可用：未绑定 journey project_id，拒绝推断项目归属。
       </div>
     );
   return (
     <JourneyContainer
       scope={`project/${identity}` as JourneyScope}
-      title={`项目旅程${projectName ? ` · ${projectName}` : ""}`}
+      title={`项目旅程${projectName ? ` · ${projectName}` : ""} · journey project_id: ${identity}`}
     />
   );
 };

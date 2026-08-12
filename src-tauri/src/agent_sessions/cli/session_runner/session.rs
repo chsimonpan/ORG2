@@ -1,8 +1,8 @@
 //! Core session execution — spawns CLI agent, parses stdout, broadcasts events.
 
-use std::collections::VecDeque;
 #[cfg(test)]
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;

@@ -588,12 +588,8 @@ async fn build_session_list(state: &AgentAppState, session_key: &SessionKey) -> 
 }
 
 fn human_session_title(s: &crate::session::persistence::UnifiedSessionRecord) -> String {
-    if let Some(item) = s.work_item_id.as_deref().filter(|x| !x.trim().is_empty()) {
-        return format!("任务 {}", item);
-    }
-    if let Some(project) = s.project_slug.as_deref().filter(|x| !x.trim().is_empty()) {
-        return format!("项目 {}", project);
-    }
+    // The user-assigned canonical session name is always the title. Project
+    // and task bindings are context, never replacements for a renamed title.
     let name = s.name.trim();
     if !name.is_empty() && name != s.session_id {
         return crate::utils::safe_truncate_chars_to_string(name, 48);
@@ -631,18 +627,20 @@ fn human_session_relation(
     recent: &str,
 ) -> String {
     let mut parts = Vec::new();
-    if let Some(project) = s.project_slug.as_deref().filter(|x| !x.trim().is_empty()) {
-        parts.push(format!("项目 `{}`", project));
+    if let Some(project_name) = s.project_name.as_deref().filter(|x| !x.trim().is_empty()) {
+        let project_id = s.project_id.as_deref().filter(|x| !x.trim().is_empty());
+        parts.push(match project_id {
+            Some(id) => format!("项目 `{}` · journey project_id `{}`", project_name, id),
+            None => format!("项目 `{}`（未绑定 journey project_id）", project_name),
+        });
+    } else if let Some(project_id) = s.project_id.as_deref().filter(|x| !x.trim().is_empty()) {
+        parts.push(format!("journey project_id `{}`", project_id));
     }
     if let Some(item) = s.work_item_id.as_deref().filter(|x| !x.trim().is_empty()) {
         parts.push(format!("任务 `{}`", item));
     }
     if parts.is_empty() {
-        if recent.contains("WI-") || recent.contains("任务") {
-            parts.push("可能关联任务（未绑定）".to_string());
-        } else {
-            parts.push("未绑定项目/任务".to_string());
-        }
+        parts.push("未绑定项目/任务（拒绝从消息、路径或 slug 推断）".to_string());
     }
     parts.join(" · ")
 }
@@ -1231,6 +1229,23 @@ mod help_text_tests {
         ] {
             assert!(text.contains(cmd), "help cheat-sheet missing {cmd}: {text}");
         }
+    }
+
+    #[test]
+    fn renamed_session_is_title_and_canonical_project_is_context() {
+        let mut session = crate::session::persistence::UnifiedSessionRecord::new(
+            "sdeagent-635cbf7c-84eb-435f-91a7-a4e79a06bc22".to_string(),
+            "aug".to_string(),
+        );
+        session.project_id = Some("proj-ppcharge".to_string());
+        session.project_name = Some("PPCharge".to_string());
+        session.project_slug = Some("ppcharge".to_string());
+
+        assert_eq!(super::human_session_title(&session), "aug");
+        let relation = super::human_session_relation(&session, "最近：暂无文本消息");
+        assert!(relation.contains("PPCharge"), "{relation}");
+        assert!(relation.contains("proj-ppcharge"), "{relation}");
+        assert!(!relation.contains("可能关联"), "{relation}");
     }
 
     #[test]

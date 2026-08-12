@@ -75,6 +75,7 @@ export const JourneyContainer: React.FC<JourneyContainerProps> = ({
   }, [scope]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount via async reload (pre-existing pattern)
     void reload();
   }, [reload]);
 
@@ -86,6 +87,12 @@ export const JourneyContainer: React.FC<JourneyContainerProps> = ({
       <header className="flex items-center gap-2 border-b border-border-2 px-3 py-2">
         <div className="min-w-0 flex-1 text-sm font-medium text-text-1">
           {title}
+          <div className="mt-0.5 font-mono text-[10px] font-normal text-text-3">
+            journey project_id:{" "}
+            {scope.startsWith("project/")
+              ? scope.slice("project/".length)
+              : "未绑定（拒绝推断）"}
+          </div>
         </div>
         <button
           type="button"
