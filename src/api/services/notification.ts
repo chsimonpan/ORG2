@@ -1,313 +1,475 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   isPermissionGranted,
+  onAction,
+  registerActionTypes,
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 
 import { createLogger } from "@src/hooks/logger";
-import { NotificationSettings } from "@src/store/ui/notificationAtom";
+import type {
+  BackgroundCompletionSummary,
+  NotificationCategory,
+  NotificationContext,
+  NotificationDeliveryResult,
+  NotificationSettings,
+} from "@src/types/ui/notification";
+
+import {
+  NotificationEventDeduper,
+  NotificationRunTracker,
+  evaluateNotificationPolicy,
+} from "./notificationPolicy";
+import {
+  type NotificationSoundPlaybackOptions,
+  playNotificationSound as playSelectedNotificationSound,
+  unlockNotificationSound as unlockSelectedNotificationSound,
+} from "./notificationSound";
+import { BackgroundCompletionSummaryCoordinator } from "./notificationSummaryCoordinator";
 
 const log = createLogger("Notification");
 
-// Audio element for completion sounds
-let audioElement: HTMLAudioElement | null = null;
-let audioContext: AudioContext | null = null;
+export type NotificationPermissionStatus = "granted" | "denied" | "unknown";
 
-// Initialize audio element
-const getAudioElement = (): HTMLAudioElement => {
-  if (!audioElement) {
-    audioElement = new Audio("/sounds/completion.mp3");
-    // Add error handler to fall back to generated sound
-    audioElement.addEventListener("error", () => {
-      log.warn("Sound file not found, using generated sound");
-    });
-  }
-  return audioElement;
-};
-
-// Generate a simple notification beep using Web Audio API as fallback
-const playGeneratedSound = (volume: number): void => {
-  try {
-    if (!audioContext) {
-      audioContext = new (
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext })
-          .webkitAudioContext
-      )();
-    }
-
-    const oscillator = audioContext.createOscillator();
-    const gainNode = audioContext.createGain();
-
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.destination);
-
-    // Pleasant notification sound
-    oscillator.frequency.setValueAtTime(880, audioContext.currentTime); // A5 note
-    oscillator.type = "sine";
-
-    gainNode.gain.setValueAtTime(0, audioContext.currentTime);
-    gainNode.gain.linearRampToValueAtTime(
-      volume / 100,
-      audioContext.currentTime + 0.01
-    );
-    gainNode.gain.exponentialRampToValueAtTime(
-      0.001,
-      audioContext.currentTime + 0.3
-    );
-
-    oscillator.start(audioContext.currentTime);
-    oscillator.stop(audioContext.currentTime + 0.3);
-  } catch (error) {
-    log.error("Failed to play generated sound:", error);
-  }
-};
-
-// Notification categories type
-export type NotificationCategory = keyof NotificationSettings["categories"];
+export const TASK_FAILURE_NOTIFICATION_BODY =
+  "A task failed. Open ORGII for details.";
 
 export interface NotificationOptions {
   title: string;
   body: string;
   category?: NotificationCategory;
   playSound?: boolean;
+  context?: NotificationContext;
+  summaryLabel?: string;
+  extra?: Record<string, unknown>;
+  actionTypeId?: string;
 }
 
-/**
- * Check notification permission status
- */
-export const checkNotificationPermission = async (): Promise<string> => {
+interface TerminalNotificationOptions {
+  title?: string;
+  context?: NotificationContext;
+  summaryLabel?: string;
+}
+
+type BackgroundCompletionSummaryListener = (
+  summary: BackgroundCompletionSummary
+) => void;
+
+let backgroundCompletionSummaryListener: BackgroundCompletionSummaryListener | null =
+  null;
+let anonymousSummaryEventSequence = 0;
+const notificationEventDeduper = new NotificationEventDeduper();
+const notificationRunTracker = new NotificationRunTracker();
+
+export function isPrimaryNotificationWindow(): boolean {
   try {
-    const granted = await isPermissionGranted();
-    return granted ? "granted" : "denied";
-  } catch (error) {
-    log.error(
-      "[Notification] Permission check failed, trying Rust command:",
-      error
-    );
+    return !isTauri() || getCurrentWindow().label === "main";
+  } catch {
+    return false;
+  }
+}
+
+export function markNotificationRunStarted(sessionId: string): void {
+  notificationRunTracker.markRunning(sessionId);
+}
+
+export function terminalNotificationEventKey(
+  sessionId: string,
+  status: "completed" | "failed"
+): string {
+  return notificationRunTracker.terminalEventKey(sessionId, status);
+}
+
+export interface SystemNotificationAction {
+  extra: Record<string, unknown>;
+}
+
+export const TEAM_INBOX_NOTIFICATION_ACTION_TYPE_ID = "orgii-team-inbox";
+
+/**
+ * Read the native permission tri-state without collapsing "not requested" into
+ * "denied". The JS plugin only exposes a boolean, so it is a fallback.
+ */
+export const checkNotificationPermission =
+  async (): Promise<NotificationPermissionStatus> => {
     try {
-      return await invoke<string>("check_notification_permission");
+      return await invoke<NotificationPermissionStatus>(
+        "check_notification_permission"
+      );
     } catch (invokeError) {
-      log.error("[Notification] Rust command also failed:", invokeError);
+      log.warn(
+        "[Notification] Rust permission check failed, using boolean fallback:",
+        invokeError
+      );
+    }
+
+    try {
+      return (await isPermissionGranted()) ? "granted" : "unknown";
+    } catch (error) {
+      log.error("[Notification] Permission check failed:", error);
       return "unknown";
     }
-  }
-};
+  };
 
-/**
- * Request notification permission
- */
-export const requestNotificationPermission = async (): Promise<string> => {
-  try {
-    const permission = await requestPermission();
-    return permission === "granted"
-      ? "granted"
-      : permission === "denied"
-        ? "denied"
-        : "unknown";
-  } catch (error) {
-    log.error(
-      "[Notification] Permission request failed, trying Rust command:",
-      error
-    );
+export const requestNotificationPermission =
+  async (): Promise<NotificationPermissionStatus> => {
     try {
-      return await invoke<string>("request_notification_permission");
-    } catch (invokeError) {
-      log.error("[Notification] Rust command also failed:", invokeError);
-      return "denied";
+      const permission = await requestPermission();
+      return permission === "granted"
+        ? "granted"
+        : permission === "denied"
+          ? "denied"
+          : "unknown";
+    } catch (error) {
+      log.warn(
+        "[Notification] Permission request failed, trying Rust command:",
+        error
+      );
+      try {
+        return await invoke<NotificationPermissionStatus>(
+          "request_notification_permission"
+        );
+      } catch (invokeError) {
+        log.error(
+          "[Notification] Rust permission request failed:",
+          invokeError
+        );
+        return "unknown";
+      }
     }
-  }
-};
+  };
 
-/**
- * Send a system notification
- */
 export const sendSystemNotification = async (
   title: string,
-  body: string
+  body: string,
+  extra?: Record<string, unknown>,
+  actionTypeId?: string
 ): Promise<boolean> => {
   try {
-    await sendNotification({ title, body });
+    await sendNotification({
+      title,
+      body,
+      extra,
+      actionTypeId,
+      autoCancel: true,
+    });
     return true;
   } catch (error) {
-    log.error("[Notification] Send failed, trying Rust command:", error);
+    log.warn("[Notification] Send failed, trying Rust command:", error);
     try {
       await invoke("send_notification", { title, body });
       return true;
     } catch (invokeError) {
-      log.error("[Notification] Rust command also failed:", invokeError);
+      log.error("[Notification] Rust notification send failed:", invokeError);
       return false;
     }
   }
 };
 
-/**
- * Play completion sound
- */
-export const playCompletionSound = (volume: number = 70): void => {
-  try {
-    const audio = getAudioElement();
-    audio.volume = Math.max(0, Math.min(1, volume / 100));
-    audio.currentTime = 0;
-
-    const playPromise = audio.play();
-
-    if (playPromise !== undefined) {
-      playPromise.catch(() => {
-        // If the audio file fails to play (not found or error), use generated sound
-        playGeneratedSound(volume);
-      });
-    }
-  } catch {
-    // Fallback to generated sound
-    playGeneratedSound(volume);
-  }
+/** Project the authoritative Team Inbox unread count into the dock badge. */
+export const registerTeamInboxNotificationActionType = async (
+  viewLabel: string
+): Promise<void> => {
+  await registerActionTypes([
+    {
+      id: TEAM_INBOX_NOTIFICATION_ACTION_TYPE_ID,
+      actions: [
+        {
+          id: "view-team-inbox",
+          title: viewLabel,
+          foreground: true,
+        },
+      ],
+    },
+  ]);
 };
 
 /**
- * Send a notification based on settings
+ * Listen for native notification activation while the application process is
+ * alive. The returned disposer is safe to call during React effect cleanup.
  */
+export const listenForSystemNotificationActions = async (
+  handler: (action: SystemNotificationAction) => void
+): Promise<() => void> => {
+  const listener = await onAction((notification) => {
+    handler({ extra: notification.extra ?? {} });
+  });
+  return () => listener.unregister();
+};
+
+/**
+ * Project the authoritative Team Inbox unread count into the dock badge.
+ */
+export const setDockBadge = async (count: number): Promise<boolean> => {
+  try {
+    await invoke("set_dock_badge", {
+      count: Number.isFinite(count) && count > 0 ? Math.floor(count) : null,
+    });
+    return true;
+  } catch (error) {
+    log.error("[Notification] Failed to update dock badge:", error);
+    return false;
+  }
+};
+
+export const playNotificationSound = (
+  options: NotificationSoundPlaybackOptions
+): Promise<boolean> => playSelectedNotificationSound(options);
+
+export const unlockNotificationSound = (): Promise<boolean> =>
+  unlockSelectedNotificationSound();
+
+async function deliverNotification(
+  options: NotificationOptions,
+  settings: NotificationSettings,
+  decision: {
+    sendSystemNotification: boolean;
+    playSound: boolean;
+  }
+): Promise<
+  Pick<NotificationDeliveryResult, "systemNotificationSent" | "soundPlayed">
+> {
+  const systemNotificationSent = decision.sendSystemNotification
+    ? await sendSystemNotification(
+        options.title,
+        options.body,
+        options.extra,
+        options.actionTypeId
+      )
+    : false;
+  const soundPlayed = decision.playSound
+    ? await playNotificationSound({
+        preset: settings.soundPreset,
+        volume: settings.soundVolume,
+      })
+    : false;
+
+  return {
+    systemNotificationSent,
+    soundPlayed,
+  };
+}
+
+const backgroundCompletionSummaryCoordinator =
+  new BackgroundCompletionSummaryCoordinator(async (summary, settings) => {
+    const visibleNames = summary.sessionNames.join(", ");
+    const remaining = Math.max(0, summary.count - summary.sessionNames.length);
+    const body = visibleNames
+      ? remaining > 0
+        ? `${visibleNames} and ${remaining} more`
+        : visibleNames
+      : `${summary.count} background tasks are ready for review`;
+    const options: NotificationOptions = {
+      title: `${summary.count} background task${summary.count === 1 ? "" : "s"} completed`,
+      body,
+      category: "taskCompletion",
+      playSound: true,
+    };
+    const decision = evaluateNotificationPolicy(
+      {
+        category: options.category,
+        playSound: true,
+      },
+      settings
+    );
+
+    if (decision.disposition !== "deliver") {
+      return decision.reason !== "quiet-hours";
+    }
+
+    const delivery = await deliverNotification(options, settings, decision);
+    let inAppDelivered = false;
+    if (backgroundCompletionSummaryListener) {
+      try {
+        backgroundCompletionSummaryListener(summary);
+        inAppDelivered = true;
+      } catch (error) {
+        log.error("[Notification] Summary listener failed:", error);
+      }
+    }
+
+    return (
+      delivery.systemNotificationSent || delivery.soundPlayed || inAppDelivered
+    );
+  });
+
+/** Keep the one-shot summary boundary timer aligned with live settings. */
+export function configureNotificationRuntime(
+  settings: NotificationSettings
+): void {
+  if (!isPrimaryNotificationWindow()) return;
+  backgroundCompletionSummaryCoordinator.configure(settings);
+}
+
+export function disposeNotificationRuntime(): void {
+  backgroundCompletionSummaryCoordinator.dispose();
+}
+
+export function setBackgroundCompletionSummaryListener(
+  listener: BackgroundCompletionSummaryListener | null
+): () => void {
+  backgroundCompletionSummaryListener = listener;
+  return () => {
+    if (backgroundCompletionSummaryListener === listener) {
+      backgroundCompletionSummaryListener = null;
+    }
+  };
+}
+
 export const notify = async (
   options: NotificationOptions,
   settings: NotificationSettings
-): Promise<boolean> => {
-  if (!settings.enabled) {
-    return false;
+): Promise<NotificationDeliveryResult> => {
+  if (!isPrimaryNotificationWindow()) {
+    return {
+      disposition: "suppressed",
+      systemNotificationSent: false,
+      soundPlayed: false,
+      reason: "non-primary-window",
+    };
   }
 
-  if (options.category && !settings.categories[options.category]) {
-    return false;
+  const eventKey = options.context?.eventKey;
+  if (eventKey && !notificationEventDeduper.shouldDeliver(eventKey)) {
+    return {
+      disposition: "suppressed",
+      systemNotificationSent: false,
+      soundPlayed: false,
+      reason: "duplicate",
+    };
   }
 
-  let notificationSent = false;
-  if (settings.systemNotificationEnabled) {
-    notificationSent = await sendSystemNotification(
-      options.title,
-      options.body
-    );
-  }
-
-  if (options.playSound !== false && settings.completionSound) {
-    playCompletionSound(settings.soundVolume);
-  }
-
-  return notificationSent;
-};
-
-/**
- * Notify task completion
- */
-export const notifyTaskCompletion = async (
-  taskName: string,
-  settings: NotificationSettings
-): Promise<boolean> => {
-  return notify(
+  configureNotificationRuntime(settings);
+  const decision = evaluateNotificationPolicy(
     {
-      title: "Task Completed",
-      body: taskName,
-      category: "taskCompletion",
-      playSound: true,
+      category: options.category,
+      context: options.context,
+      playSound: options.playSound !== false,
     },
     settings
   );
+
+  if (decision.disposition === "defer") {
+    backgroundCompletionSummaryCoordinator.enqueue(
+      {
+        eventKey:
+          options.context?.eventKey ??
+          `summary:${Date.now()}:${++anonymousSummaryEventSequence}`,
+        sessionId: options.context?.sessionId,
+        sessionName: options.summaryLabel ?? options.body,
+      },
+      settings
+    );
+    return {
+      disposition: "deferred",
+      systemNotificationSent: false,
+      soundPlayed: false,
+      reason: decision.reason,
+    };
+  }
+
+  if (decision.disposition === "suppress") {
+    return {
+      disposition: "suppressed",
+      systemNotificationSent: false,
+      soundPlayed: false,
+      reason: decision.reason,
+    };
+  }
+
+  const delivery = await deliverNotification(options, settings, decision);
+  return {
+    disposition: "delivered",
+    ...delivery,
+  };
 };
 
-/**
- * Notify agent approval needed
- */
+export const notifyTaskCompletion = async (
+  taskName: string,
+  settings: NotificationSettings,
+  options: TerminalNotificationOptions = {}
+): Promise<NotificationDeliveryResult> =>
+  notify(
+    {
+      title: options.title ?? "Task Completed",
+      body: taskName,
+      category: "taskCompletion",
+      playSound: true,
+      context: options.context,
+      summaryLabel: options.summaryLabel ?? taskName,
+    },
+    settings
+  );
+
 export const notifyAgentApproval = async (
   actionName: string,
-  settings: NotificationSettings
-): Promise<boolean> => {
-  return notify(
+  settings: NotificationSettings,
+  context?: NotificationContext
+): Promise<NotificationDeliveryResult> =>
+  notify(
     {
       title: "Action Requires Approval",
       body: actionName,
       category: "agentApproval",
       playSound: true,
+      context,
     },
     settings
   );
-};
 
-/**
- * Notify error
- */
 export const notifyError = async (
   errorMessage: string,
-  settings: NotificationSettings
-): Promise<boolean> => {
-  return notify(
+  settings: NotificationSettings,
+  options: TerminalNotificationOptions = {}
+): Promise<NotificationDeliveryResult> =>
+  notify(
     {
-      title: "Error",
+      title: options.title ?? "Error",
       body: errorMessage,
       category: "errors",
-      playSound: false,
+      playSound: true,
+      context: options.context,
     },
     settings
   );
-};
 
-/**
- * Notify session status change
- */
-export const notifySessionStatus = async (
-  status: string,
-  settings: NotificationSettings
-): Promise<boolean> => {
+export const notifyTeamInbox = async (
+  title: string,
+  body: string,
+  settings: NotificationSettings,
+  extra?: Record<string, unknown>
+): Promise<NotificationDeliveryResult> => {
   return notify(
     {
-      title: "Session Status",
-      body: status,
-      category: "sessionStatus",
-      playSound: false,
+      title,
+      body,
+      category: "teamInbox",
+      playSound: true,
+      extra,
+      actionTypeId: TEAM_INBOX_NOTIFICATION_ACTION_TYPE_ID,
     },
     settings
   );
 };
 
-/**
- * Notify git operation
- */
-export const notifyGitOperation = async (
-  operation: string,
-  settings: NotificationSettings
-): Promise<boolean> => {
-  return notify(
-    {
-      title: "Git Operation",
-      body: operation,
-      category: "gitOperations",
-      playSound: false,
-    },
-    settings
-  );
-};
-
-/**
- * Test notification - sends a test notification and plays sound
- */
+/** Test the native channel and selected sound without changing saved settings. */
 export const sendTestNotification = async (
   settings: NotificationSettings
 ): Promise<boolean> => {
-  const tempSettings = {
-    ...settings,
-    enabled: true,
-    systemNotificationEnabled: true,
-    categories: {
-      ...settings.categories,
-      taskCompletion: true,
-    },
-  };
-
-  return notify(
+  const result = await deliverNotification(
     {
       title: "Test Notification",
       body: "This is a test notification from ORGII",
       category: "taskCompletion",
       playSound: true,
     },
-    tempSettings
+    settings,
+    {
+      sendSystemNotification: true,
+      playSound: settings.soundEnabled,
+    }
   );
+  return result.systemNotificationSent;
 };

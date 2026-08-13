@@ -28,6 +28,9 @@
 export { default as SectionHeading } from "./Heading";
 export type { SectionHeadingProps } from "./Heading";
 
+export { default as SectionDescription } from "./Description";
+export type { SectionDescriptionProps } from "./Description";
+
 export { default as SectionContainer } from "./Container";
 export type { SectionContainerProps } from "./Container";
 
@@ -73,7 +76,6 @@ export {
   /** 480 — container-query breakpoint value */
   SECTION_LAYOUT_BREAKPOINT,
   SECTION_CONTAINER_BASE_CLASSES,
-  SECTION_CONTAINER_COLOR_CLASSES,
   /** "px-4" | "px-4 py-2" | "px-4 py-3" — padding variants for SectionContainer content */
   SECTION_PADDING,
   /** "pl-6" — left indent for sub-settings */
@@ -106,4 +108,6 @@ export {
   SECTION_ACTION_GAP_CLASSES,
   /** "flex flex-col gap-3" — wrapper gap between section containers */
   SECTION_GAP_CLASSES,
+  /** Shared icon/title/description/content hierarchy for content intros */
+  SECTION_INTRO_TOKENS,
 } from "./tokens";

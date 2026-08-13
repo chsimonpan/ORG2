@@ -1,22 +1,34 @@
-/** React-free "address comments" round: one in-place agent turn on the owning local session over every unresolved thread; the agent replies per thread via the reply_session_comment tool, with transcript parsing as fallback. */
+/**
+ * One in-place agent turn over unresolved cloud-comment threads.
+ *
+ * The turn is submitted through the exact same user-intent dispatcher as the
+ * composer, so an active session queues it and an idle session sends it. The
+ * agent must post thread replies through `session.replyComment`; transcript
+ * text is never guessed or copied into a comment as a fallback.
+ */
 import { atom } from "jotai";
 
+import {
+  type TurnIntentDispatch,
+  waitForTurnIntentDispatch,
+} from "@src/engines/SessionCore/control/turnIntentDispatchLifecycle";
+import {
+  getLastTurnTerminal,
+  turnLifecycleSignalAtom,
+} from "@src/engines/SessionCore/control/turnLifecycle";
 import { eventStoreProxy } from "@src/engines/SessionCore/core/store/EventStoreProxy";
-import { SessionService } from "@src/engines/SessionCore/services/SessionService";
+import { mintTurnIntentId } from "@src/engines/SessionCore/sync/adapters/shared/eventFactories";
+import { getSessionForkedFrom } from "@src/features/TeamCollaboration/forkSession";
 import { createLogger } from "@src/hooks/logger";
-import { TERMINAL_STATUSES } from "@src/types/session/session";
+import { sessionByIdAtom } from "@src/store/session/sessionAtom";
 import { getInstrumentedStore } from "@src/util/core/state/instrumentedStore";
 
+import { stripCopyEventNamespace } from "../TeamCollaboration/copyEventId";
 import {
   type AddressableThread,
   buildAddressCommentsBriefing,
   collectAddressableThreads,
-  parseAddressReplies,
 } from "./addressComments";
-import {
-  agentTaskRunnerSettingsAtom,
-  resolveAgentRunnerSettings,
-} from "./agentTaskRunnerSettingsAtom";
 import { commitRefreshedAuth, org2CloudAuthAtom } from "./org2CloudAuthAtom";
 import { ensureFreshSession } from "./org2CloudClient";
 import { broadcastCommentsChanged } from "./org2CloudCommentsBus";
@@ -26,12 +38,16 @@ import {
 } from "./org2CloudCommentsClient";
 
 const log = createLogger("addressCommentsRun");
-
-const STATUS_POLL_INTERVAL_MS = 4000;
 const RUN_DEADLINE_MS = 15 * 60_000;
-const FALLBACK_REPLY_MAX_CHARS = 4000;
 
-export const addressRunActiveAtom = atom<Record<string, boolean>>({});
+export interface AddressRunActivity {
+  /** Null means the run targets every currently addressable thread. */
+  selectedHeadIds: readonly string[] | null;
+}
+
+export const addressRunActiveAtom = atom<Record<string, AddressRunActivity>>(
+  {}
+);
 addressRunActiveAtom.debugLabel = "addressRunActiveAtom";
 
 export interface ActiveAddressRun {
@@ -39,31 +55,96 @@ export interface ActiveAddressRun {
   cloudSessionId: string;
   localSessionId: string;
   validHeadIds: ReadonlySet<string>;
-  holdReplyForCommentId?: string;
-  heldBody?: string;
   replied: Map<string, string>;
 }
 
 const activeAddressRuns = new Map<string, ActiveAddressRun>();
+interface ScheduledAddressRun {
+  token: symbol;
+  selectedHeadIds: ReadonlySet<string> | null;
+}
 
-/**
- * Resolve the run that owns `commentId`, restricted to the run whose
- * `localSessionId` equals `invokingSessionId` (the trusted CallContext id of
- * the session whose agent called the reply tool). Fail-closed: an empty or
- * absent `invokingSessionId` matches nothing, so session A can never post
- * into session B's threads and an unbound call can never reach any run.
- */
+const scheduledRunsBySession = new Map<string, ScheduledAddressRun[]>();
+
+function publishRunActivity(localSessionId: string): void {
+  const runs = scheduledRunsBySession.get(localSessionId) ?? [];
+  const selected = new Set<string>();
+  for (const run of runs) {
+    for (const headId of run.selectedHeadIds ?? []) selected.add(headId);
+  }
+  const selectedHeadIds = runs.some((run) => run.selectedHeadIds === null)
+    ? null
+    : [...selected];
+  getInstrumentedStore().set(addressRunActiveAtom, (current) => {
+    if (runs.length === 0) {
+      if (!(localSessionId in current)) return current;
+      const { [localSessionId]: _removed, ...rest } = current;
+      return rest;
+    }
+    return { ...current, [localSessionId]: { selectedHeadIds } };
+  });
+}
+
+function beginRunActivity(
+  localSessionId: string,
+  selectedHeadIds: readonly string[] | undefined
+): () => void {
+  const run: ScheduledAddressRun = {
+    token: Symbol("address-comments-run"),
+    selectedHeadIds:
+      selectedHeadIds === undefined ? null : new Set(selectedHeadIds),
+  };
+  const current = scheduledRunsBySession.get(localSessionId) ?? [];
+  scheduledRunsBySession.set(localSessionId, [...current, run]);
+  publishRunActivity(localSessionId);
+  return () => {
+    const remaining = (scheduledRunsBySession.get(localSessionId) ?? []).filter(
+      (candidate) => candidate.token !== run.token
+    );
+    if (remaining.length === 0) scheduledRunsBySession.delete(localSessionId);
+    else scheduledRunsBySession.set(localSessionId, remaining);
+    publishRunActivity(localSessionId);
+  };
+}
+
+async function waitForTurnTerminal(
+  dispatch: TurnIntentDispatch,
+  deadlineMs: number
+): Promise<void> {
+  const { sessionId, generation } = dispatch;
+  const isComplete = (): boolean =>
+    getLastTurnTerminal(sessionId)?.generation === generation;
+  if (isComplete()) return;
+  const store = getInstrumentedStore();
+  await new Promise<void>((resolve, reject) => {
+    const remainingMs = deadlineMs - Date.now();
+    if (remainingMs <= 0) {
+      reject(new Error("address-comments run timed out"));
+      return;
+    }
+    let unsubscribe: (() => void) | null = null;
+    const timer = setTimeout(() => {
+      unsubscribe?.();
+      reject(new Error("address-comments run timed out"));
+    }, remainingMs);
+    const check = (): void => {
+      if (!isComplete()) return;
+      clearTimeout(timer);
+      unsubscribe?.();
+      resolve();
+    };
+    unsubscribe = store.sub(turnLifecycleSignalAtom, check);
+    check();
+  });
+}
+
 function findActiveAddressRunForComment(
   commentId: string,
   invokingSessionId: string
 ): ActiveAddressRun | undefined {
   if (invokingSessionId.length === 0) return undefined;
-  for (const run of activeAddressRuns.values()) {
-    if (!run.validHeadIds.has(commentId)) continue;
-    if (run.localSessionId !== invokingSessionId) continue;
-    return run;
-  }
-  return undefined;
+  const run = activeAddressRuns.get(invokingSessionId);
+  return run?.validHeadIds.has(commentId) ? run : undefined;
 }
 
 export interface AddressReplyToolResult {
@@ -71,13 +152,7 @@ export interface AddressReplyToolResult {
   message: string;
 }
 
-/**
- * `session.replyComment` action backend — validates against the active run
- * registry. `invokingSessionId` is the trusted CallContext id of the session
- * whose agent issued the call; it binds the reply to that session's own run so
- * a foreign run's threads stay unreachable. Fail-closed: a missing/empty id is
- * rejected outright rather than scanning every active run.
- */
+/** Trusted backend for the `session.replyComment` action. */
 export async function replyViaActiveAddressRun(
   commentId: string,
   body: string,
@@ -107,14 +182,6 @@ export async function replyViaActiveAddressRun(
       message: `A reply was already posted to comment ${commentId} in this run. Do not reply to the same comment twice.`,
     };
   }
-  if (commentId === run.holdReplyForCommentId) {
-    run.heldBody = trimmedBody;
-    run.replied.set(commentId, trimmedBody);
-    return {
-      success: true,
-      message: "Reply recorded; it will be delivered as this task's report.",
-    };
-  }
   const accessToken = await freshAccessToken();
   await addSessionComment(accessToken, {
     orgId: run.orgId,
@@ -128,15 +195,6 @@ export async function replyViaActiveAddressRun(
   return { success: true, message: `Reply posted to comment ${commentId}.` };
 }
 
-const lastRoundReplies = new Map<string, Map<string, string>>();
-
-export function getLastRoundReply(
-  localSessionId: string,
-  commentId: string
-): string | undefined {
-  return lastRoundReplies.get(localSessionId)?.get(commentId);
-}
-
 type AddressRunFinishedListener = () => void;
 const addressRunFinishedListeners = new Set<AddressRunFinishedListener>();
 
@@ -144,9 +202,7 @@ export function registerAddressRunFinishedListener(
   listener: AddressRunFinishedListener
 ): () => void {
   addressRunFinishedListeners.add(listener);
-  return () => {
-    addressRunFinishedListeners.delete(listener);
-  };
+  return () => addressRunFinishedListeners.delete(listener);
 }
 
 function notifyAddressRunFinished(): void {
@@ -160,18 +216,7 @@ function notifyAddressRunFinished(): void {
 }
 
 export function isAddressRunActive(localSessionId: string): boolean {
-  return Boolean(
-    getInstrumentedStore().get(addressRunActiveAtom)[localSessionId]
-  );
-}
-
-function setAddressRunActive(localSessionId: string, active: boolean): void {
-  getInstrumentedStore().set(addressRunActiveAtom, (current) => {
-    if (active) return { ...current, [localSessionId]: true };
-    if (!(localSessionId in current)) return current;
-    const { [localSessionId]: _removed, ...rest } = current;
-    return rest;
-  });
+  return (scheduledRunsBySession.get(localSessionId)?.length ?? 0) > 0;
 }
 
 async function freshAccessToken(): Promise<string> {
@@ -181,9 +226,7 @@ async function freshAccessToken(): Promise<string> {
     throw new Error("org2 cloud sign-in required for an address-comments run");
   }
   const fresh = await ensureFreshSession(current);
-  if (!fresh) {
-    throw new Error("org2 cloud session refresh failed");
-  }
+  if (!fresh) throw new Error("org2 cloud session refresh failed");
   commitRefreshedAuth(
     (updater) => store.set(org2CloudAuthAtom, updater),
     current,
@@ -200,8 +243,11 @@ export interface AddressRoundEventLike {
 
 export function attachAnchorExcerpts(
   threads: readonly AddressableThread[],
-  events: readonly AddressRoundEventLike[]
+  events: readonly AddressRoundEventLike[],
+  localSessionId?: string
 ): AddressableThread[] {
+  const toSourceId = (id: string) =>
+    localSessionId ? stripCopyEventNamespace(localSessionId, id) : id;
   const eventTextById = new Map<string, string>();
   const roundNumberByEventId = new Map<string, number>();
   const roundUserTextByNumber = new Map<number, string>();
@@ -209,12 +255,13 @@ export function attachAnchorExcerpts(
   for (const event of events) {
     if (event.source === "user") {
       roundNumber += 1;
-      if (event.displayText) {
+      if (event.displayText)
         roundUserTextByNumber.set(roundNumber, event.displayText);
-      }
     }
-    if (roundNumber > 0) roundNumberByEventId.set(event.id, roundNumber);
-    if (event.displayText) eventTextById.set(event.id, event.displayText);
+    if (roundNumber > 0)
+      roundNumberByEventId.set(toSourceId(event.id), roundNumber);
+    if (event.displayText)
+      eventTextById.set(toSourceId(event.id), event.displayText);
   }
   return threads.map((thread) => {
     const eventId = thread.anchorEventId;
@@ -233,120 +280,127 @@ export function attachAnchorExcerpts(
   });
 }
 
-export async function readRunSummaryFromEventStore(
-  sessionId: string
-): Promise<string | undefined> {
-  const events = await eventStoreProxy.getPersistedEvents(sessionId);
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event.source !== "assistant") continue;
-    const actionType = event.actionType ?? "";
-    if (
-      actionType.includes("thinking") ||
-      actionType.includes("reasoning") ||
-      actionType.includes("tool")
-    ) {
-      continue;
-    }
-    const text = (event.displayText || "").trim();
-    if (text.length > 0) return text;
-  }
-  return undefined;
-}
-
-export function partitionAddressReplies(
-  replies: readonly { commentId: string; body: string }[],
-  holdReplyForCommentId: string | undefined
-): { toPost: { commentId: string; body: string }[]; heldReply?: string } {
-  const toPost = replies.filter(
-    (reply) => reply.commentId !== holdReplyForCommentId
-  );
-  const held = replies.find(
-    (reply) => reply.commentId === holdReplyForCommentId
-  );
-  return {
-    toPost,
-    ...(held !== undefined ? { heldReply: held.body } : {}),
-  };
-}
-
-export function selectFallbackReplies(
-  summary: string,
-  validIds: ReadonlySet<string>,
-  replied: ReadonlyMap<string, string>,
-  firstHeadId: string
-): Array<{ commentId: string; body: string }> {
-  const parsed = parseAddressReplies(summary, validIds).filter(
-    (reply) => !replied.has(reply.commentId)
-  );
-  if (parsed.length === 0 && replied.size === 0 && summary.length > 0) {
-    return [
-      {
-        commentId: firstHeadId,
-        body: summary.slice(0, FALLBACK_REPLY_MAX_CHARS),
-      },
-    ];
-  }
-  return parsed;
-}
-
 export function seedActiveAddressRunForTest(run: ActiveAddressRun): () => void {
   activeAddressRuns.set(run.localSessionId, run);
   return () => {
-    activeAddressRuns.delete(run.localSessionId);
+    if (activeAddressRuns.get(run.localSessionId) === run) {
+      activeAddressRuns.delete(run.localSessionId);
+    }
   };
 }
+
+export interface AddressTurnSubmitInput {
+  displayContent: string;
+  agentContent: string;
+  turnIntentId: string;
+}
+
+export type AddressTurnDispatcher = (
+  input: AddressTurnSubmitInput
+) => Promise<void>;
 
 export interface AddressRoundInput {
   orgId: string;
   cloudSessionId: string;
   localSessionId: string;
-  /**
-   * Thread head whose parsed reply is HELD instead of posted — the caller
-   * (in-place task runner) delivers it as the task's completion report
-   * reply, so the thread never receives the same content twice.
-   */
-  holdReplyForCommentId?: string;
-  /** Restrict the round to these thread heads; omitted = all unresolved. */
+  dispatchTurn: AddressTurnDispatcher;
   selectedHeadIds?: readonly string[];
-  /** Extra requester instruction appended to the briefing. */
   instruction?: string;
 }
 
 export type AddressRoundResult =
-  | { status: "skipped_active" }
   | { status: "no_threads" }
-  | {
-      status: "ran";
-      threadCount: number;
-      /** Replies actually POSTED (a held reply is not counted). */
-      replyCount: number;
-      summary: string;
-      /** The held thread's parsed reply body, when one was produced. */
-      heldReply?: string;
-    };
+  | { status: "ran"; threadCount: number; replyCount: number };
+
+function buildDisplayContent(threads: readonly AddressableThread[]): string {
+  if (threads.length === 1) {
+    const body = threads[0].headBody.replace(/^\s*@agent\b\s*/i, "");
+    return `@agent ${body}`.trim();
+  }
+  return `@agent Address ${threads.length} cloud comment threads`;
+}
+
+/**
+ * Rounds are SERIALIZED per local session: `activeAddressRuns` holds one
+ * registration per session, so a second round starting while one is in
+ * flight would overwrite it and cross-validate the running turn's
+ * `reply_session_comment` calls against the wrong head-id set (rejected as
+ * unknown, or booked into the wrong run's replied map). Queued rounds also
+ * list comments AFTER the prior round settles, so they see its replies and
+ * resolutions instead of re-addressing them.
+ */
+const roundChainBySession = new Map<string, Promise<unknown>>();
 
 export async function runAddressCommentsRound(
+  input: AddressRoundInput
+): Promise<AddressRoundResult> {
+  const { localSessionId } = input;
+  // Activity begins at ENQUEUE (the scheduled-runs map is a list precisely
+  // so a queued round's threads show as addressing while a prior round runs).
+  const finishRunActivity = beginRunActivity(
+    localSessionId,
+    input.selectedHeadIds
+  );
+  const prior = roundChainBySession.get(localSessionId) ?? Promise.resolve();
+  const round = prior.then(() => executeAddressCommentsRound(input));
+  // Park the settled chain — a failed round must never poison the next.
+  const parked = round.then(
+    () => undefined,
+    () => undefined
+  );
+  roundChainBySession.set(localSessionId, parked);
+  try {
+    return await round;
+  } finally {
+    finishRunActivity();
+    if (roundChainBySession.get(localSessionId) === parked) {
+      roundChainBySession.delete(localSessionId);
+    }
+  }
+}
+
+async function executeAddressCommentsRound(
   input: AddressRoundInput
 ): Promise<AddressRoundResult> {
   const {
     orgId,
     cloudSessionId,
     localSessionId,
-    holdReplyForCommentId,
+    dispatchTurn,
     selectedHeadIds,
     instruction,
   } = input;
-  if (isAddressRunActive(localSessionId)) return { status: "skipped_active" };
-  setAddressRunActive(localSessionId, true);
-  lastRoundReplies.delete(localSessionId);
+  let run: ActiveAddressRun | null = null;
   try {
     const listToken = await freshAccessToken();
-    const { comments } = await listSessionComments(
+    const { comments, viewerOwnsSession } = await listSessionComments(
       listToken,
       orgId,
       cloudSessionId
     );
+    // Defense in depth: the rendered affordance also uses this server-derived
+    // bit, but the runner itself must never spend a model account for an
+    // imported replay, an unrelated local session, or another member. A
+    // verified owner fork may address its source threads.
+    if (!viewerOwnsSession) {
+      throw new Error("@agent is available only on the owner's source session");
+    }
+    if (localSessionId !== cloudSessionId) {
+      const localSession = getInstrumentedStore().get(
+        sessionByIdAtom(localSessionId)
+      );
+      const forkedFrom = getSessionForkedFrom(
+        localSession ?? { session_id: localSessionId }
+      );
+      if (
+        forkedFrom?.orgId !== orgId ||
+        forkedFrom.sourceSessionId !== cloudSessionId
+      ) {
+        throw new Error(
+          "@agent may use only a verified local fork of the owner's cloud source"
+        );
+      }
+    }
     let threads = collectAddressableThreads(comments);
     if (selectedHeadIds !== undefined) {
       const selected = new Set(selectedHeadIds);
@@ -356,99 +410,44 @@ export async function runAddressCommentsRound(
     const anchorEvents = await eventStoreProxy
       .getPersistedEvents(localSessionId)
       .catch(() => []);
-    threads = attachAnchorExcerpts(threads, anchorEvents);
+    threads = attachAnchorExcerpts(threads, anchorEvents, localSessionId);
 
-    const validIds = new Set(threads.map((thread) => thread.headId));
-    const run: ActiveAddressRun = {
+    const turnIntentId = mintTurnIntentId();
+    const deadlineMs = Date.now() + RUN_DEADLINE_MS;
+    // Register before dispatch. A fast tool call may arrive as soon as the
+    // transport accepts the turn; registering after dispatch left a race in
+    // which a legitimate reply_session_comment call was rejected.
+    run = {
       orgId,
       cloudSessionId,
       localSessionId,
-      validHeadIds: validIds,
-      ...(holdReplyForCommentId !== undefined ? { holdReplyForCommentId } : {}),
+      validHeadIds: new Set(threads.map((thread) => thread.headId)),
       replied: new Map(),
     };
     activeAddressRuns.set(localSessionId, run);
-
-    const briefing = buildAddressCommentsBriefing(threads, instruction);
-    const runnerSettings = resolveAgentRunnerSettings(
-      getInstrumentedStore().get(agentTaskRunnerSettingsAtom),
-      orgId
-    );
-    await SessionService.sendMessage({
-      sessionId: localSessionId,
-      content: briefing,
-      mode: runnerSettings.mode,
-      ...(runnerSettings.model !== undefined
-        ? { model: runnerSettings.model }
-        : {}),
-      ...(runnerSettings.accountId !== undefined
-        ? { accountId: runnerSettings.accountId }
-        : {}),
+    await dispatchTurn({
+      displayContent: buildDisplayContent(threads),
+      agentContent: buildAddressCommentsBriefing(threads, instruction),
+      turnIntentId,
     });
-    const deadline = Date.now() + RUN_DEADLINE_MS;
-    for (;;) {
-      await new Promise((resolve) =>
-        setTimeout(resolve, STATUS_POLL_INTERVAL_MS)
-      );
-      const { status } = await SessionService.getStatus({
-        sessionId: localSessionId,
-      });
-      if (TERMINAL_STATUSES.has(String(status))) break;
-      if (Date.now() > deadline) {
-        throw new Error("address-comments run timed out");
-      }
+    const dispatch = await waitForTurnIntentDispatch(turnIntentId, deadlineMs);
+    if (dispatch.sessionId !== localSessionId) {
+      throw new Error("address-comments turn dispatched to the wrong session");
     }
 
-    const summary = (await readRunSummaryFromEventStore(localSessionId)) ?? "";
-    const parsedReplies = selectFallbackReplies(
-      summary,
-      validIds,
-      run.replied,
-      threads[0].headId
-    );
-    const { toPost, heldReply } = partitionAddressReplies(
-      parsedReplies,
-      holdReplyForCommentId
-    );
-    const toolPostedCount =
-      run.replied.size - (run.heldBody !== undefined ? 1 : 0);
-    for (const reply of toPost) {
-      const replyToken = await freshAccessToken();
-      await addSessionComment(replyToken, {
-        orgId,
-        sessionId: cloudSessionId,
-        body: reply.body,
-        parentId: reply.commentId,
-        kind: "agent_report",
-      });
-      run.replied.set(reply.commentId, reply.body);
-    }
-    broadcastCommentsChanged(orgId, cloudSessionId);
-    const effectiveHeldReply = run.heldBody ?? heldReply;
-    const postedCount = toolPostedCount + toPost.length;
-    const roundReplies = new Map(run.replied);
-    if (
-      holdReplyForCommentId !== undefined &&
-      effectiveHeldReply !== undefined
-    ) {
-      roundReplies.set(holdReplyForCommentId, effectiveHeldReply);
-    }
-    lastRoundReplies.set(localSessionId, roundReplies);
+    await waitForTurnTerminal(dispatch, deadlineMs);
     log.info(
-      `address round on ${localSessionId}: ${threads.length} thread(s), ${postedCount} posted repl(ies)${effectiveHeldReply !== undefined ? ", 1 held" : ""}`
+      `address round on ${localSessionId}: ${threads.length} thread(s), ${run.replied.size} agent repl(ies)`
     );
     return {
       status: "ran",
       threadCount: threads.length,
-      replyCount: postedCount,
-      summary,
-      ...(effectiveHeldReply !== undefined
-        ? { heldReply: effectiveHeldReply }
-        : {}),
+      replyCount: run.replied.size,
     };
   } finally {
-    activeAddressRuns.delete(localSessionId);
-    setAddressRunActive(localSessionId, false);
+    if (run && activeAddressRuns.get(localSessionId) === run) {
+      activeAddressRuns.delete(localSessionId);
+    }
     notifyAddressRunFinished();
   }
 }

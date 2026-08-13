@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from "react";
+import { useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -8,7 +8,9 @@ import {
 } from "@src/api/http/project/types";
 import type { Person } from "@src/types/core/shared";
 import type { WorkItem as WorkItemExtended } from "@src/types/core/workItem";
+import { formatDate } from "@src/util/data/formatters/date";
 
+import { describeTodoHistoryChange } from "./todoHistory";
 import type { TimelineEntry } from "./types";
 
 interface UseWorkItemTimelineOptions {
@@ -23,51 +25,33 @@ type TimelineTranslator = (
 
 export function useWorkItemTimeline({
   workItem,
-  teamMembers: _teamMembers,
+  teamMembers,
 }: UseWorkItemTimelineOptions) {
   const { t } = useTranslation("projects");
 
   const timelineEntries = useMemo(
-    () => buildWorkItemTimelineEntries(workItem, t),
-    [workItem, t]
-  );
-
-  const formatRelativeTime = useCallback(
-    (timestamp: string): string => {
-      const date = new Date(timestamp);
-      const now = new Date();
-      const diffMs = now.getTime() - date.getTime();
-      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-      const diffDays = Math.floor(diffHours / 24);
-
-      if (diffDays > 0)
-        return t("workItems.activity.daysAgo", { count: diffDays });
-      if (diffHours > 0)
-        return t("workItems.activity.hoursAgo", { count: diffHours });
-      const diffMinutes = Math.floor(diffMs / (1000 * 60));
-      if (diffMinutes > 0)
-        return t("workItems.activity.minutesAgo", { count: diffMinutes });
-      return t("workItems.activity.justNow");
-    },
-    [t]
+    () => buildWorkItemTimelineEntries(workItem, t, teamMembers),
+    [workItem, t, teamMembers]
   );
 
   const lastUpdatedRef = useRef(workItem.updated_time);
 
   return {
     timelineEntries,
-    formatRelativeTime,
     lastUpdatedRef,
   };
 }
 
 export function buildWorkItemTimelineEntries(
   workItem: WorkItemExtended,
-  t: TimelineTranslator
+  t: TimelineTranslator,
+  teamMembers: readonly Person[] = []
 ): TimelineEntry[] {
+  const memberById = new Map(teamMembers.map((member) => [member.id, member]));
   const entries =
-    workItem.history?.map((event) => historyEventToTimelineEntry(event, t)) ??
-    [];
+    workItem.history?.map((event) =>
+      historyEventToTimelineEntry(event, t, memberById)
+    ) ?? [];
   const existingCommentIds = commentIdsFromHistory(workItem.history ?? []);
 
   for (const comment of workItem.comments ?? []) {
@@ -75,19 +59,23 @@ export function buildWorkItemTimelineEntries(
       continue;
     }
 
+    const author = memberById.get(comment.author);
     entries.push({
       id: comment.id,
       timestamp: comment.created_at,
       type: WORK_ITEM_HISTORY_ACTION.COMMENTED,
-      userName: comment.author,
+      actorId: comment.author,
+      userName: author?.name ?? comment.author,
+      userAvatar: author?.avatar,
+      userColor: author?.color,
       descriptions: [comment.content || t("workItems.activity.commented")],
     });
   }
 
   entries.sort(
     (entryA, entryB) =>
-      new Date(entryB.timestamp).getTime() -
-      new Date(entryA.timestamp).getTime()
+      new Date(entryA.timestamp).getTime() -
+      new Date(entryB.timestamp).getTime()
   );
 
   return entries;
@@ -105,15 +93,39 @@ function commentIdsFromHistory(history: WorkItemHistoryEvent[]): Set<string> {
 
 function historyEventToTimelineEntry(
   event: WorkItemHistoryEvent,
-  t: TimelineTranslator
+  t: TimelineTranslator,
+  memberById: ReadonlyMap<string, Person>
 ): TimelineEntry {
+  const actor = event.actorId ? memberById.get(event.actorId) : undefined;
   return {
     id: event.id,
     timestamp: event.timestamp,
     type: event.action,
+    actorId: event.actorId,
     userName:
-      event.actorName || event.actorId || t("workItems.activity.system"),
+      actor?.name ||
+      event.actorName ||
+      event.actorId ||
+      t("workItems.activity.system"),
+    userAvatar: actor?.avatar,
+    userColor: actor?.color,
     descriptions: eventDescriptions(event, t),
+    changeFields:
+      event.action === WORK_ITEM_HISTORY_ACTION.UPDATED
+        ? Array.from(
+            new Set(
+              (event.changes ?? []).map((change) =>
+                fieldToLabel(change.field, t)
+              )
+            )
+          )
+        : undefined,
+    changeFieldKeys:
+      event.action === WORK_ITEM_HISTORY_ACTION.UPDATED
+        ? Array.from(
+            new Set((event.changes ?? []).map((change) => change.field))
+          )
+        : undefined,
   };
 }
 
@@ -140,21 +152,37 @@ function eventDescriptions(
       );
       return [
         t("workItems.activity.movedFromTo", {
-          from: valueToLabel(projectChange?.oldValue),
-          to: valueToLabel(projectChange?.newValue),
+          from: valueToLabel(projectChange?.oldValue, "project", t),
+          to: valueToLabel(projectChange?.newValue, "project", t),
         }),
       ];
     }
     case WORK_ITEM_HISTORY_ACTION.UPDATED:
     default: {
-      const descriptions = (event.changes ?? []).map((change) =>
-        changeToDescription(change, t)
+      const descriptions = (event.changes ?? []).flatMap((change) =>
+        changeToDescriptions(change, t)
       );
       return descriptions.length > 0
         ? descriptions
         : [event.summary || t("workItems.activity.madeChange")];
     }
   }
+}
+
+function changeToDescriptions(
+  change: WorkItemHistoryChange,
+  t: TimelineTranslator
+): string[] {
+  if (change.field === "todos") {
+    const todoDescriptions = describeTodoHistoryChange(
+      change.oldValue,
+      change.newValue,
+      t
+    );
+    if (todoDescriptions) return todoDescriptions;
+  }
+
+  return [changeToDescription(change, t)];
 }
 
 function changeToDescription(
@@ -168,7 +196,7 @@ function changeToDescription(
   if (isEmptyValue(change.oldValue)) {
     return t("workItems.activity.setField", {
       field: fieldLabel,
-      value: valueToLabel(change.newValue),
+      value: valueToLabel(change.newValue, change.field, t),
     });
   }
   if (isEmptyValue(change.newValue)) {
@@ -177,8 +205,8 @@ function changeToDescription(
   if (isCompactValue(change.oldValue) && isCompactValue(change.newValue)) {
     return t("workItems.activity.changedField", {
       field: fieldLabel,
-      from: valueToLabel(change.oldValue),
-      to: valueToLabel(change.newValue),
+      from: valueToLabel(change.oldValue, change.field, t),
+      to: valueToLabel(change.newValue, change.field, t),
     });
   }
   return t("workItems.activity.changedFieldShort", { field: fieldLabel });
@@ -217,20 +245,54 @@ function commentContentFromValue(value: unknown): string | undefined {
   return typeof record.content === "string" ? record.content : undefined;
 }
 
-function valueToLabel(value: unknown): string {
+function valueToLabel(
+  value: unknown,
+  field: string,
+  t: TimelineTranslator
+): string {
   if (isEmptyValue(value)) return "—";
-  if (typeof value === "string") return value;
+  if (typeof value === "string") {
+    if (field === "startDate" || field === "targetDate") {
+      return formatDate(value, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: undefined,
+        minute: undefined,
+      });
+    }
+    if (field === "status") {
+      return t(`workItems.statusLabels.${value}`, {
+        defaultValue: humanizeEnumValue(value),
+      });
+    }
+    if (field === "priority") {
+      return t(`workItems.priorityLabels.${value}`, {
+        defaultValue: humanizeEnumValue(value),
+      });
+    }
+    if (field === "assigneeType") {
+      return humanizeEnumValue(value);
+    }
+    return value;
+  }
   if (typeof value === "number" || typeof value === "boolean") {
     return String(value);
   }
   if (Array.isArray(value)) {
     if (value.every((item) => isCompactValue(item))) {
-      return value.map((item) => valueToLabel(item)).join(", ");
+      return value.map((item) => valueToLabel(item, field, t)).join(", ");
     }
     return `${value.length}`;
   }
   if (typeof value === "object") return "…";
   return String(value);
+}
+
+function humanizeEnumValue(value: string): string {
+  const words = value.replace(/[_-]+/g, " ").trim();
+  if (!words) return value;
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function isEmptyValue(value: unknown): boolean {

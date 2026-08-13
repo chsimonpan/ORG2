@@ -1,15 +1,24 @@
 //! User-intervention state for Agent Org members.
 //!
 //! A member can temporarily be in direct conversation with the user. While this
-//! state is active, turn-boundary inbox drain and autonomous claim are paused so
-//! the user's follow-up is processed before coworker messages or new work.
+//! state is active, turn-boundary inbox drain is paused so the user's follow-up
+//! is processed before coworker messages or newly assigned work.
 
 use rusqlite::{params, Connection, OptionalExtension, Result as SqliteResult};
 use serde::Serialize;
 
 use database::db::{get_connection, with_sessions_writer};
 
+use super::agent_org_runs::COORDINATOR_MEMBER_ID;
+
 pub const DEFAULT_INTERVENTION_TTL_SECS: i64 = 180;
+
+/// Member intervention is a temporary user takeover of a worker session.
+/// Coordinator/root chat is the normal Agent Org control surface, not a
+/// takeover target.
+pub fn can_enter_member_intervention(member_id: &str) -> bool {
+    member_id != COORDINATOR_MEMBER_ID
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -85,6 +94,12 @@ impl AgentMemberInterventionStore {
     pub fn enter(
         params: EnterMemberInterventionParams,
     ) -> Result<AgentMemberInterventionRecord, String> {
+        if !can_enter_member_intervention(&params.member_id) {
+            return Err(
+                "coordinator is the normal Agent Org control surface and cannot enter member intervention"
+                    .to_string(),
+            );
+        }
         let now = chrono::Utc::now();
         let now_text = now.to_rfc3339();
         let ttl_secs = if params.ttl_secs > 0 {
@@ -134,17 +149,19 @@ impl AgentMemberInterventionStore {
             Ok(())
         })?;
 
-        Self::get(&params.org_run_id, &params.member_id)?.ok_or_else(|| {
+        let record = Self::get(&params.org_run_id, &params.member_id)?.ok_or_else(|| {
             format!(
                 "agent_member_interventions upsert did not return row for run={} member={}",
                 params.org_run_id, params.member_id
             )
-        })
+        })?;
+        crate::coordination::agent_org_run_events::notify_agent_org_run_changed(&record.org_run_id);
+        Ok(record)
     }
 
     pub fn clear(org_run_id: &str, member_id: &str) -> Result<bool, String> {
         let now = chrono::Utc::now().to_rfc3339();
-        with_sessions_writer(|| -> Result<bool, String> {
+        let changed = with_sessions_writer(|| -> Result<bool, String> {
             let conn = get_connection().map_err(|err| err.to_string())?;
             let updated = conn
                 .execute(
@@ -155,6 +172,53 @@ impl AgentMemberInterventionStore {
                 )
                 .map_err(|err| err.to_string())?;
             Ok(updated > 0)
+        })?;
+        if changed {
+            crate::coordination::agent_org_run_events::notify_agent_org_run_changed(org_run_id);
+        }
+        Ok(changed)
+    }
+
+    /// Atomically release a direct-user intervention and capture the unread
+    /// inbox high-water mark that the ensuing wake must acknowledge.
+    ///
+    /// If either operation fails, the transaction rolls the intervention
+    /// clear back. The caller can therefore safely report an error without
+    /// leaving the member silently returned to autonomous work.
+    pub fn clear_and_capture_unread_boundary(
+        org_run_id: &str,
+        member_id: &str,
+    ) -> Result<(bool, Option<i64>), String> {
+        let now = chrono::Utc::now().to_rfc3339();
+        with_sessions_writer(|| -> Result<(bool, Option<i64>), String> {
+            let mut conn = get_connection().map_err(|err| err.to_string())?;
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(|err| err.to_string())?;
+            let updated = tx
+                .execute(
+                    "UPDATE agent_member_interventions
+                     SET cleared_at = ?3
+                     WHERE org_run_id = ?1 AND member_id = ?2 AND cleared_at IS NULL",
+                    params![org_run_id, member_id, now],
+                )
+                .map_err(|err| err.to_string())?;
+            let boundary = tx
+                .query_row(
+                    "SELECT MAX(id) FROM agent_inbox
+                     WHERE recipient_member_id=?1
+                       AND org_run_id=?2
+                       AND read_at IS NULL
+                       AND NOT EXISTS (
+                           SELECT 1 FROM agent_inbox_delivery_resolutions resolution
+                           WHERE resolution.inbox_id=agent_inbox.id
+                       )",
+                    params![member_id, org_run_id],
+                    |row| row.get(0),
+                )
+                .map_err(|err| err.to_string())?;
+            tx.commit().map_err(|err| err.to_string())?;
+            Ok((updated > 0, boundary))
         })
     }
 
@@ -187,6 +251,9 @@ impl AgentMemberInterventionStore {
         org_run_id: &str,
         member_id: &str,
     ) -> Result<Option<AgentMemberInterventionRecord>, String> {
+        if member_id == COORDINATOR_MEMBER_ID {
+            return Ok(None);
+        }
         let Some(record) = Self::get(org_run_id, member_id)? else {
             return Ok(None);
         };
@@ -194,10 +261,33 @@ impl AgentMemberInterventionStore {
             return Ok(None);
         }
         if !resume_after_is_future(&record.resume_after) {
-            let _ = Self::clear(org_run_id, member_id)?;
             return Ok(None);
         }
         Ok(Some(record))
+    }
+
+    /// Clear expired worker interventions and legacy coordinator rows.
+    ///
+    /// Read APIs deliberately do not call this method. Keeping cleanup in the
+    /// watchdog/startup lifecycle prevents a frequently-polled Run View from
+    /// unexpectedly taking the global sessions writer lock.
+    pub fn clear_expired_and_legacy() -> Result<usize, String> {
+        let now = chrono::Utc::now().to_rfc3339();
+        with_sessions_writer(|| -> Result<usize, String> {
+            let conn = get_connection().map_err(|err| err.to_string())?;
+            conn.execute(
+                "UPDATE agent_member_interventions
+                 SET cleared_at = ?1
+                 WHERE cleared_at IS NULL
+                   AND (
+                     member_id = ?2
+                     OR datetime(resume_after) IS NULL
+                     OR datetime(resume_after) <= datetime(?1)
+                   )",
+                params![now, COORDINATOR_MEMBER_ID],
+            )
+            .map_err(|err| err.to_string())
+        })
     }
 
     /// Clear all active interventions across all org runs. Called at app startup
@@ -225,6 +315,13 @@ impl AgentMemberInterventionStore {
 
     pub fn list_active(org_run_id: &str) -> Result<Vec<AgentMemberInterventionRecord>, String> {
         let conn = get_connection().map_err(|err| err.to_string())?;
+        Self::list_active_with_connection(&conn, org_run_id)
+    }
+
+    pub(crate) fn list_active_with_connection(
+        conn: &Connection,
+        org_run_id: &str,
+    ) -> Result<Vec<AgentMemberInterventionRecord>, String> {
         let now = chrono::Utc::now().to_rfc3339();
         let mut stmt = conn
             .prepare(
@@ -241,13 +338,17 @@ impl AgentMemberInterventionStore {
                  FROM agent_member_interventions
                  WHERE org_run_id = ?1
                    AND cleared_at IS NULL
-                   AND resume_after > ?2
+                   AND member_id <> ?3
+                   AND datetime(resume_after) > datetime(?2)
                  ORDER BY last_user_activity_at DESC",
             )
             .map_err(|err| err.to_string())?;
 
         let rows = stmt
-            .query_map(params![org_run_id, now], row_to_intervention)
+            .query_map(
+                params![org_run_id, now, COORDINATOR_MEMBER_ID],
+                row_to_intervention,
+            )
             .map_err(|err| err.to_string())?;
         let mut records = Vec::new();
         for row in rows {
@@ -333,6 +434,74 @@ mod tests {
     }
 
     #[test]
+    fn coordinator_cannot_enter_member_intervention() {
+        let _sandbox = setup();
+        let error = AgentMemberInterventionStore::enter(EnterMemberInterventionParams {
+            org_run_id: "run-1".into(),
+            member_id: COORDINATOR_MEMBER_ID.into(),
+            agent_id: "builtin:sde".into(),
+            session_id: "root-session".into(),
+            reason: Some("direct_user_chat".into()),
+            ttl_secs: 60,
+        })
+        .expect_err("coordinator must not enter member intervention");
+
+        assert!(error.contains("cannot enter member intervention"));
+    }
+
+    #[test]
+    fn legacy_coordinator_intervention_is_hidden_without_mutating_on_read() {
+        let _sandbox = setup();
+        let now = chrono::Utc::now();
+        let conn = get_connection().expect("db connection");
+        conn.execute(
+            "INSERT INTO agent_member_interventions (
+                org_run_id, member_id, agent_id, session_id, status, reason,
+                entered_at, last_user_activity_at, resume_after, cleared_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8, NULL)",
+            params![
+                "run-legacy",
+                COORDINATOR_MEMBER_ID,
+                "builtin:sde",
+                "root-session",
+                MemberInterventionStatus::UserIntervention.as_str(),
+                "direct_user_chat",
+                now.to_rfc3339(),
+                (now + chrono::Duration::minutes(3)).to_rfc3339(),
+            ],
+        )
+        .expect("insert legacy coordinator intervention");
+
+        assert!(AgentMemberInterventionStore::active_for_member(
+            "run-legacy",
+            COORDINATOR_MEMBER_ID
+        )
+        .expect("read legacy intervention")
+        .is_none());
+        assert!(
+            AgentMemberInterventionStore::get("run-legacy", COORDINATOR_MEMBER_ID)
+                .expect("get legacy intervention")
+                .expect("legacy row remains for audit")
+                .cleared_at
+                .is_none(),
+            "read paths must not acquire the writer lock or mutate legacy rows"
+        );
+
+        assert_eq!(
+            AgentMemberInterventionStore::clear_expired_and_legacy()
+                .expect("cleanup legacy intervention"),
+            1
+        );
+        assert!(
+            AgentMemberInterventionStore::get("run-legacy", COORDINATOR_MEMBER_ID)
+                .expect("get cleaned legacy intervention")
+                .expect("legacy row remains for audit")
+                .cleared_at
+                .is_some()
+        );
+    }
+
+    #[test]
     fn clear_hides_active_record() {
         let _sandbox = setup();
         AgentMemberInterventionStore::enter(EnterMemberInterventionParams {
@@ -411,12 +580,21 @@ mod tests {
             "expired intervention must not be returned as active"
         );
 
-        let record =
-            AgentMemberInterventionStore::get("run-1", "member-ttl").expect("get after expiry");
+        let record = AgentMemberInterventionStore::get("run-1", "member-ttl")
+            .expect("get after read-only expiry check");
         assert!(
-            record.map(|r| r.cleared_at.is_some()).unwrap_or(false),
-            "expired intervention must be auto-cleared"
+            record.map(|r| r.cleared_at.is_none()).unwrap_or(false),
+            "read paths must not mutate expired interventions"
         );
+
+        assert_eq!(
+            AgentMemberInterventionStore::clear_expired_and_legacy()
+                .expect("cleanup expired intervention"),
+            1
+        );
+        assert!(AgentMemberInterventionStore::get("run-1", "member-ttl")
+            .expect("get after cleanup")
+            .is_some_and(|row| row.cleared_at.is_some()));
     }
 
     #[test]

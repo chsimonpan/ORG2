@@ -6,11 +6,21 @@ import { useTranslation } from "react-i18next";
 import Button from "@src/components/Button";
 import Message from "@src/components/Message";
 import Switch from "@src/components/Switch";
+import { DETAIL_PANEL_TOKENS } from "@src/config/detailPanelTokens";
+import LaunchButton from "@src/features/SessionCreator/components/LaunchButton";
 import { useKeyboardSave } from "@src/hooks/keyboard";
 import { createLogger } from "@src/hooks/logger";
-import { DetailSplitLayout } from "@src/modules/ProjectManager/shared";
+import {
+  CreateComposerHeader,
+  CreateComposerPinnedActions,
+  DetailSplitLayout,
+  ManualCreateComposer,
+} from "@src/modules/ProjectManager/shared";
 import { WorkstationToolbarTooltip } from "@src/modules/WorkStation/shared";
-import { PANEL_HEADER_TOKENS } from "@src/modules/shared/layouts/blocks";
+import {
+  CreatorContentLayout,
+  PANEL_HEADER_TOKENS,
+} from "@src/modules/shared/layouts/blocks";
 import type { WorkItemDraft } from "@src/store/workstation/projectManager";
 import type { Person } from "@src/types/core/shared";
 import type {
@@ -49,7 +59,6 @@ export interface CreateWorkItemViewProps {
    */
   orgId?: string | null;
   repoPath?: string | null;
-  scopeBreadcrumbLabel?: string;
   onCancel: () => void;
   onSetUnsaved: (hasUnsaved: boolean) => void;
   onWorkItemCreated: (result?: CreatedWorkItemResult) => void;
@@ -69,6 +78,15 @@ export interface CreateWorkItemViewProps {
   showFooter?: boolean;
   showSubmitAction?: boolean;
   chatPanelFooter?: boolean;
+  /** Optional content centered in the page above the bottom-docked manual composer. */
+  middleContent?: React.ReactNode;
+  /** Agent/Manual segmented control rendered with the creator setup pills. */
+  creatorModeControl?: React.ReactNode;
+  /** Render Session Creator in Agent mode with Work Item fields in its composer. */
+  renderAgentComposer?: (
+    headerContent: React.ReactNode,
+    pinnedActionsContent: React.ReactNode
+  ) => React.ReactNode;
   defaultAiAssignee?: {
     id: string;
     name: string;
@@ -85,7 +103,6 @@ const CreateWorkItemView: React.FC<CreateWorkItemViewProps> = ({
   projectName,
   orgId,
   repoPath,
-  scopeBreadcrumbLabel,
   onCancel,
   onSetUnsaved,
   onWorkItemCreated,
@@ -105,6 +122,9 @@ const CreateWorkItemView: React.FC<CreateWorkItemViewProps> = ({
   showFooter = true,
   showSubmitAction = true,
   chatPanelFooter = false,
+  middleContent,
+  creatorModeControl,
+  renderAgentComposer,
   defaultAiAssignee = null,
 }) => {
   const { t } = useTranslation("projects");
@@ -133,10 +153,9 @@ const CreateWorkItemView: React.FC<CreateWorkItemViewProps> = ({
     projectName,
     projectSlug,
     repoPath,
-    scopeBreadcrumbLabel,
   });
 
-  const { draft } = inlineFields;
+  const { draft, editorRef } = inlineFields;
   const canAutoExecuteWithAssignee =
     draft.assigneeType === "agent" || draft.assigneeType === "org";
   const autoExecuteBlocked =
@@ -201,40 +220,64 @@ const CreateWorkItemView: React.FC<CreateWorkItemViewProps> = ({
     setLocalPropertiesOpen((current) => !current);
   }, [onToggleProperties]);
 
-  const handleCreate = useCallback(async () => {
-    if (!draft.name.trim() || saving) return;
+  const handleCreate = useCallback(
+    async (descriptionOverride?: string) => {
+      if (!draft.name.trim() || saving) return;
 
-    setSaving(true);
-    try {
-      const rawMarkdown =
-        inlineFields.editorRef.current?.getMarkdown()?.trim() ??
-        draft.description;
-      const result = await createWorkItemFromDraft({
-        createMore,
-        description: rawMarkdown,
-        draft,
-        orgId,
-        selectedProjectSlug: inlineFields.selectedProjectSlug,
-      });
+      setSaving(true);
+      try {
+        const rawMarkdown =
+          descriptionOverride?.trim() ??
+          inlineFields.editorRef.current?.getMarkdown()?.trim() ??
+          draft.description;
+        const result = await createWorkItemFromDraft({
+          createMore,
+          description: rawMarkdown,
+          draft,
+          orgId,
+          selectedProjectSlug: inlineFields.selectedProjectSlug,
+        });
 
-      await emit("orgii-data-changed");
-      if (createMore) {
-        inlineFields.resetDraftForCreateMore();
-        onWorkItemCreated(result);
-      } else {
-        inlineFields.clearDraft();
-        onWorkItemCreated(result);
+        await emit("orgii-data-changed", {
+          project_slug: result.projectSlug,
+          work_item_id: result.shortId,
+          source: "work-item-create",
+        });
+        if (createMore) {
+          inlineFields.resetDraftForCreateMore();
+          onWorkItemCreated(result);
+        } else {
+          inlineFields.clearDraft();
+          onWorkItemCreated(result);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error("Failed to create work item", err);
+        Message.error(msg);
+      } finally {
+        setSaving(false);
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.error("Failed to create work item", err);
-      Message.error(msg);
-    } finally {
-      setSaving(false);
-    }
-  }, [createMore, draft, inlineFields, onWorkItemCreated, orgId, saving]);
+    },
+    [createMore, draft, inlineFields, onWorkItemCreated, orgId, saving]
+  );
 
-  useKeyboardSave(handleCreate, !saving && !!draft.name.trim());
+  useKeyboardSave(
+    handleCreate,
+    !resolvedAiGenerateMode && !saving && !!draft.name.trim()
+  );
+
+  const composerHeaderContent = (
+    <CreateComposerHeader dataTestId="create-work-item-composer-header">
+      {inlineFields.titleSection}
+    </CreateComposerHeader>
+  );
+  const workItemPropertyPills = (
+    <CreateComposerPinnedActions dataTestId="create-work-item-pinned-actions">
+      {creatorModeControl}
+      {inlineFields.workItemProjectPill}
+      {inlineFields.inlinePropertyPills}
+    </CreateComposerPinnedActions>
+  );
 
   return (
     <DetailSplitLayout
@@ -296,11 +339,17 @@ const CreateWorkItemView: React.FC<CreateWorkItemViewProps> = ({
         </>
       }
       leftContent={
-        <div className="flex h-full min-h-0 flex-col overflow-hidden">
+        <CreatorContentLayout
+          placement={
+            resolvedAiGenerateMode && renderAgentComposer ? "fill" : "bottom"
+          }
+          contentDataTestId="create-work-item-creator-content"
+          middleContent={middleContent}
+        >
           {showAiModePanel ? (
-            <div className="border-b border-solid border-border-1 px-4 py-2">
+            <div className={`${DETAIL_PANEL_TOKENS.headerWidth} px-4 py-2`}>
               <div
-                className="flex items-center justify-between gap-3 rounded-xl bg-surface-container px-3 py-2"
+                className="flex items-center justify-center gap-2 px-3 py-2"
                 data-testid="create-work-item-mode-panel"
               >
                 <span className="text-[12px] font-medium text-text-1">
@@ -316,10 +365,32 @@ const CreateWorkItemView: React.FC<CreateWorkItemViewProps> = ({
               </div>
             </div>
           ) : null}
-          <div className="mx-auto h-full w-full max-w-[932px] px-4">
-            <InlineCreateWorkItemFields state={inlineFields} />
-          </div>
-        </div>
+          {resolvedAiGenerateMode && renderAgentComposer ? (
+            renderAgentComposer(composerHeaderContent, workItemPropertyPills)
+          ) : renderAgentComposer ? (
+            <ManualCreateComposer
+              dataTestId="create-work-item-manual-composer"
+              editorRef={editorRef}
+              headerContent={composerHeaderContent}
+              editorContent={inlineFields.descriptionSection}
+              pinnedActionsContent={workItemPropertyPills}
+              submitButton={
+                <LaunchButton
+                  ariaLabel={t("common:actions.save")}
+                  disabled={!draft.name.trim() || saving}
+                  loading={saving}
+                  onClick={() => {
+                    void handleCreate();
+                  }}
+                />
+              }
+            />
+          ) : (
+            <div className={`${DETAIL_PANEL_TOKENS.headerWidth} h-full px-4`}>
+              <InlineCreateWorkItemFields state={inlineFields} />
+            </div>
+          )}
+        </CreatorContentLayout>
       }
       rightContent={
         resolvedPropertiesOpen ? (
@@ -338,7 +409,7 @@ const CreateWorkItemView: React.FC<CreateWorkItemViewProps> = ({
       }
       resizableRightPanel={resolvedPropertiesOpen}
       footer={
-        showFooter && inlineFields.showManualInputs ? (
+        showFooter && inlineFields.showManualInputs && !renderAgentComposer ? (
           chatPanelFooter ? (
             <>
               <Button
@@ -351,7 +422,7 @@ const CreateWorkItemView: React.FC<CreateWorkItemViewProps> = ({
               <Button
                 variant="primary"
                 size="small"
-                onClick={handleCreate}
+                onClick={() => handleCreate()}
                 disabled={!draft.name.trim() || saving}
                 data-testid="create-work-item-submit"
               >
@@ -378,7 +449,7 @@ const CreateWorkItemView: React.FC<CreateWorkItemViewProps> = ({
                 <Button
                   variant="primary"
                   size="small"
-                  onClick={handleCreate}
+                  onClick={() => handleCreate()}
                   disabled={!draft.name.trim() || saving}
                   data-testid="create-work-item-submit"
                 >

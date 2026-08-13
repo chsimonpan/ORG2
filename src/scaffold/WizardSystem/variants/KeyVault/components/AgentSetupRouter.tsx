@@ -6,14 +6,9 @@
  */
 import React from "react";
 
-import {
-  getClaudeCodeOAuthModels as fetchClaudeCodeOAuthModels,
-  getCodexOAuthModels as fetchCodexOAuthModels,
-  getOAuthModelCatalog,
-} from "@src/api/services/keyValidation";
+import { getOAuthModelCatalog } from "@src/api/services/keyValidation";
 import { CLI_AGENT } from "@src/api/tauri/rpc/schemas/validation";
 import { LOCAL_MODEL_PROVIDER } from "@src/api/types/keys";
-import { createLogger } from "@src/hooks/logger";
 
 import { ApiKeyProviderSetup } from "./setup/ApiKeyProviderSetup";
 import { ClaudeCodeSetup } from "./setup/ClaudeCodeSetup";
@@ -30,8 +25,6 @@ import type {
   KiroSessionValues,
 } from "./setup/types";
 
-const log = createLogger("ApiSetup");
-
 interface AgentSetupRouterProps extends AgentSetupProps {
   agentCategory: string | null;
   isComplex: boolean;
@@ -42,6 +35,7 @@ interface AgentSetupRouterProps extends AgentSetupProps {
   setTokenDetected: (detected: boolean) => void;
   detectingToken: boolean;
   tokenError: string | null;
+  setTokenError: (error: string | null) => void;
   clearTokenError: () => void;
   useGuidedSetup: boolean;
   setUseGuidedSetup: (use: boolean) => void;
@@ -52,6 +46,7 @@ interface AgentSetupRouterProps extends AgentSetupProps {
   handleSessionTokenCaptured: (sessionToken: string) => void;
   handleUrlChange: (url: string) => void;
   hasSessionToken: boolean;
+  autoStartCodexLogin?: boolean;
 }
 
 /**
@@ -67,6 +62,7 @@ export const AgentSetupRouter: React.FC<AgentSetupRouterProps> = ({
   setTokenDetected,
   detectingToken,
   tokenError,
+  setTokenError,
   clearTokenError,
   useGuidedSetup,
   setUseGuidedSetup,
@@ -77,6 +73,7 @@ export const AgentSetupRouter: React.FC<AgentSetupRouterProps> = ({
   handleSessionTokenCaptured,
   handleUrlChange,
   hasSessionToken,
+  autoStartCodexLogin,
   ...sharedProps
 }) => {
   const { onChange } = sharedProps;
@@ -121,31 +118,33 @@ export const AgentSetupRouter: React.FC<AgentSetupRouterProps> = ({
           onDetectToken={sharedProps.onAutoDetect ?? (() => {})}
           onClearTokenError={clearTokenError}
           preselectedMethod={isComplex ? setupMethod : undefined}
+          autoStartLogin={autoStartCodexLogin}
           onSessionCaptured={async (values: CodexSessionValues) => {
-            const catalog = await getOAuthModelCatalog(CLI_AGENT.CODEX);
-            let discoveredModels: string[] = [];
-            try {
-              discoveredModels = await fetchCodexOAuthModels(
-                values.accessToken,
-                values.idToken
+            const catalog = await getOAuthModelCatalog(CLI_AGENT.CODEX, {
+              accessToken: values.accessToken,
+              refreshToken: values.refreshToken,
+              idToken: values.idToken,
+            }).catch((err: unknown) => {
+              setTokenError(
+                err instanceof Error
+                  ? err.message
+                  : "Codex model discovery failed"
               );
-            } catch (err) {
-              log.warn(
-                "[ApiSetup] Codex OAuth model discovery failed; using Rust catalog:",
-                err
-              );
-            }
-            const codexModels =
-              discoveredModels.length > 0 ? discoveredModels : catalog.models;
+              return undefined;
+            });
+            if (!catalog) return;
             const defaultEnabledModels = catalog.defaultEnabledModels.filter(
-              (modelId) => codexModels.includes(modelId)
+              (modelId) => catalog.models.includes(modelId)
             );
             const enabledModels =
               defaultEnabledModels.length > 0
                 ? defaultEnabledModels
-                : codexModels.slice(0, 1);
+                : catalog.models.slice(0, 1);
             onChange({
-              name: "OpenAI",
+              // Intentionally do NOT set `name` here. Forcing "OpenAI" either
+              // trips `isDuplicateName` (disabling Done) or shadows the
+              // `nextDefaultName` dedupe in `submit()`. Let the wizard's own
+              // name-resolution handle it (empty → "OpenAI" / "OpenAI-1" ...).
               auth_method: "oauth",
               oauth_session_token: values.accessToken,
               raw_key_input: "",
@@ -161,8 +160,16 @@ export const AgentSetupRouter: React.FC<AgentSetupRouterProps> = ({
                     ]
                   : []),
               ],
-              available_models: codexModels,
-              model_context_lengths: {},
+              available_models: catalog.models,
+              model_context_lengths: catalog.modelContextLengths,
+              model_variants: catalog.modelVariants.map((variant) => ({
+                model: variant.model,
+                baseModel: variant.base_model,
+                reasoning: variant.reasoning ?? undefined,
+                fast: variant.fast,
+                contextWindow: variant.context_window ?? undefined,
+              })),
+              default_variants: catalog.defaultVariants,
               enabled_models: enabledModels,
               validated: true,
             });
@@ -235,31 +242,28 @@ export const AgentSetupRouter: React.FC<AgentSetupRouterProps> = ({
           onClearTokenError={clearTokenError}
           preselectedMethod={isComplex ? setupMethod : undefined}
           onSessionCaptured={async (values: ClaudeCodeSessionValues) => {
-            const catalog = await getOAuthModelCatalog(CLI_AGENT.CLAUDE_CODE);
-            let discoveredModels: string[] = [];
-            try {
-              discoveredModels = await fetchClaudeCodeOAuthModels(
-                values.accessToken
+            const catalog = await getOAuthModelCatalog(CLI_AGENT.CLAUDE_CODE, {
+              accessToken: values.accessToken,
+              refreshToken: values.refreshToken,
+            }).catch((err: unknown) => {
+              setTokenError(
+                err instanceof Error
+                  ? err.message
+                  : "Claude Code model discovery failed"
               );
-            } catch (err) {
-              log.warn(
-                "[ApiSetup] Claude Code OAuth model discovery failed; using Rust catalog:",
-                err
-              );
-            }
-            const claudeCodeModels =
-              discoveredModels.length > 0 ? discoveredModels : catalog.models;
+              return undefined;
+            });
+            if (!catalog) return;
             const defaultEnabledModels = catalog.defaultEnabledModels.filter(
-              (modelId) => claudeCodeModels.includes(modelId)
+              (modelId) => catalog.models.includes(modelId)
             );
             const enabledModels =
               defaultEnabledModels.length > 0
                 ? defaultEnabledModels
-                : claudeCodeModels.slice(0, 1);
+                : catalog.models.slice(0, 1);
             const expiresAt = values.expiresIn
               ? Date.now() + values.expiresIn * 1000
               : undefined;
-            const accountName = "Anthropic";
             const envVars = [
               ...(values.refreshToken
                 ? [
@@ -292,9 +296,20 @@ export const AgentSetupRouter: React.FC<AgentSetupRouterProps> = ({
               raw_key_input: "",
               env_vars: envVars,
               account_metadata: values.accountMetadata ?? {},
-              ...(accountName ? { name: accountName } : {}),
-              available_models: claudeCodeModels,
-              model_context_lengths: {},
+              // Intentionally do NOT set `name` here. Forcing "Anthropic"
+              // trips `isDuplicateName` (disabling Done) or shadows the
+              // `nextDefaultName` dedupe in `submit()`. The wizard resolves
+              // the account name itself (empty → brand label / "-1" / ...).
+              available_models: catalog.models,
+              model_context_lengths: catalog.modelContextLengths,
+              model_variants: catalog.modelVariants.map((variant) => ({
+                model: variant.model,
+                baseModel: variant.base_model,
+                reasoning: variant.reasoning ?? undefined,
+                fast: variant.fast,
+                contextWindow: variant.context_window ?? undefined,
+              })),
+              default_variants: catalog.defaultVariants,
               enabled_models: enabledModels,
               validated: true,
             });

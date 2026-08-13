@@ -10,6 +10,7 @@ const ZENMUX_OPENAI_BASE_URL: &str = "https://zenmux.ai/api/v1";
 const ZENMUX_ANTHROPIC_BASE_URL: &str = "https://zenmux.ai/api/anthropic";
 const LONGCAT_OPENAI_BASE_URL: &str = "https://api.longcat.chat/openai";
 const LONGCAT_ANTHROPIC_BASE_URL: &str = "https://api.longcat.chat/anthropic";
+const ATLASCLOUD_ANTHROPIC_BASE_URL: &str = "https://api.atlascloud.ai";
 
 impl KeyService {
     /// Get environment variables for running an agent
@@ -115,6 +116,14 @@ impl KeyService {
                          official OAuth tokens only authenticate at api.anthropic.com — not exporting ANTHROPIC_BASE_URL",
                         entry.id,
                         entry.base_url
+                    );
+                } else if entry.model_type == ModelType::AtlascloudApi {
+                    // Atlas keys persist the OpenAI-protocol /v1 URL; its
+                    // Anthropic surface lives at the bare host, so the stored
+                    // URL must never reach Claude Code.
+                    env.insert(
+                        "ANTHROPIC_BASE_URL".to_string(),
+                        ATLASCLOUD_ANTHROPIC_BASE_URL.to_string(),
                     );
                 } else if let Some(ref url) = entry.base_url {
                     env.insert("ANTHROPIC_BASE_URL".to_string(), url.clone());
@@ -358,7 +367,9 @@ impl KeyService {
             | ModelType::MistralVibe
             | ModelType::Autohand
             | ModelType::Omp
-            | ModelType::Pi => {
+            | ModelType::Pi
+            | ModelType::QoderCli
+            | ModelType::TraeCli => {
                 if let Some(ref key) = entry.api_key {
                     env.insert("ORGII_API_KEY".to_string(), key.clone());
                 }
@@ -366,6 +377,7 @@ impl KeyService {
             // API key providers: store api_key under the provider's env var name
             ModelType::AnthropicApi
             | ModelType::OpenaiApi
+            | ModelType::AtlascloudApi
             | ModelType::DeepseekApi
             | ModelType::GeminiApi
             | ModelType::GroqApi
@@ -386,8 +398,7 @@ impl KeyService {
             | ModelType::VllmApi
             | ModelType::AzureOpenaiApi
             | ModelType::AzureAnthropicApi
-            | ModelType::OrgiiOrchestrator
-            | ModelType::EmbeddingApi => {
+            | ModelType::OrgiiOrchestrator => {
                 // The outer match already pinned `agent_type` to one of
                 // the API-provider variants below, so the inner match
                 // is exhaustive in practice. Use `unreachable!` for the
@@ -399,6 +410,7 @@ impl KeyService {
                 let env_key = match agent_type {
                     ModelType::AnthropicApi => "ANTHROPIC_API_KEY",
                     ModelType::OpenaiApi => "OPENAI_API_KEY",
+                    ModelType::AtlascloudApi => "ATLASCLOUD_API_KEY",
                     ModelType::DeepseekApi => "DEEPSEEK_API_KEY",
                     ModelType::GeminiApi => "GEMINI_API_KEY",
                     ModelType::GroqApi => "GROQ_API_KEY",
@@ -414,7 +426,6 @@ impl KeyService {
                     ModelType::CherryinApi => "CHERRYIN_API_KEY",
                     ModelType::BedrockApi => "AWS_BEARER_TOKEN_BEDROCK",
                     ModelType::CustomApi => "CUSTOM_API_KEY",
-                    ModelType::EmbeddingApi => "EMBEDDING_API_KEY",
                     ModelType::OpenrouterApi => "OPENROUTER_API_KEY",
                     ModelType::ZenmuxApi => "ZENMUX_API_KEY",
                     ModelType::VllmApi => "VLLM_API_KEY",
@@ -472,8 +483,9 @@ impl KeyService {
                 env.insert("OPENAI_API_KEY".to_string(), proxy_token.to_string());
                 env.insert("PROXY_TOKEN".to_string(), proxy_token.to_string());
                 // Note: OPENAI_BASE_URL is NOT set for proxy mode.
-                // The base URL is configured in ~/.codex/config.toml under
-                // [model_providers.proxy], and selected via `-c model_provider="proxy"`.
+                // The base URL is configured in the hosted session's isolated
+                // CODEX_HOME under [model_providers.proxy], and selected via
+                // `-c model_provider="proxy"`.
                 // This matches the market-worker's approach.
             }
             ModelType::Copilot => {
@@ -526,12 +538,15 @@ impl KeyService {
             | ModelType::MistralVibe
             | ModelType::Autohand
             | ModelType::Omp
-            | ModelType::Pi => {
+            | ModelType::Pi
+            | ModelType::QoderCli
+            | ModelType::TraeCli => {
                 // Token available via ORGII_PROXY_TOKEN (set above).
             }
             // API key providers — must mirror the list in get_env_for_agent
             ModelType::AnthropicApi
             | ModelType::OpenaiApi
+            | ModelType::AtlascloudApi
             | ModelType::DeepseekApi
             | ModelType::GeminiApi
             | ModelType::GroqApi
@@ -552,8 +567,7 @@ impl KeyService {
             | ModelType::VllmApi
             | ModelType::AzureOpenaiApi
             | ModelType::AzureAnthropicApi
-            | ModelType::OrgiiOrchestrator
-            | ModelType::EmbeddingApi => {
+            | ModelType::OrgiiOrchestrator => {
                 // Same fail-loud principle as the non-proxy builder above:
                 // the outer match pins `agent_type` to API-provider
                 // variants, so the inner match is exhaustive. Use
@@ -564,6 +578,7 @@ impl KeyService {
                 let env_key = match agent_type {
                     ModelType::AnthropicApi => "ANTHROPIC_API_KEY",
                     ModelType::OpenaiApi => "OPENAI_API_KEY",
+                    ModelType::AtlascloudApi => "ATLASCLOUD_API_KEY",
                     ModelType::DeepseekApi => "DEEPSEEK_API_KEY",
                     ModelType::GeminiApi => "GEMINI_API_KEY",
                     ModelType::GroqApi => "GROQ_API_KEY",
@@ -579,7 +594,6 @@ impl KeyService {
                     ModelType::CherryinApi => "CHERRYIN_API_KEY",
                     ModelType::BedrockApi => "AWS_BEARER_TOKEN_BEDROCK",
                     ModelType::CustomApi => "CUSTOM_API_KEY",
-                    ModelType::EmbeddingApi => "EMBEDDING_API_KEY",
                     ModelType::OpenrouterApi => "OPENROUTER_API_KEY",
                     ModelType::ZenmuxApi => "ZENMUX_API_KEY",
                     ModelType::VllmApi => "VLLM_API_KEY",

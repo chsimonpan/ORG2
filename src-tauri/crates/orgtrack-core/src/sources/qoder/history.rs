@@ -134,14 +134,11 @@ pub fn load_qoder_history_for_session(
     let (project_dir_name, task_dir_name) = source_session_id
         .split_once('/')
         .unwrap_or(("", source_session_id));
-    let workspace_path = imported_cache::query_cached_session_from_conn(
-        conn,
-        SOURCE_QODER,
-        source_session_id,
-    )
-    .ok()
-    .flatten()
-    .and_then(|cached| cached.repo_path);
+    let workspace_path =
+        imported_cache::query_cached_session_from_conn(conn, SOURCE_QODER, source_session_id)
+            .ok()
+            .flatten()
+            .and_then(|cached| cached.repo_path);
     Ok(super::log_enrichment::enrich_with_agent_log(
         session_id,
         task_dir_name,
@@ -198,8 +195,7 @@ fn discover_records_in_projects_dir(
     };
     for project_entry in project_entries.flatten() {
         let project_dir = project_entry.path();
-        let Some(project_dir_name) = project_dir.file_name().and_then(|name| name.to_str())
-        else {
+        let Some(project_dir_name) = project_dir.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
         let history_dir = project_dir.join(CONVERSATION_HISTORY_DIR);
@@ -381,6 +377,8 @@ fn session_meta_to_cache_input(meta: QoderHistoryMeta) -> ImportedHistoryCacheIn
         model: None,
         input_tokens: 0,
         output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
         repo_path: meta.repo_path,
         branch: None,
         impact: meta.impact,
@@ -390,7 +388,10 @@ fn session_meta_to_cache_input(meta: QoderHistoryMeta) -> ImportedHistoryCacheIn
     }
 }
 
-fn transcript_to_chunks(session_id: &str, transcript: &[QoderTranscriptLine]) -> Vec<ActivityChunk> {
+fn transcript_to_chunks(
+    session_id: &str,
+    transcript: &[QoderTranscriptLine],
+) -> Vec<ActivityChunk> {
     // Pass 1: collect tool results so each `tool_use` can be paired with the
     // matching `tool_result` regardless of which later line carried it.
     let mut tool_outputs: HashMap<String, Value> = HashMap::new();
@@ -734,16 +735,14 @@ fn resolve_qoder_transcript_path(
 
 /// Existing-store probe locations for the Data Sources inventory.
 pub fn qoder_history_candidate_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    if let Some(home) = dirs::home_dir() {
-        paths.extend(qoder_projects_dir_candidates(&home));
-    }
+    let home = app_paths::external_history_home_dir();
+    let mut paths = qoder_projects_dir_candidates(&home);
     paths.extend(qoder_global_state_db_candidates());
     imported_paths::dedupe_paths(paths)
 }
 
 fn qoder_projects_dirs() -> Result<Vec<PathBuf>, String> {
-    let home = dirs::home_dir().ok_or_else(|| "Home directory not found".to_string())?;
+    let home = app_paths::external_history_home_dir();
     Ok(qoder_projects_dir_candidates(&home))
 }
 
@@ -754,13 +753,10 @@ fn qoder_projects_dir_candidates(home: &Path) -> Vec<PathBuf> {
 
 /// VS Code-family per-user data root: `Qoder/User/globalStorage/state.vscdb`.
 fn qoder_global_state_db_candidates() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Some(data) = dirs::data_dir() {
-        roots.push(data);
-    }
-    if let Some(config) = dirs::config_dir() {
-        roots.push(config);
-    }
+    let mut roots = vec![
+        app_paths::external_history_data_dir(),
+        app_paths::external_history_config_dir(),
+    ];
     roots.sort();
     roots.dedup();
     roots

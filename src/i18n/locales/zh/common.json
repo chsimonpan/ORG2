@@ -1,4 +1,48 @@
-﻿{
+{
+  "windowChrome": {
+    "menus": {
+      "file": "文件",
+      "edit": "编辑",
+      "view": "查看",
+      "window": "窗口",
+      "help": "帮助",
+      "aria": "{{label}}菜单"
+    },
+    "items": {
+      "quitOrg2": "退出 ORG-2",
+      "newSession": "新建会话",
+      "openFolder": "打开文件夹...",
+      "addFolderToWorkspace": "将文件夹添加到工作区...",
+      "saveWorkspaceAs": "工作区另存为...",
+      "closeWindow": "关闭窗口",
+      "undo": "撤销",
+      "redo": "重做",
+      "cut": "剪切",
+      "copy": "复制",
+      "paste": "粘贴",
+      "selectAll": "全选",
+      "commandPalette": "命令面板",
+      "goToFile": "转到文件...",
+      "selectModel": "选择模型...",
+      "switchWorkspace": "切换工作区...",
+      "switchBranch": "切换分支...",
+      "switchRunningLocation": "切换运行位置...",
+      "settings": "设置...",
+      "zoomIn": "放大",
+      "zoomOut": "缩小",
+      "actualSize": "实际大小",
+      "minimize": "最小化",
+      "maximizeRestore": "最大化 / 还原",
+      "maximizeWorkstation": "最大化工作台",
+      "documentation": "文档",
+      "reportIssue": "报告问题"
+    },
+    "controls": {
+      "minimizeWindow": "最小化窗口",
+      "maximizeRestoreWindow": "最大化或还原窗口",
+      "closeWindow": "关闭窗口"
+    }
+  },
   "toasts": {
     "replyEmpty": "回复不能为空",
     "sessionNotFound": "未找到会话",
@@ -169,6 +213,7 @@
     "goToSettings": "前往设置",
     "restart": "重新启动",
     "switchToStation": "切换到{{station}}",
+    "switchMethod": "切换方式",
     "rate": "评分",
     "openInTab": "在标签页中打开",
     "insert": "插入",
@@ -195,6 +240,7 @@
     "selectRepository": "选择仓库",
     "all": "全部",
     "collapse": "收起",
+    "toggle": "展开/收起",
     "addRepo": "添加仓库",
     "addFolder": "添加文件夹",
     "resume": "继续",
@@ -281,6 +327,16 @@
     "testing": "测试中...",
     "empty": "空",
     "launching": "启动中..."
+  },
+  "workManagementTable": {
+    "columns": {
+      "id": "ID",
+      "titleContext": "标题 / 上下文",
+      "status": "状态",
+      "assignee": "负责人",
+      "updated": "更新时间"
+    },
+    "selectRow": "选择 {{id}}"
   },
   "pagination": {
     "totalItems": "共 {{count}} 项",
@@ -544,6 +600,10 @@
     "failedToRenderEvent": "渲染事件失败",
     "unknown": "未知错误",
     "agentRequestFailed": "Agent 请求失败",
+    "codexLoginExpired": "Codex 登录已失效",
+    "codexLoginExpiredDescription": "重新连接 Codex 即可修复此账号；登录并保存后会返回当前会话。",
+    "reconnectCodex": "重新连接 Codex",
+    "technicalDetails": "技术详情",
     "failedToCopy": "复制失败",
     "api": {
       "titles": {
@@ -873,7 +933,7 @@
     "listDirParseSafetyHint": "仅显示前 {{maxShown}} 项；完整列表因性能限制被截断。",
     "noTasks": "暂无任务",
     "noTasksWithDates": "没有带日期的任务可显示",
-    "noTasksWithDatesSubtitle": "为任务添加开始和结束日期以在此查看",
+    "noTasksWithDatesSubtitle": "添加开始和结束日期即可显示任务",
     "noItemsAvailable": "暂无可用项目",
     "loadingMore": "加载更多...",
     "scrollForMore": "滚动查看更多",
@@ -881,10 +941,10 @@
     "typeToSearch": "输入以搜索",
     "pleaseTryAgain": "请重试",
     "noFileOpen": "打开文件以开始编辑",
-    "selectFileToEdit": "从资源管理器中选择文件开始编辑",
+    "selectFileToEdit": "在资源管理器中选择文件",
     "noTabs": "打开标签页以开始",
     "noTabsOpen": "打开项目以开始",
-    "selectItemToStart": "从侧边栏选择一个项目以开始",
+    "selectItemToStart": "在侧边栏中选择项目",
     "noDatabaseConnected": "未连接数据库",
     "addConnectionToQuery": "添加连接以开始查询",
     "noQueryResults": "运行查询以查看结果",
@@ -893,7 +953,7 @@
     "chatHistoryEmpty": "暂无活动",
     "chatHistoryReloadHint": "Session 数据可能未加载",
     "chatHistoryAgentWorking": "Agent 运行中",
-    "chatHistoryAgentWorkingHint": "助手回复将显示在此处。在首条事件到达前，工具栏可能显示为空闲。",
+    "chatHistoryAgentWorkingHint": "首条回复到达后会显示消息，此前工具栏可能显示空闲",
     "pleaseSelect": "请选择",
     "noTerminalsAvailable": "打开终端以开始",
     "noSessionsFound": "未找到 Session",
@@ -903,7 +963,7 @@
     "noQueryHistory": "尚未执行查询",
     "executedQueriesSubtitle": "已执行的查询将显示在这里",
     "noOperationHistory": "暂无操作记录",
-    "noOperationHistorySubtitle": "Commit、push、pull 等 Git 操作将显示在此处",
+    "noOperationHistorySubtitle": "Git 操作将显示在此处",
     "selectFileToViewChanges": "选择文件以查看变更",
     "failedToLoadHistory": "加载历史记录失败",
     "noGitHistory": "暂无 Git 历史记录",
@@ -970,13 +1030,12 @@
     "addCssVariables": "向项目添加 CSS 变量",
     "loadingAccountStatus": "正在加载账户状态...",
     "noRepositorySelected": "未选择仓库",
-    "selectRepositoryFromHome": "请从首页选择一个仓库以打开。",
     "noWorkspaceExplorerTitle": "未打开 Workspace",
     "noWorkspaceExplorerSubtitle": "打开工作区以查看文件",
     "cannotFindRepo": "找不到 {{repoName}}",
     "lastSeenAtPath": "上次路径：{{path}}",
     "unsupportedFileType": "不支持的文件类型",
-    "binaryUnsupportedEncoding": "该文件未显示，因为它是二进制文件或使用了不支持的文本编码。",
+    "binaryUnsupportedEncoding": "二进制文件或不支持的文本编码",
     "connectingDatabase": "正在打开数据库...",
     "invalidDatabase": "无效的数据库文件",
     "selectTable": "选择一个表",
@@ -1001,7 +1060,8 @@
     "scanningFileExtensions": "Scanning file extensions...",
     "startBrowsingMarket": "Start browsing the marketplace",
     "previewUnavailable": "预览不可用",
-    "selectPrCommitToViewDiff": "从顶部选择一个 PR 提交来查看 diff。"
+    "selectPrCommitToViewDiff": "从顶部选择一个 PR 提交来查看 diff。",
+    "selectRepositoryFromWorkspace": "选择工作区仓库"
   },
   "inbox": {
     "searchPlaceholder": "搜索消息...",
@@ -1080,6 +1140,18 @@
       "stopProcess": "停止进程",
       "searchPlaceholder": "搜索端口…",
       "noSearchResults": "没有匹配的端口"
+    },
+    "ci": {
+      "openPullRequest": "在 GitHub 中打开 Pull Request",
+      "viewDetails": "查看检查详情",
+      "refresh": "刷新检查",
+      "unavailable": "无法读取检查状态",
+      "sections": {
+        "failed": "失败",
+        "running": "运行中",
+        "skipped": "已跳过",
+        "passed": "已通过"
+      }
     },
     "noLanguageServicesActive": "没有活跃的 Language Service",
     "linesSelected": "已选择 {{count}} 行",
@@ -1164,8 +1236,6 @@
       "tryVerifyUrl": "确认网址是否正确",
       "tryAgainLater": "稍后再试"
     },
-    "selectRepoFromHome": "请从首页选择一个仓库",
-    "cloneRepoAgain": "请从首页重新克隆仓库",
     "unsavedChangesTitle": "未保存的更改",
     "prkPlaceholder": "PRJ",
     "gitSyncMenuTitle": "Git 同步操作"
@@ -1205,7 +1275,150 @@
       "takeAction": "执行操作",
       "sync": "同步",
       "createPR": "创建 PR",
-      "stash": "暂存"
+      "stash": "暂存",
+      "compareBranch": "比较分支"
+    },
+    "rail": {
+      "openTabs": "打开的标签页",
+      "closeItem": "关闭 {{label}}",
+      "expand": "展开工作区信息",
+      "collapse": "折叠工作区信息"
+    },
+    "pr": {
+      "title": "Pull request",
+      "linkedBranch": "Pull request #{{number}}",
+      "baseBranch": "基准",
+      "noDescription": "未提供描述。",
+      "loadingConversation": "正在加载…",
+      "reviewNoBody": "留下了审查评论。",
+      "submitReview": "提交审查",
+      "reviewHeadNotice": "仅当显示的头部提交仍然匹配时，此审查才会生效。",
+      "reviewDecision": "审查决定",
+      "reviewComment": "审查评论",
+      "reviewCommentPlaceholder": "添加评论…",
+      "commentPlaceholder": "发表评论…",
+      "comment": "评论",
+      "approve": "批准",
+      "requestChanges": "请求更改",
+      "reply": "回复",
+      "replyPlaceholder": "回复…",
+      "reviewThreads": "审查评论",
+      "details": "详情",
+      "unknownAuthor": "未知",
+      "actions": {
+        "label": "pull request 操作",
+        "confirmMergeTitle": "合并 pull request？",
+        "confirmMergeMessage": "GitHub 会将当前 pull request 的源分支合并到目标分支。",
+        "merge": "合并",
+        "squash": "压缩并合并",
+        "rebase": "变基并合并",
+        "mergeSuccess": "pull request 已合并",
+        "mergeRequested": "已请求合并",
+        "removedFromQueue": "已从合并队列中移除",
+        "autoMergeEnabled": "已启用自动合并",
+        "autoMergeDisabled": "已禁用自动合并",
+        "markReady": "标记为可供审查",
+        "markedReady": "pull request 已标记为可供审查",
+        "convertToDraft": "转换为草稿",
+        "convertedToDraft": "pull request 已转换为草稿",
+        "confirmCloseTitle": "关闭 pull request？",
+        "confirmCloseMessage": "此 pull request 将保留，稍后可重新打开。",
+        "closeSuccess": "pull request 已关闭",
+        "reopen": "重新打开 pull request",
+        "reopenSuccess": "pull request 已重新打开",
+        "enableAutoMerge": "启用自动合并",
+        "mergeWhenReady": "准备好后合并",
+        "disableAutoMerge": "禁用自动合并",
+        "removeFromMergeQueue": "从合并队列中移除",
+        "merged": "已合并",
+        "closed": "已关闭",
+        "draft": "草稿",
+        "inMergeQueue": "在合并队列中",
+        "approvalRequired": "需要批准",
+        "changesRequested": "已请求更改",
+        "checksFailed": "检查失败",
+        "checksPending": "检查待定",
+        "mergeBlocked": "合并受阻",
+        "searchReviewers": "搜索审查者",
+        "reviewersLoadFailed": "无法加载审查者",
+        "noReviewers": "没有可用的审查者",
+        "reviewersUpdated": "审查者已更新",
+        "reviewersCount_one": "{{count}} 名审查者",
+        "reviewersCount_other": "{{count}} 名审查者",
+        "reviewers": "审查者",
+        "tooltips": {
+          "merge": "在 GitHub 上合并此 pull request",
+          "alreadyMerged": "此 pull request 已合并",
+          "reopenBeforeMerging": "请先重新打开此 pull request 再进行合并",
+          "markReady": "请先将此 pull request 标记为可供审查再进行合并",
+          "mergeQueue": "GitHub 将通过合并队列合并此 pull request",
+          "approvalRequired": "GitHub 要求审查批准后才能合并",
+          "changesRequested": "必须解决请求的更改后才能合并",
+          "resolveConflicts": "请先解决合并冲突",
+          "checksFailed": "必须通过必要检查后才能合并",
+          "checksPending": "等待必要检查完成或启用自动合并",
+          "mergeBlocked": "GitHub 报告存在未满足的合并要求"
+        }
+      },
+      "activity": {
+        "opened": "打开了此 pull request",
+        "commented": "发表了评论",
+        "approved": "批准了这些更改",
+        "changesRequested": "请求了更改",
+        "reviewDismissed": "驳回了审查",
+        "reviewed": "进行了审查"
+      },
+      "summary": {
+        "label": "pull request 摘要",
+        "branch": "分支",
+        "createdBy": "创建者",
+        "reviewers": "审查者",
+        "noReviewers": "无审查者",
+        "comments": "评论",
+        "commentCount_one": "{{count}} 条评论",
+        "commentCount_other": "{{count}} 条评论",
+        "checks": "检查",
+        "noChecks": "无 CI 检查",
+        "checksFailed": "检查失败",
+        "status": "状态"
+      },
+      "tabs": {
+        "conversation": "对话",
+        "commits": "提交",
+        "checks": "检查",
+        "changes": "更改"
+      },
+      "checks": {
+        "none": "未报告检查",
+        "noneHint": "此 pull request 的头提交未运行任何 CI 检查或状态。",
+        "allPassed": "所有检查均已通过",
+        "someFailed": "部分检查失败",
+        "pending": "检查进行中",
+        "passedShort": "已通过",
+        "failedShort": "失败",
+        "runningShort": "运行中",
+        "checkingShort": "检查中",
+        "noneShort": "无 CI",
+        "unavailableShort": "CI 不可用",
+        "branchStatus": "Pull request #{{number}} CI：{{status}}"
+      },
+      "commits": {
+        "backToList": "全部提交",
+        "none": "无提交"
+      },
+      "changes": {
+        "title": "文件更改",
+        "noFiles": "无文件更改",
+        "tooLarge": "文件太大，无法显示差异",
+        "unavailable": "更改不可用",
+        "unavailableHint": "无法解析 pull request 的基准提交和头提交。"
+      },
+      "status": {
+        "open": "打开",
+        "merged": "已合并",
+        "closed": "已关闭",
+        "draft": "草稿"
+      }
     },
     "messages": {
       "pushSuccess": "Successfully pushed changes to remote",
@@ -1259,6 +1472,85 @@
         "closed": "已关闭",
         "completed": "已完成",
         "notPlanned": "未计划"
+      },
+      "activity": {
+        "opened": "打开了此 issue",
+        "commented": "发表了评论",
+        "timelineItemCount_one": "{{count}} 个时间线项目",
+        "timelineItemCount_other": "{{count}} 个时间线项目",
+        "noDescription": "未提供描述。",
+        "assigned": "指派了",
+        "assignedIssue": "指派了此 issue",
+        "unassigned": "取消指派了",
+        "removedAssignee": "移除了一名受理人",
+        "added": "添加了",
+        "removed": "移除了",
+        "label": "一个标签",
+        "milestoned": "将此 issue 添加到里程碑 {{milestone}}",
+        "demilestoned": "将此 issue 从里程碑 {{milestone}} 中移除",
+        "closedViaCommit": "通过提交 {{commit}} 关闭了此 issue",
+        "closed": "关闭了此 issue",
+        "reopened": "重新打开了此 issue",
+        "renamedTo": "将此 issue 重命名为",
+        "renamed": "重命名了此 issue",
+        "locked": "锁定了此对话",
+        "lockedAs": "因 {{reason}} 锁定了此对话",
+        "unlocked": "解锁了此对话",
+        "crossReferencedFrom": "从以下位置引用了此 issue：",
+        "crossReferenced": "交叉引用了此 issue",
+        "referencedInCommit": "在提交 {{commit}} 中引用了此 issue",
+        "referencedInACommit": "在一次提交中引用了此 issue",
+        "connected": "关联了此 issue",
+        "disconnected": "取消关联了此 issue",
+        "markedAsDuplicate": "将此 issue 标记为重复",
+        "unmarkedAsDuplicate": "移除了重复标记",
+        "pinned": "置顶了此 issue",
+        "unpinned": "取消置顶了此 issue",
+        "transferred": "转移了此 issue",
+        "convertedToDiscussion": "将此 issue 转换为讨论",
+        "mentioned": "提及了此 issue",
+        "commentDeleted": "删除了一条评论",
+        "subscribed": "订阅了此 issue",
+        "unsubscribed": "取消订阅了此 issue",
+        "addedToProject": "将此 issue 添加到项目",
+        "movedInProject": "在项目中移动了此 issue",
+        "removedFromProject": "将此 issue 从项目中移除",
+        "archived": "归档了此 issue",
+        "unarchived": "取消归档了此 issue",
+        "merged": "合并了此 pull request",
+        "committed": "向此 pull request 提交了更改",
+        "headRefDeleted": "删除了头部分支",
+        "headRefRestored": "恢复了头部分支",
+        "headRefForcePushed": "强制推送了头部分支",
+        "baseRefChanged": "更改了基础分支",
+        "automaticBaseChangeFailed": "无法自动更改基础分支",
+        "automaticBaseChangeSucceeded": "自动更改了基础分支",
+        "deployed": "部署了此 pull request",
+        "deploymentEnvironmentChanged": "更改了部署环境",
+        "readyForReview": "将此 pull request 标记为可供审查",
+        "reviewRequested": "请求了审查",
+        "reviewRequestRemoved": "移除了审查请求",
+        "reviewed": "审查了这些更改",
+        "reviewDismissed": "驳回了审查",
+        "userBlocked": "屏蔽了此用户"
+      },
+      "composer": {
+        "addComment": "添加评论",
+        "commentingAs": "正在以 {{login}} 身份操作",
+        "identityUnavailable": "GitHub 身份不可用",
+        "commentPlaceholder": "撰写评论…",
+        "submitComment": "评论",
+        "closeIssue": "关闭 issue",
+        "closeAsCompleted": "以已完成关闭",
+        "closeAsNotPlanned": "以不计划关闭",
+        "closeAsDuplicate": "作为重复项关闭",
+        "duplicateSearchPlaceholder": "搜索 issue",
+        "duplicateEmpty": "没有匹配的 issue",
+        "duplicateLoadFailed": "issue 加载失败",
+        "reopenIssue": "重新打开 issue",
+        "commentFailed": "添加评论失败",
+        "bodyUpdateFailed": "更新 issue 描述失败",
+        "statusFailed": "更新 issue 状态失败"
       }
     }
   },
@@ -1718,7 +2010,6 @@
     "ramCurrentSession": "当前会话",
     "ramChatRenderedTree": "Chat 渲染树",
     "ramSessionStore": "Session store",
-    "ramStartSidebar": "Start 侧栏",
     "ramSessionSidebar": "Session 侧栏",
     "ramSecondLevelSidebars": "二级侧栏",
     "ramSettingsSidebar": "Settings 侧栏",
@@ -2179,20 +2470,7 @@
     }
   },
   "dragDrop": {
-    "dropFilesToUpload": "拖放文件以上传",
-    "dropFileToChat": "拖放文件以添加到聊天",
-    "dropFolderToAdd": "拖放文件夹以添加仓库",
-    "releaseToAddFiles": "释放以将文件添加到您的 Session",
-    "releaseToAddFileToChat": "释放以将文件添加到聊天（类似 ⌘L）",
-    "releaseToOpenFolder": "释放以打开文件夹",
-    "folderDetected": "检测到文件夹",
-    "openSpotlightToAdd": "打开 Spotlight 以将此文件夹添加为仓库",
-    "openSpotlight": "打开 Spotlight",
-    "addedToChat": "已将 \"{{name}}\" 添加到聊天",
-    "couldNotExtractPath": "无法从拖放中提取文件路径",
-    "couldNotExtractPathFromItem": "无法从拖放项中提取文件路径",
-    "dropFilesHere": "将文件拖放到这里",
-    "dragFilesFromIde": "从 VS Code 拖动文件或标签页以添加到聊天"
+    "couldNotExtractPathFromItem": "无法从拖放项中提取文件路径"
   },
   "contextList": {
     "task": "任务",
@@ -2303,6 +2581,198 @@
       "noRepo": "无仓库"
     }
   },
+  "notifications": {
+    "backgroundSession": "后台会话",
+    "taskCompletedTitle": "任务已完成",
+    "taskCompletedBody": "“{{name}}”已完成，可以查看结果",
+    "taskCompletedToast": "“{{name}}”已完成，请打开会话查看结果。",
+    "openSessionAction": "打开会话",
+    "taskFailedTitle": "任务失败",
+    "taskFailedBody": "“{{name}}”失败{{detail}}",
+    "taskCancelledToast": "“{{name}}”已取消"
+  },
+  "teamInbox": {
+    "title": "团队收件箱",
+    "listLabel": "团队收件箱列表",
+    "itemsLabel": "团队收件箱事项",
+    "unreadCount": "{{count}} 条未读",
+    "allRead": "已全部阅读",
+    "loadMore": "加载更多",
+    "filters": {
+      "all": "全部",
+      "mentions": "提及",
+      "assigned": "分配给我"
+    },
+    "sections": {
+      "reviewRequested": "已请求审查",
+      "authoredByMe": "由我创建",
+      "otherTodos": "其他待办事项"
+    },
+    "status": {
+      "read": "已读",
+      "unread": "未读"
+    },
+    "notifications": {
+      "assignmentTitle": "有新的工作项分配给你",
+      "mentionTitle": "{{name}} 提及了你",
+      "handoffTitle": "来自 {{name}} 的交接",
+      "multipleTitle": "团队收件箱有 {{count}} 条新动态",
+      "multipleBody": "打开团队收件箱查看新的分配和提及。"
+    },
+    "row": {
+      "assignedSummary": "{{status}} · {{priority}}",
+      "ariaLabel": "{{title}}，{{status}}"
+    },
+    "search": {
+      "placeholder": "搜索收件箱",
+      "ariaLabel": "搜索团队收件箱"
+    },
+    "groups": {
+      "today": "今天",
+      "yesterday": "昨天",
+      "thisWeek": "本周",
+      "earlier": "更早"
+    },
+    "empty": {
+      "title": "暂无事项",
+      "subtitle": "新的提及和分配会显示在这里。",
+      "selectTitle": "选择一个事项",
+      "selectSubtitle": "查看评论上下文或工作项详情",
+      "mentions": {
+        "title": "暂无提及",
+        "subtitle": "当同事在评论中 @ 你时，会显示在这里"
+      },
+      "assigned": {
+        "title": "暂无分配给你的事项",
+        "subtitle": "分配给你的工作项会显示在这里。"
+      },
+      "noResults": {
+        "title": "无匹配结果",
+        "subtitle": "没有与「{{query}}」匹配的事项。"
+      }
+    },
+    "loading": "正在加载团队收件箱…",
+    "drop": {
+      "title": "拖到这里创建工作项",
+      "subtitle": "先确认会话摘要，再创建或交接工作项。",
+      "processing": "正在从「{{title}}」创建工作项…",
+      "processingHint": "正在读取会话并解析目标成员。",
+      "success": "工作项已创建",
+      "reused": "已更新现有工作项",
+      "failed": "无法创建工作项",
+      "error": "无法根据该会话创建工作项。",
+      "open": "打开",
+      "dismiss": "关闭"
+    },
+    "handoff": {
+      "title": "从会话创建",
+      "createFromSession": "创建团队工作项…",
+      "destination": "交接到",
+      "chooseDestination": "选择交接位置",
+      "cloudDestination": "{{name}} · 团队收件箱",
+      "recipientSelf": "{{name}}（我）",
+      "chooseRecipient": "选择接收人",
+      "todoCount": "{{count}} 个待办",
+      "workItemTitle": "工作项标题",
+      "assignTo": "分配给",
+      "status": "状态",
+      "priority": "优先级",
+      "dueDate": "截止日期",
+      "noDueDate": "无截止日期",
+      "note": "交接说明",
+      "notePlaceholder": "说明已经完成什么、还有哪些未决事项，以及下一步建议。",
+      "selfHint": "分配给自己会创建普通工作项，不会发起交接请求。",
+      "submitHandoff": "创建并交接",
+      "submitCreate": "创建工作项",
+      "preparing": "正在准备「{{title}}」…",
+      "validation": {
+        "title_required": "请输入工作项标题。",
+        "project_required": "请选择交接目标。",
+        "project_unavailable": "该交接目标已不可用，请选择其他目标。",
+        "recipient_required": "请选择接收人。",
+        "recipient_unavailable": "该接收人已不可用，请选择其他接收人。"
+      },
+      "preparationError": {
+        "session_unavailable": "该会话已不可用，请重新打开后再试。",
+        "project_unavailable": "该会话所属的项目已不可用。",
+        "identity_unavailable": "当前登录账号不是该交接目标的有效成员。",
+        "no_project": "没有可用交接目标，请先加入团队或项目后再试。",
+        "unknown": "无法准备该会话，请刷新团队收件箱后重试。"
+      },
+      "submitError": "无法创建工作项，请检查接收人后重试。",
+      "pendingTitle": "来自 {{name}} 的交接",
+      "acceptedTitle": "{{name}} 已接收",
+      "returnedTitle": "{{name}} 已退回",
+      "noNote": "没有交接说明。",
+      "statusLabel": "工作项交接",
+      "return": "退回",
+      "accept": "接收",
+      "returnTitle": "退回这次交接？",
+      "confirmReturn": "退回给发起人",
+      "returnHint": "告诉 {{name}} 需要补充或调整的内容。工作项会重新分配给对方。",
+      "returnPlaceholder": "再次交接前需要修改什么？",
+      "responseError": "无法保存交接操作，请重试。",
+      "identityUnavailable": "无法验证你的团队身份，请先检查项目个人资料再处理交接。",
+      "rowPending": "来自 {{name}} · 等待你处理",
+      "rowAccepted": "已接收交接 · {{status}} · {{priority}}",
+      "rowReturned": "{{name}} 已退回 · {{status}} · {{priority}}"
+    },
+    "errors": {
+      "loadTitle": "无法加载团队收件箱",
+      "load": "无法加载团队收件箱",
+      "loadMore": "加载更多团队收件箱事项失败，请重试。",
+      "refresh": "无法刷新团队收件箱",
+      "markRead": "标记已读失败，请重试。",
+      "markUnread": "标记未读失败，请重试。",
+      "markAllRead": "全部标记已读失败，请重试。",
+      "identity": "当前账户无法匹配到项目成员，请检查项目个人资料中的邮箱。",
+      "partialLoad": "部分团队收件箱来源刷新失败，当前可用事项仍会保留显示",
+      "pullRequestsPartialLoad": "部分 pull request 刷新失败",
+      "pullRequestsPartialLoadHelp": "当前可用事项仍会保留显示；请刷新以重新加载缺少的 pull request",
+      "workItemContext": "部分项目上下文暂不可用，工作项仍可继续查看和操作。",
+      "workItemLoad": "无法加载此工作项，请重试。",
+      "workItemUpdate": "无法保存刚才的工作项修改，请重试。"
+    },
+    "detail": {
+      "assignedSubtitle": "分配给你的工作项",
+      "standaloneProject": "独立工作项",
+      "mentionSubtitle": "评论中提及了你",
+      "mentionedYou": "提及了你",
+      "threadComments": "该话题中有 {{count}} 条评论"
+    },
+    "actions": {
+      "markRead": "标记已读",
+      "markUnread": "标记未读",
+      "openWorkItem": "打开工作项",
+      "openSession": "打开会话"
+    },
+    "fields": {
+      "status": "状态",
+      "priority": "优先级",
+      "assignee": "负责人",
+      "workItemId": "工作项 ID",
+      "session": "会话",
+      "comments": "评论数",
+      "threadId": "话题 ID",
+      "commentId": "评论 ID"
+    },
+    "workItemStatus": {
+      "backlog": "待办池",
+      "todo": "待办",
+      "in_progress": "进行中",
+      "in_review": "审核中",
+      "blocked": "受阻",
+      "done": "已完成",
+      "cancelled": "已取消"
+    },
+    "priority": {
+      "none": "无优先级",
+      "low": "低",
+      "medium": "中",
+      "high": "高",
+      "urgent": "紧急"
+    }
+  },
   "globalToolbar": {
     "selectWorkspaceToStart": "选择一个工作区以开始",
     "selectRepoToStart": "选择一个 Repo 开始"
@@ -2328,8 +2798,8 @@
     "previewAlt": "预览"
   },
   "quitConfirmation": {
-    "title": "退出 ORGII？",
-    "subtitle": "正在运行的会话会保留当前状态。你可以稍后重新打开 ORGII。",
+    "title": "退出 ORG-2？",
+    "subtitle": "正在运行的会话会保留当前状态。你可以稍后重新打开 ORG-2。",
     "cancel": "取消",
     "confirm": "退出"
   },

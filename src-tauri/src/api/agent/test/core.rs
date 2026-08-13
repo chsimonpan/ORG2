@@ -570,6 +570,8 @@ pub async fn test_event_store_complete_last_running(
             repo_path: None,
             extracted: None,
             payload_refs: Vec::new(),
+            shell_replay: None,
+            shell_replay_bookmarks: None,
             last_extract_at: None,
         });
     }
@@ -1120,9 +1122,11 @@ async fn debug_work_item_runtime_launch_impl(
                 labels: Vec::new(),
                 milestone: None,
                 parent: None,
+                stage: None,
                 start_date: None,
                 target_date: None,
                 created_by: Some("e2e".to_string()),
+                origin_session: None,
                 created_at: now.clone(),
                 updated_at: now,
                 deleted_at: None,
@@ -1132,6 +1136,7 @@ async fn debug_work_item_runtime_launch_impl(
                 history: Vec::new(),
                 delegations: Vec::new(),
                 linked_sessions: Vec::new(),
+                handoff: None,
                 proof_of_work: None,
                 orchestrator_config: Some(OrchestratorConfig {
                     selected_account_id: Some(account_id),
@@ -1209,7 +1214,7 @@ pub async fn test_work_item_scheduler_run_once() -> Json<serde_json::Value> {
 pub async fn debug_work_item_scheduler_run_once() -> Result<serde_json::Value, String> {
     let handle = crate::api::get_app_handle()
         .ok_or_else(|| "AppHandle not initialized. Is the Tauri app running?".to_string())?;
-    agent_core::coordination::work_item_scheduler::debug_run_once(&handle).await?;
+    agent_core::coordination::work_item_scheduler::debug_run_once(handle).await?;
     Ok(serde_json::json!({ "ran": true }))
 }
 
@@ -1217,7 +1222,7 @@ pub async fn debug_work_item_scheduler_run_once() -> Result<serde_json::Value, S
 pub async fn debug_routine_scheduler_run_once() -> Result<serde_json::Value, String> {
     let handle = crate::api::get_app_handle()
         .ok_or_else(|| "AppHandle not initialized. Is the Tauri app running?".to_string())?;
-    agent_core::coordination::routine_scheduler::debug_run_once(&handle).await?;
+    agent_core::coordination::routine_scheduler::debug_run_once(handle).await?;
     Ok(serde_json::json!({ "ran": true }))
 }
 

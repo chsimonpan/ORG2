@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 
 import Button from "@src/components/Button";
 import { getMaterialConfig } from "@src/components/Glass/config";
@@ -21,7 +22,11 @@ import { type StationMode, stationModeAtom } from "@src/store/ui/simulatorAtom";
 import { useCurrentTheme } from "@src/util/ui/theme/themeUtils";
 import { getViewportSize } from "@src/util/ui/window/viewport";
 
-import { GENERAL_LAYOUT_TOUR_TARGETS } from "./generalLayoutTourConfig";
+import { createAnimationFrameScheduler } from "./animationFrameScheduler";
+import {
+  GENERAL_LAYOUT_TOUR_STEPS,
+  GENERAL_LAYOUT_TOUR_TARGETS,
+} from "./generalLayoutTourConfig";
 
 type GeneralLayoutTourTarget =
   (typeof GENERAL_LAYOUT_TOUR_TARGETS)[keyof typeof GENERAL_LAYOUT_TOUR_TARGETS];
@@ -29,8 +34,6 @@ type GeneralLayoutTourTarget =
 interface TourStep {
   id: string;
   target: GeneralLayoutTourTarget;
-  title: string;
-  body: string;
   /** Snap into My Station when this step becomes active (dock chrome steps). */
   switchToMyStation?: boolean;
   stationMode?: StationMode;
@@ -49,56 +52,7 @@ interface GeneralLayoutTourProps {
   onClose: () => void;
 }
 
-const TOUR_STEPS: TourStep[] = [
-  {
-    id: "chat-panel",
-    target: GENERAL_LAYOUT_TOUR_TARGETS.chatPanel,
-    title: "Chat Panel",
-    body: "This is where users have conversations with agents, review activity, and send follow-up instructions.",
-  },
-  {
-    id: "station-mode-pill",
-    target: GENERAL_LAYOUT_TOUR_TARGETS.stationModePill,
-    title: "Switch station modes",
-    stationMode: "my-station",
-    demoStationModeSwitch: true,
-    body: "Use this pill to switch station modes. Desktop means My Station, your workspace. Infinity means Agent Station, the agent activity view.",
-  },
-  {
-    id: "dock",
-    target: GENERAL_LAYOUT_TOUR_TARGETS.dock,
-    title: "Agent Station dock chrome",
-    body: "The dock switches apps inside the station. The tour temporarily disables auto-hide so these controls stay visible.",
-  },
-  {
-    id: "all-tabs",
-    target: GENERAL_LAYOUT_TOUR_TARGETS.dockAllTabs,
-    title: "All Tabs",
-    switchToMyStation: true,
-    body: "The first dock icon shows all open tabs together, regardless of which workstation app owns them.",
-  },
-  {
-    id: "code-editor",
-    target: GENERAL_LAYOUT_TOUR_TARGETS.dockCodeEditor,
-    title: "Code Editor",
-    switchToMyStation: true,
-    body: "Use Code Editor for files, diffs, terminals, source control, and coding changes made during a session.",
-  },
-  {
-    id: "browser",
-    target: GENERAL_LAYOUT_TOUR_TARGETS.dockBrowser,
-    title: "Browser",
-    switchToMyStation: true,
-    body: "Use Browser for web pages, previews, app testing, and browser-based investigation alongside the chat.",
-  },
-  {
-    id: "projects",
-    target: GENERAL_LAYOUT_TOUR_TARGETS.dockProjects,
-    title: "Projects",
-    switchToMyStation: true,
-    body: "Use Projects to track work items, plans, and project state connected to the current workspace.",
-  },
-];
+const TOUR_STEPS: readonly TourStep[] = GENERAL_LAYOUT_TOUR_STEPS;
 
 const POPOVER_WIDTH = 320;
 const VIEWPORT_PADDING = 16;
@@ -217,6 +171,7 @@ const GeneralLayoutTour: React.FC<GeneralLayoutTourProps> = ({
   open,
   onClose,
 }) => {
+  const { t } = useTranslation("onboarding");
   const { isDark } = useCurrentTheme();
   const setStationMode = useSetAtom(stationModeAtom);
   const [stepIndex, setStepIndex] = useState(0);
@@ -270,16 +225,20 @@ const GeneralLayoutTour: React.FC<GeneralLayoutTourProps> = ({
   useEffect(() => {
     if (!open) return;
 
-    const frameId = window.requestAnimationFrame(updateTargetRect);
-    const retryId = window.setTimeout(updateTargetRect, 180);
-    window.addEventListener("resize", updateTargetRect);
-    window.addEventListener("scroll", updateTargetRect, true);
+    const scheduler = createAnimationFrameScheduler(updateTargetRect, {
+      requestFrame: window.requestAnimationFrame.bind(window),
+      cancelFrame: window.cancelAnimationFrame.bind(window),
+    });
+    const retryId = window.setTimeout(scheduler.schedule, 180);
+    scheduler.schedule();
+    window.addEventListener("resize", scheduler.schedule);
+    window.addEventListener("scroll", scheduler.schedule, true);
 
     return () => {
-      window.cancelAnimationFrame(frameId);
+      scheduler.cancel();
       window.clearTimeout(retryId);
-      window.removeEventListener("resize", updateTargetRect);
-      window.removeEventListener("scroll", updateTargetRect, true);
+      window.removeEventListener("resize", scheduler.schedule);
+      window.removeEventListener("scroll", scheduler.schedule, true);
     };
   }, [open, updateTargetRect]);
 
@@ -387,18 +346,19 @@ const GeneralLayoutTour: React.FC<GeneralLayoutTourProps> = ({
           {...POPUP_ANIMATION}
           className="fixed z-[10002] rounded-[14px] p-3"
           style={{ ...popoverStyle, ...popoverGlassStyle }}
-          onClick={(event: React.MouseEvent<HTMLDivElement>) =>
-            event.stopPropagation()
-          }
+          onClick={(event) => event.stopPropagation()}
         >
           <div className="mb-2 flex items-center justify-between gap-3">
             <span className="text-[11px] font-medium uppercase tracking-wider text-primary-6">
-              Step {stepIndex + 1} of {TOUR_STEPS.length}
+              {t("tutorials.chrome.stepProgress", {
+                current: stepIndex + 1,
+                total: TOUR_STEPS.length,
+              })}
             </span>
             <button
               type="button"
               className="flex size-6 items-center justify-center rounded-full text-text-3 transition-colors hover:bg-fill-2 hover:text-text-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-6"
-              aria-label="Close"
+              aria-label={t("tutorials.chrome.close")}
               onClick={onClose}
             >
               <X size={14} />
@@ -406,10 +366,10 @@ const GeneralLayoutTour: React.FC<GeneralLayoutTourProps> = ({
           </div>
 
           <h3 className="mb-1.5 text-[14px] font-semibold leading-tight text-text-1">
-            {currentStep.title}
+            {t(`tutorials.generalLayout.steps.${currentStep.id}.title`)}
           </h3>
           <p className="mb-3 text-[12px] leading-[1.45] text-text-2">
-            {currentStep.body}
+            {t(`tutorials.generalLayout.steps.${currentStep.id}.body`)}
           </p>
 
           {currentStep.demoStationModeSwitch && (
@@ -419,8 +379,12 @@ const GeneralLayoutTour: React.FC<GeneralLayoutTourProps> = ({
                   <Monitor size={14} strokeWidth={1.8} />
                 </span>
                 <span className="flex min-w-0 flex-col leading-tight">
-                  <span className="font-semibold">Desktop</span>
-                  <span className="text-text-3">My Station</span>
+                  <span className="font-semibold">
+                    {t("tutorials.chrome.desktop")}
+                  </span>
+                  <span className="text-text-3">
+                    {t("tutorials.chrome.myStation")}
+                  </span>
                 </span>
               </div>
               <div className="flex items-center gap-2 rounded-md bg-fill-2 px-2 py-2 text-[11px] text-text-1">
@@ -428,8 +392,12 @@ const GeneralLayoutTour: React.FC<GeneralLayoutTourProps> = ({
                   <Infinity size={14} strokeWidth={1.8} />
                 </span>
                 <span className="flex min-w-0 flex-col leading-tight">
-                  <span className="font-semibold">Infinity</span>
-                  <span className="text-text-3">Agent Station</span>
+                  <span className="font-semibold">
+                    {t("tutorials.chrome.infinity")}
+                  </span>
+                  <span className="text-text-3">
+                    {t("tutorials.chrome.agentStation")}
+                  </span>
                 </span>
               </div>
             </div>
@@ -455,12 +423,12 @@ const GeneralLayoutTour: React.FC<GeneralLayoutTourProps> = ({
               iconOnly
               icon={<ArrowLeft size={13} />}
               disabled={isFirstStep}
-              aria-label="Previous step"
-              title="Previous step"
+              aria-label={t("tutorials.chrome.previous")}
+              title={t("tutorials.chrome.previous")}
               onClick={goPrevious}
             />
             <span className="text-[11px] text-text-3">
-              Use ← / → or &lt; / &gt;
+              {t("tutorials.chrome.keyboardHint")}
             </span>
             <Button
               size="mini"
@@ -468,8 +436,16 @@ const GeneralLayoutTour: React.FC<GeneralLayoutTourProps> = ({
               shape="circle"
               iconOnly
               icon={isLastStep ? <Check size={13} /> : <ArrowRight size={13} />}
-              aria-label={isLastStep ? "Finish tour" : "Next step"}
-              title={isLastStep ? "Finish tour" : "Next step"}
+              aria-label={
+                isLastStep
+                  ? t("tutorials.chrome.finish")
+                  : t("tutorials.chrome.next")
+              }
+              title={
+                isLastStep
+                  ? t("tutorials.chrome.finish")
+                  : t("tutorials.chrome.next")
+              }
               onClick={goNext}
             />
           </div>

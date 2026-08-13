@@ -142,7 +142,7 @@
     "timezoneAuto": "자동 (브라우저)",
     "timezoneSearchPlaceholder": "가까운 도시 검색",
     "sendOnEnter": "Enter로 메시지 보내기",
-    "sendOnEnterDesc": "활성화하면 Enter로 보내고 Shift+Enter로 줄바꿈합니다. 비활성화하면 Ctrl/Cmd+Enter로 보냅니다",
+    "sendOnEnterDesc": "활성화하면 Enter로 보내고, Shift+Enter와 Ctrl/Cmd+Enter로 줄바꿈합니다. 비활성화하면 Ctrl/Cmd+Enter로 보냅니다",
     "language": "언어",
     "languageSearchPlaceholder": "언어 검색...",
     "languageNames": {
@@ -227,7 +227,10 @@
     "presenceGuidanceOnlineDefault": "저는 키보드 앞에 있습니다. 언제든 확인 질문을 해도 되고, 파괴적인 작업을 실행하기 전에는 저에게 확인해 주세요",
     "presenceGuidanceInvisibleDefault": "근처에 있지만 오프라인으로 표시 중입니다. 기본적으로 자율적으로 진행하고, 고위험 작업이나 큰 리팩터링일 때만 알려 주세요. 그 외 질문은 하나씩 묻지 말고 한 번에 요약해 주세요",
     "presenceGuidanceAwayDefault": "저는 자리를 비웠습니다. 제 답변을 기다리지 말고 현재 정보로 최선의 결정을 내려 완료할 수 있는 일을 마치고, 돌아왔을 때 볼 수 있도록 결과와 열린 질문을 간단히 남겨 주세요",
-    "followSystem": "시스템 설정 따르기"
+    "followSystem": "시스템 설정 따르기",
+    "preferences": "환경설정",
+    "usePointerCursors": "포인터 커서 사용",
+    "usePointerCursorsDesc": "대화형 요소 위에 마우스를 올리면 커서를 포인터로 변경합니다"
   },
   "background": {
     "title": "배경",
@@ -703,8 +706,34 @@
     "test": {
       "sent": "테스트 알림 발송됨",
       "permissionWarning": "테스트 알림 전송 실패. 권한을 확인하세요.",
-      "sendFailed": "테스트 알림을 보낼 수 없습니다. 알림 권한을 확인하고 다시 시도하세요."
-    }
+      "sendFailed": "테스트 알림을 보낼 수 없습니다. 알림 권한을 확인하고 다시 시도하세요.",
+      "soundFailed": "알림 소리를 재생할 수 없습니다. 시스템 볼륨을 확인하세요."
+    },
+    "teamInbox": "팀 받은편지함",
+    "soundPreset": "알림음",
+    "soundPresetDesc": "알림에 사용할 소리를 선택합니다",
+    "previewSound": "미리 듣기",
+    "soundPresets": {
+      "classic": "클래식",
+      "gentle": "부드럽게",
+      "ascending": "상승",
+      "bell": "벨"
+    },
+    "criticalOnly": "중요 알림만",
+    "criticalOnlyDesc": "승인이 필요한 작업이나 작업 실패에만 알립니다",
+    "quietHours": "방해 금지 일정",
+    "quietHoursDesc": "매일 지정한 시간대에는 일반 알림을 끕니다",
+    "quietHoursSchedule": "방해 금지 시간",
+    "quietHoursScheduleDesc": "기기의 현지 시간을 사용합니다. 시작과 종료 시간이 같으면 사용되지 않습니다.",
+    "quietHoursStart": "시작",
+    "quietHoursEnd": "종료",
+    "allowCriticalDuringQuietHours": "중요 알림 허용",
+    "allowCriticalDuringQuietHoursDesc": "승인 요청과 실패는 시스템 알림을 표시할 수 있지만 소리는 재생되지 않습니다",
+    "backgroundCompletionSummary": "백그라운드 완료 요약",
+    "backgroundCompletionSummaryDesc": "방해 금지 시간이 끝나면 하나로 묶어 알립니다",
+    "mutedSessions": "음소거된 Session",
+    "mutedSessionsDesc": "이 기기에서 {{count}}개의 Session이 음소거되었습니다",
+    "clearMutedSessions": "모두 해제"
   },
   "editor": {
     "tabEditor": "에디터",
@@ -923,7 +952,24 @@
     "diskCategory_screenshots": "브라우저 스크린샷",
     "diskCategory_agentWorktrees": "Agent Session Worktrees",
     "diskCategory_lspBin": "LSP Server 바이너리",
-    "loadZeroRows": "Click to load {{count}} more"
+    "loadZeroRows": "Click to load {{count}} more",
+    "appMemory": "App memory",
+    "appBackend": "ORG2 backend",
+    "appWebviewHelpers": "Owned WebView helpers",
+    "rssMappedDiagnostic": "RSS / mapped memory (diagnostic)",
+    "measurement": "Measurement",
+    "measurementKinds": {
+      "native": "Native effective memory",
+      "compatibility": "Compatibility metric",
+      "mixed": "Mixed native / fallback metrics",
+      "rss_fallback": "RSS fallback",
+      "unavailable": "Unavailable"
+    },
+    "toolProcessDiagnostics": "Terminal, CLI & tool processes (RSS diagnostic)",
+    "excludedFromAppMemory": "excluded from App memory",
+    "noToolProcesses": "No terminal, CLI, MCP, or tool processes detected",
+    "categoryAgentCli": "CLI agent",
+    "categoryMcpOrTool": "MCP / tool process"
   },
   "storage": {
     "dataDirectory": "데이터 디렉토리",
@@ -942,7 +988,13 @@
     "tableSize": "크기",
     "tablePercentage": "비율",
     "scanFailed": "디스크 사용량 검사 실패",
-    "openFolderFailed": "폴더를 열 수 없습니다"
+    "openFolderFailed": "폴더를 열 수 없습니다",
+    "browserCache": "브라우저 캐시",
+    "browserCacheDesc": "{{used}} 사용 중 · {{cleanable}} 안전하게 정리 가능",
+    "cleanBrowserCache": "정리",
+    "browserCacheCleaned": "브라우저 저장 공간 {{size}}을 확보했습니다",
+    "browserCacheAlreadyClean": "브라우저 캐시가 이미 정리되어 있습니다",
+    "browserCacheCleanFailed": "브라우저 캐시를 정리하지 못했습니다"
   },
   "dependencies": {
     "systemDependencies": "시스템 Dependencies",
@@ -991,7 +1043,7 @@
     "decryptEffect": "Decrypt 효과",
     "decryptEffectDesc": "Agent 메시지에 Decrypt 애니메이션 활성화",
     "sendOnEnter": "Enter로 메시지 보내기",
-    "sendOnEnterDesc": "활성화하면 Enter로 보내고 Shift+Enter로 줄바꿈합니다. 비활성화하면 Ctrl/Cmd+Enter로 보냅니다"
+    "sendOnEnterDesc": "활성화하면 Enter로 보내고, Shift+Enter와 Ctrl/Cmd+Enter로 줄바꿈합니다. 비활성화하면 Ctrl/Cmd+Enter로 보냅니다"
   },
   "languageServers": {
     "languageServersDesc": "자동 완성, 진단 및 코드 인텔리전스를 위한 LSP 서버 관리",

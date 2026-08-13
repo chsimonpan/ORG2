@@ -18,14 +18,15 @@ import {
 // ── Enums ──
 
 /**
- * Wire category from Rust (cli | agent | os).
+ * Wire category from Rust (cli | agent | os | human).
  * Transformed at parse time to `DispatchCategory` so consumers never see the
  * wire value — only the routing value used by the frontend.
  */
 const WireCategorySchema = z
-  .enum(["cli", "agent", "os"])
-  .transform((cat): "cli_agent" | "rust_agent" => {
+  .enum(["cli", "agent", "os", "human"])
+  .transform((cat): "cli_agent" | "rust_agent" | "human_session" => {
     if (cat === "cli") return "cli_agent";
+    if (cat === "human") return "human_session";
     return "rust_agent";
   });
 
@@ -52,10 +53,31 @@ export const SessionFilterInput = z.object({
   externalHistorySource: z.string().optional(),
   disabledExternalHistorySources: z.array(z.string()).optional(),
   activeOnly: z.boolean().optional(),
+  includeContinuationSuperseded: z.boolean().optional(),
 });
 
 export const SessionAggregateListInput = z.object({
   filter: SessionFilterInput.optional(),
+});
+
+export const NativeSidebarSessionStreamSchema = z.enum([
+  "pinnedNative",
+  "standaloneAgent",
+  "agentOrgRoot",
+  "osAgent",
+  "cliAgent",
+  "humanSession",
+]);
+
+export const NativeSidebarSessionCursorSchema = z.object({
+  updatedAt: z.string().min(1),
+  sessionId: z.string().min(1),
+});
+
+export const NativeSidebarSessionPageInput = z.object({
+  stream: NativeSidebarSessionStreamSchema,
+  cursor: NativeSidebarSessionCursorSchema.nullable().optional(),
+  limit: z.number().int().min(1).max(50),
 });
 
 export const ExternalHistorySidebarDateBucketSchema = z.enum([
@@ -137,6 +159,9 @@ export const SessionPatchInput = z.object({
       model: z.string().optional(),
       accountId: z.string().optional(),
       agentExecMode: z.string().optional(),
+      // Product mode (orgtrack/v1 §5.2): build|plan|ask|project.
+      // Validated as a closed enum on the Rust side.
+      productMode: z.string().optional(),
       // `.nullable().optional()` is the zod equivalent of the Rust
       // `Option<Option<String>>`: undefined = leave alone, null = clear,
       // string = set.
@@ -150,6 +175,7 @@ export const SessionPatchInput = z.object({
         p.name !== undefined ||
         p.model !== undefined ||
         p.agentExecMode !== undefined ||
+        p.productMode !== undefined ||
         p.draftText !== undefined ||
         p.replyTargetEventId !== undefined ||
         p.pinned !== undefined,
@@ -173,6 +199,8 @@ export const SessionAggregateRecordSchema = z.object({
   externalHistorySource: z.string().optional(),
   userInput: z.string().optional(),
   repoPath: z.string().optional(),
+  repoRootPath: z.string().optional(),
+  repoRemoteUrls: z.array(z.string()).optional(),
   storagePath: z.string().optional(),
   repoName: z.string().optional(),
   branch: z.string().optional(),
@@ -203,13 +231,15 @@ export const SessionAggregateRecordSchema = z.object({
   agentDefinitionId: z.string().optional(),
   agentIconId: z.string().optional(),
   agentDisplayName: z.string().optional(),
-  // Per-session exec mode picked via in-session ModePill. Undefined means
-  // "user has never patched this session" — frontend falls back to
-  // `creatorDefaultExecModeAtom` until the first `session_patch`. CLI
-  // sessions always emit `undefined` (no mode concept). String (not
+  // Per-session exec mode picked via in-session ModePill. Undefined is
+  // tolerated for historical rows and resolves to `build`; it must never
+  // inherit the mutable creator default. String (not
   // strict enum) so the wire format tolerates new modes added on the
   // Rust side without a coordinated frontend release.
   agentExecMode: z.string().optional(),
+  // Persistent product mode (orgtrack/v1 §5.2): build|plan|ask|project.
+  // Absent = build. Source of truth for the Project mutation surface.
+  productMode: z.string().optional(),
   // Per-session unsent draft text (P3). The chat composer mirrors this
   // into ComposerInput on session activation. Cleared on send. Persisted via
   // debounced `session_patch` calls — see `useSessionDraftField`.
@@ -224,12 +254,16 @@ export const SessionAggregateRecordSchema = z.object({
   linesAdded: z.number().int().optional(),
   linesRemoved: z.number().int().optional(),
   touchedFiles: z.array(z.string()).optional(),
-  // Channel origin for OS Agent sessions (e.g. "feishu", "telegram").
-  channel: z.string().optional(),
 });
 
 export const SessionListResponseSchema = z.object({
   sessions: z.array(SessionAggregateRecordSchema),
+});
+
+export const NativeSidebarSessionPageResponseSchema = z.object({
+  sessions: z.array(SessionAggregateRecordSchema),
+  nextCursor: NativeSidebarSessionCursorSchema.nullable(),
+  hasMore: z.boolean(),
 });
 
 export const ExternalHistorySidebarRowSchema = z.object({
@@ -242,10 +276,21 @@ export const ExternalHistorySidebarRowSchema = z.object({
   status: z.string().optional(),
   isActive: z.boolean().optional(),
   repoPath: z.string().optional(),
+  repoRootPath: z.string().optional(),
+  repoRemoteUrls: z.array(z.string()).optional(),
+  // Branch as recorded by the source app itself (Claude Code transcripts,
+  // Cursor/Windsurf tracked-repo metadata). Absent for sources that never
+  // report one — the sidebar simply omits the git indicator then.
+  branch: z.string().optional(),
   // The source app's transcript file. Imported sessions have no sessions.db
   // copy, so this is their only storage path.
   storagePath: z.string().optional(),
   model: z.string().optional(),
+  // Stable continuation-family identity elected by the imported-history
+  // cache. Used only for sidebar de-duplication of force-revealed siblings.
+  continuationLineageId: z.string().optional(),
+  /** ORGII-owned pin state; imported sessions carry no pin from their source. */
+  pinned: z.boolean().optional(),
   totalTokens: z.number().int().optional(),
   filesChanged: z.number().int().optional(),
   linesAdded: z.number().int().optional(),
@@ -262,6 +307,8 @@ export const ExternalHistorySidebarResponseSchema = z.object({
       hasMore: z.boolean(),
     })
   ),
+  /** Present when this source's store failed to read. Never treat it as empty. */
+  error: z.string().optional(),
 });
 
 export const ExternalHistorySidebarBatchResponseSchema = z.object({
@@ -273,6 +320,15 @@ export type SessionAggregateRecord = z.output<
   typeof SessionAggregateRecordSchema
 >;
 export type SessionListResponse = z.output<typeof SessionListResponseSchema>;
+export type NativeSidebarSessionStream = z.output<
+  typeof NativeSidebarSessionStreamSchema
+>;
+export type NativeSidebarSessionCursor = z.output<
+  typeof NativeSidebarSessionCursorSchema
+>;
+export type NativeSidebarSessionPageResponse = z.output<
+  typeof NativeSidebarSessionPageResponseSchema
+>;
 export type ExternalHistorySidebarDateBucket = z.output<
   typeof ExternalHistorySidebarDateBucketSchema
 >;

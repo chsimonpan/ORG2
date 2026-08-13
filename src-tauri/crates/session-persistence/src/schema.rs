@@ -68,12 +68,15 @@ pub fn init_session_tables(conn: &Connection) -> SqliteResult<()> {
         [],
     )?;
 
+    // Complete shell transcripts live in append-only artifacts. The leaf
+    // database crate owns this cross-layer storage schema so the app startup
+    // path and lower-level replay tests use the exact same DDL.
+    database::init_shell_replay_tables(conn)?;
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS session_turns (
             session_id TEXT NOT NULL,
             turn_id TEXT NOT NULL,
-            turn_intent_id TEXT,
-            execution_turn_id TEXT,
             start_sequence INTEGER NOT NULL,
             end_sequence INTEGER,
             next_turn_id TEXT,
@@ -127,20 +130,6 @@ pub fn init_session_tables(conn: &Connection) -> SqliteResult<()> {
         [],
     )
     .ok();
-    // Durable exact join key from user_message.result_json.turnIntentId.
-    // Nullable for legacy materialized turns that predate the runtime id.
-    conn.execute(
-        "ALTER TABLE session_turns ADD COLUMN turn_intent_id TEXT",
-        [],
-    )
-    .ok();
-    // DialogTurn id from user_message.result_json.executionTurnId. This is
-    // the only durable key allowed to join terminal assistant args.turnId.
-    conn.execute(
-        "ALTER TABLE session_turns ADD COLUMN execution_turn_id TEXT",
-        [],
-    )
-    .ok();
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS session_turn_index_state (
@@ -176,6 +165,7 @@ pub fn init_session_tables(conn: &Connection) -> SqliteResult<()> {
             session_id        TEXT NOT NULL,
             turn_intent_id    TEXT NOT NULL,
             client_message_id TEXT,
+            org_run_id        TEXT,
             source            TEXT NOT NULL,
             status            TEXT NOT NULL,
             created_at        TEXT NOT NULL,
@@ -184,9 +174,24 @@ pub fn init_session_tables(conn: &Connection) -> SqliteResult<()> {
         )",
         [],
     )?;
+    // Existing databases predate explicit Agent Org ownership. The column is
+    // nullable because ordinary session turns do not belong to an Org run.
+    // In-flight legacy rows are reconciled to terminal state on restart, so
+    // no unsafe session-tree backfill is attempted here.
+    conn.execute(
+        "ALTER TABLE session_turn_intents ADD COLUMN org_run_id TEXT",
+        [],
+    )
+    .ok();
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_session_turn_intents_session_status
          ON session_turn_intents(session_id, status)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_session_turn_intents_org_run_status
+         ON session_turn_intents(org_run_id, status)
+         WHERE org_run_id IS NOT NULL",
         [],
     )?;
 
@@ -198,6 +203,7 @@ pub fn init_session_tables(conn: &Connection) -> SqliteResult<()> {
             session_id TEXT PRIMARY KEY,
             event_count INTEGER NOT NULL DEFAULT 0,
             cached_at INTEGER NOT NULL,
+            content_revision INTEGER NOT NULL DEFAULT 0,
             time_range_start TEXT,
             time_range_end TEXT,
             specs_json TEXT
@@ -208,6 +214,26 @@ pub fn init_session_tables(conn: &Connection) -> SqliteResult<()> {
     // Migration: add specs_json column for existing DBs
     conn.execute("ALTER TABLE sessions ADD COLUMN specs_json TEXT", [])
         .ok();
+    conn.execute(
+        "ALTER TABLE sessions ADD COLUMN content_revision INTEGER NOT NULL DEFAULT 0",
+        [],
+    )
+    .ok();
+
+    // ============================================
+    // Human session note entries
+    // ============================================
+
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS human_session_entries (
+            id         TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL REFERENCES agent_sessions(session_id) ON DELETE CASCADE,
+            body       TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_human_session_entries_session
+            ON human_session_entries(session_id, created_at);",
+    )?;
 
     // ============================================
     // Per-round token usage tracking
@@ -234,6 +260,15 @@ pub fn init_session_tables(conn: &Connection) -> SqliteResult<()> {
 
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_stu_session_id ON session_token_usage(session_id)",
+        [],
+    )?;
+    // Usage dashboard windows first scope by session/source, then by time.
+    // `IF NOT EXISTS` makes this a non-destructive migration for existing DBs;
+    // one composite index keeps the new read path cheap without duplicating
+    // another full-table index on this write-heavy event table.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_stu_session_created_at_id
+         ON session_token_usage(session_id, created_at, id)",
         [],
     )?;
 
@@ -497,12 +532,12 @@ mod tests {
     }
 
     fn column_exists(conn: &Connection, table_name: &str, column_name: &str) -> bool {
-        let mut statement = conn
+        let mut stmt = conn
             .prepare(&format!("PRAGMA table_info({table_name})"))
-            .expect("prepare table-info query");
-        let exists = statement
+            .expect("prepare table info");
+        let exists = stmt
             .query_map([], |row| row.get::<_, String>(1))
-            .expect("query table-info")
+            .expect("query table info")
             .filter_map(Result::ok)
             .any(|name| name == column_name);
         exists
@@ -520,6 +555,83 @@ mod tests {
         assert!(index_exists(&conn, "idx_stool_session_turn"));
         assert!(index_exists(&conn, "idx_stool_session_call"));
         assert!(index_exists(&conn, "idx_stool_session_iteration"));
+        assert!(index_exists(&conn, "idx_stu_session_created_at_id"));
+        assert!(column_exists(&conn, "session_turn_intents", "org_run_id"));
+        assert!(index_exists(
+            &conn,
+            "idx_session_turn_intents_org_run_status"
+        ));
+    }
+
+    #[test]
+    fn init_session_tables_adds_org_run_id_to_existing_turn_intents() {
+        let conn = Connection::open_in_memory().expect("open in-memory sqlite");
+        conn.execute_batch(
+            "CREATE TABLE session_turn_intents (
+                 session_id TEXT NOT NULL,
+                 turn_intent_id TEXT NOT NULL,
+                 client_message_id TEXT,
+                 source TEXT NOT NULL,
+                 status TEXT NOT NULL,
+                 created_at TEXT NOT NULL,
+                 updated_at TEXT NOT NULL,
+                 PRIMARY KEY (session_id, turn_intent_id)
+             );
+             INSERT INTO session_turn_intents (
+                 session_id, turn_intent_id, source, status, created_at, updated_at
+             ) VALUES ('legacy-session', 'legacy-intent', 'agent_org', 'queued',
+                       '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');",
+        )
+        .expect("seed legacy turn-intent schema");
+
+        init_session_tables(&conn).expect("upgrade session schema");
+
+        assert!(column_exists(&conn, "session_turn_intents", "org_run_id"));
+        let legacy_owner: Option<String> = conn
+            .query_row(
+                "SELECT org_run_id FROM session_turn_intents
+                 WHERE session_id='legacy-session' AND turn_intent_id='legacy-intent'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("legacy row remains readable");
+        assert_eq!(legacy_owner, None, "legacy ownership must not be guessed");
+    }
+
+    #[test]
+    fn init_session_tables_creates_human_session_entry_schema() {
+        let conn = Connection::open_in_memory().expect("open in-memory sqlite");
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             CREATE TABLE agent_sessions (session_id TEXT PRIMARY KEY);",
+        )
+        .expect("create canonical session parent");
+        init_session_tables(&conn).expect("init session schema");
+
+        assert!(table_exists(&conn, "human_session_entries"));
+        assert!(index_exists(&conn, "idx_human_session_entries_session"));
+
+        conn.execute("INSERT INTO agent_sessions VALUES ('humansession-1')", [])
+            .expect("insert Human session parent");
+        conn.execute(
+            "INSERT INTO human_session_entries
+             (id, session_id, body, created_at)
+             VALUES ('entry-1', 'humansession-1', 'done', 'now')",
+            [],
+        )
+        .expect("insert Human entry");
+
+        conn.execute(
+            "DELETE FROM agent_sessions WHERE session_id='humansession-1'",
+            [],
+        )
+        .expect("delete Human session parent");
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM human_session_entries", [], |row| {
+                row.get(0)
+            })
+            .expect("count cascaded rows");
+        assert_eq!(count, 0, "entries should cascade with their Human session");
     }
 
     fn trigger_exists(conn: &Connection, trigger_name: &str) -> bool {
@@ -597,51 +709,5 @@ mod tests {
 
         // Second init is a no-op (marker-gated) and must not fail.
         init_session_tables(&conn).expect("re-init session schema");
-    }
-    #[test]
-    fn init_session_tables_adds_nullable_turn_identity_columns_to_existing_turn_index() {
-        let conn = Connection::open_in_memory().expect("open in-memory sqlite");
-        // Simulate an existing sessions.db produced before the v9 turn-index
-        // contract. The migration must preserve it and expose a nullable
-        // exact runtime join key rather than forcing a synthesized value.
-        conn.execute_batch(
-            "CREATE TABLE session_turns (
-                session_id TEXT NOT NULL,
-                turn_id TEXT NOT NULL,
-                start_sequence INTEGER NOT NULL,
-                end_sequence INTEGER,
-                next_turn_id TEXT,
-                started_at TEXT NOT NULL,
-                ended_at TEXT,
-                duration_ms INTEGER,
-                user_event_ids_json TEXT NOT NULL DEFAULT '[]',
-                user_preview TEXT NOT NULL DEFAULT '',
-                event_count INTEGER NOT NULL DEFAULT 0,
-                body_event_count INTEGER NOT NULL DEFAULT 0,
-                status TEXT NOT NULL,
-                interrupted INTEGER NOT NULL DEFAULT 0,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (session_id, turn_id)
-            );",
-        )
-        .expect("create legacy session_turns table");
-
-        init_session_tables(&conn).expect("migrate legacy session schema");
-
-        assert!(column_exists(&conn, "session_turns", "turn_intent_id"));
-        assert!(column_exists(&conn, "session_turns", "execution_turn_id"));
-        for column in ["turn_intent_id", "execution_turn_id"] {
-            let is_nullable: i64 = conn
-                .query_row(
-                    r#"SELECT "notnull" FROM pragma_table_info('session_turns') WHERE name = ?1"#,
-                    [column],
-                    |row| row.get(0),
-                )
-                .expect("read turn identity nullability");
-            assert_eq!(
-                is_nullable, 0,
-                "{column} must remain nullable for legacy rows"
-            );
-        }
     }
 }

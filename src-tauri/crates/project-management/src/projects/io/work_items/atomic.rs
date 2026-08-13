@@ -22,6 +22,31 @@ use super::extras::{ExtrasPayload, FieldRevision, REVISION_SOURCE_LOCAL};
 use super::history::{append_mutation_event, WorkItemHistorySnapshot};
 use crate::projects::types::{WorkItemData, WorkItemFrontmatter, WorkItemPartialUpdate};
 
+#[derive(Debug, Clone, Copy)]
+enum AtomicWorkItemScope<'a> {
+    Project(&'a str),
+    Standalone { org_id: &'a str },
+}
+
+/// Work-service options threaded into the atomic RMW choke point
+/// (`orgtrack/v1` Phase 2a). Legacy callers use `Default` — no OCC
+/// precondition, flag-only FSM validation, generic `work.patch` audit
+/// label. The application service (`crate::work_service`) passes explicit
+/// options for strict transitions.
+#[derive(Default)]
+pub struct AtomicServiceOptions {
+    /// Optimistic concurrency: reject with `PM_ERR:REVISION_CONFLICT`
+    /// when the row's `local_version` differs before the mutator runs.
+    pub expected_local_version: Option<i64>,
+    /// Canonical operation label for the audit event (default `work.patch`).
+    pub operation: Option<&'static str>,
+    /// Reject portable-FSM violations instead of recording them as
+    /// flagged audit metadata.
+    pub strict_fsm: bool,
+    /// Human-supplied reason (transition/reopen/release), audited.
+    pub reason: Option<String>,
+}
+
 /// Sync-relevant fields whose mutations are tracked in
 /// `workitem_extras.field_revisions`. The names match
 /// [`crate::sync::adapter::EntityField::as_local_name`]
@@ -77,8 +102,30 @@ pub fn update_work_item_atomic<T, F>(
 where
     F: FnOnce(&mut WorkItemFrontmatter, &mut String) -> Result<T, String>,
 {
-    let (value, changed_fields, payload_tail_changed) =
-        update_work_item_atomic_with_revisions(project_slug, short_id, HashMap::new(), mutator)?;
+    update_work_item_atomic_as(project_slug, short_id, None, mutator)
+}
+
+/// Actor-attributed variant of [`update_work_item_atomic`].
+///
+/// This preserves the same outbox/payload-tail behavior while allowing
+/// domain commands such as handoff acceptance to write an auditable history
+/// event without duplicating the transaction or sync logic.
+pub fn update_work_item_atomic_as<T, F>(
+    project_slug: &str,
+    short_id: &str,
+    actor: Option<&crate::projects::types::WorkItemMutationActor>,
+    mutator: F,
+) -> Result<T, String>
+where
+    F: FnOnce(&mut WorkItemFrontmatter, &mut String) -> Result<T, String>,
+{
+    let (value, changed_fields, payload_tail_changed) = update_work_item_atomic_with_revisions(
+        project_slug,
+        short_id,
+        HashMap::new(),
+        actor,
+        mutator,
+    )?;
     if !changed_fields.is_empty() {
         // Re-read the work item to build the outbox payload. The read
         // is one extra round trip but keeps the closure-form API
@@ -135,6 +182,145 @@ pub fn update_work_item_atomic_with_revisions<T, F>(
     project_slug: &str,
     short_id: &str,
     override_revisions: HashMap<String, FieldRevision>,
+    actor: Option<&crate::projects::types::WorkItemMutationActor>,
+    mutator: F,
+) -> Result<(T, Vec<&'static str>, bool), String>
+where
+    F: FnOnce(&mut WorkItemFrontmatter, &mut String) -> Result<T, String>,
+{
+    update_work_item_atomic_with_revisions_scoped(
+        AtomicWorkItemScope::Project(project_slug),
+        short_id,
+        override_revisions,
+        actor,
+        AtomicServiceOptions::default(),
+        mutator,
+    )
+}
+
+/// Application-service entry: same transactional semantics as
+/// [`update_work_item_atomic_as`] (outbox emission included) plus the
+/// service options — OCC precondition, strict FSM, audit label/reason.
+pub fn update_work_item_atomic_serviced<T, F>(
+    project_slug: &str,
+    short_id: &str,
+    actor: Option<&crate::projects::types::WorkItemMutationActor>,
+    service: AtomicServiceOptions,
+    mutator: F,
+) -> Result<T, String>
+where
+    F: FnOnce(&mut WorkItemFrontmatter, &mut String) -> Result<T, String>,
+{
+    let (value, changed_fields, payload_tail_changed) =
+        update_work_item_atomic_with_revisions_scoped(
+            AtomicWorkItemScope::Project(project_slug),
+            short_id,
+            HashMap::new(),
+            actor,
+            service,
+            mutator,
+        )?;
+    if !changed_fields.is_empty() {
+        let data = super::crud::read_work_item(project_slug, short_id)?;
+        let payload = changed_fields_payload(&data, &changed_fields);
+        crate::sync::io::record_local_update(project_slug, short_id, &changed_fields, &payload)?;
+    } else if payload_tail_changed {
+        crate::sync::collab_bridge::record_work_item_payload_touch(project_slug, short_id)?;
+    }
+    Ok(value)
+}
+
+/// Closure-form atomic RMW for a standalone (org-scoped) work item —
+/// the standalone counterpart to [`update_work_item_atomic`]. Shares the
+/// same `BEGIN IMMEDIATE` boundary, history writer, audit + watermark
+/// emission, and collab-bridge push as the partial-update path, so
+/// callers stop doing client-side read-modify-write + whole-row writes
+/// (the lost-update race).
+pub fn update_standalone_work_item_atomic<T, F>(
+    org_id: Option<&str>,
+    short_id: &str,
+    mutator: F,
+) -> Result<T, String>
+where
+    F: FnOnce(&mut WorkItemFrontmatter, &mut String) -> Result<T, String>,
+{
+    update_standalone_work_item_atomic_by(org_id, None, short_id, mutator)
+}
+
+pub fn update_standalone_work_item_atomic_by<T, F>(
+    org_id: Option<&str>,
+    actor: Option<&crate::projects::types::WorkItemMutationActor>,
+    short_id: &str,
+    mutator: F,
+) -> Result<T, String>
+where
+    F: FnOnce(&mut WorkItemFrontmatter, &mut String) -> Result<T, String>,
+{
+    update_standalone_work_item_atomic_serviced(
+        org_id,
+        actor,
+        AtomicServiceOptions::default(),
+        short_id,
+        mutator,
+    )
+}
+
+/// Standalone counterpart of [`update_work_item_atomic_serviced`]: same
+/// atomic RMW, but the caller stamps the canonical audit operation
+/// (e.g. `work.note`) instead of the default `work.patch`.
+pub fn update_standalone_work_item_atomic_serviced<T, F>(
+    org_id: Option<&str>,
+    actor: Option<&crate::projects::types::WorkItemMutationActor>,
+    service: AtomicServiceOptions,
+    short_id: &str,
+    mutator: F,
+) -> Result<T, String>
+where
+    F: FnOnce(&mut WorkItemFrontmatter, &mut String) -> Result<T, String>,
+{
+    let org_id = org_id.unwrap_or("personal-org");
+    let (value, changed_fields, payload_tail_changed) =
+        update_standalone_work_item_atomic_as(org_id, short_id, actor, service, |fm, body| {
+            mutator(fm, body)
+        })?;
+    if !changed_fields.is_empty() || payload_tail_changed {
+        let data = super::crud::read_standalone_work_item(Some(org_id), short_id)?;
+        crate::sync::collab_bridge::record_work_item_write(
+            org_id,
+            None,
+            &data.frontmatter.id,
+            data.frontmatter.deleted_at.is_some(),
+        )?;
+    }
+    Ok(value)
+}
+
+pub(super) fn update_standalone_work_item_atomic_as<T, F>(
+    org_id: &str,
+    short_id: &str,
+    actor: Option<&crate::projects::types::WorkItemMutationActor>,
+    service: AtomicServiceOptions,
+    mutator: F,
+) -> Result<(T, Vec<&'static str>, bool), String>
+where
+    F: FnOnce(&mut WorkItemFrontmatter, &mut String) -> Result<T, String>,
+{
+    update_work_item_atomic_with_revisions_scoped(
+        AtomicWorkItemScope::Standalone { org_id },
+        short_id,
+        HashMap::new(),
+        actor,
+        service,
+        mutator,
+    )
+}
+
+fn update_work_item_atomic_with_revisions_scoped<T, F>(
+    scope: AtomicWorkItemScope<'_>,
+    short_id: &str,
+    override_revisions: HashMap<String, FieldRevision>,
+    actor: Option<&crate::projects::types::WorkItemMutationActor>,
+    service: AtomicServiceOptions,
     mutator: F,
 ) -> Result<(T, Vec<&'static str>, bool), String>
 where
@@ -143,49 +329,84 @@ where
     let mut connection = conn()?;
     let tx = map_db(connection.transaction_with_behavior(TransactionBehavior::Immediate))?;
 
-    let project_id: String = map_db(
-        tx.query_row(
-            "SELECT id FROM projects WHERE slug = ?1",
-            params![project_slug],
-            |row| row.get(0),
-        )
-        .optional(),
-    )?
-    .ok_or_else(|| format!("Project '{}' not found", project_slug))?;
+    let project_id = match scope {
+        AtomicWorkItemScope::Project(project_slug) => Some(
+            map_db(
+                tx.query_row(
+                    "SELECT id FROM projects WHERE slug = ?1",
+                    params![project_slug],
+                    |row| row.get(0),
+                )
+                .optional(),
+            )?
+            .ok_or_else(|| format!("Project '{}' not found", project_slug))?,
+        ),
+        AtomicWorkItemScope::Standalone { .. } => None,
+    };
 
-    let core = map_db(
-        tx.query_row(
-            "SELECT id, short_id, title, body, status, priority, assignee, assignee_type,
-                    milestone, parent, start_date, target_date, created_at, updated_at,
-                    deleted_at, local_version, org_id
-             FROM workitems
-             WHERE project_id = ?1 AND short_id = ?2",
-            params![&project_id, short_id],
-            |row| {
-                Ok(AtomicCore {
-                    work_item_id: row.get::<_, String>(0)?,
-                    short_id: row.get::<_, String>(1)?,
-                    title: row.get::<_, String>(2)?,
-                    body: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                    status: row.get::<_, String>(4)?,
-                    priority: row.get::<_, String>(5)?,
-                    assignee: row.get::<_, Option<String>>(6)?,
-                    assignee_type: row.get::<_, Option<String>>(7)?,
-                    milestone: row.get::<_, Option<String>>(8)?,
-                    parent: row.get::<_, Option<String>>(9)?,
-                    start_date: row.get::<_, Option<String>>(10)?,
-                    target_date: row.get::<_, Option<String>>(11)?,
-                    created_at_ms: row.get::<_, i64>(12)?,
-                    updated_at_ms: row.get::<_, i64>(13)?,
-                    deleted_at_ms: row.get::<_, Option<i64>>(14)?,
-                    local_version: row.get::<_, i64>(15)?,
-                    org_id: row.get::<_, String>(16)?,
-                })
-            },
-        )
-        .optional(),
-    )?
+    let map_core = |row: &rusqlite::Row<'_>| {
+        Ok(AtomicCore {
+            work_item_id: row.get::<_, String>(0)?,
+            short_id: row.get::<_, String>(1)?,
+            title: row.get::<_, String>(2)?,
+            body: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            status: row.get::<_, String>(4)?,
+            priority: row.get::<_, String>(5)?,
+            assignee: row.get::<_, Option<String>>(6)?,
+            assignee_type: row.get::<_, Option<String>>(7)?,
+            milestone: row.get::<_, Option<String>>(8)?,
+            parent: row.get::<_, Option<String>>(9)?,
+            start_date: row.get::<_, Option<String>>(10)?,
+            target_date: row.get::<_, Option<String>>(11)?,
+            created_at_ms: row.get::<_, i64>(12)?,
+            updated_at_ms: row.get::<_, i64>(13)?,
+            deleted_at_ms: row.get::<_, Option<i64>>(14)?,
+            local_version: row.get::<_, i64>(15)?,
+            org_id: row.get::<_, String>(16)?,
+        })
+    };
+    let core = match scope {
+        AtomicWorkItemScope::Project(_) => map_db(
+            tx.query_row(
+                "SELECT id, short_id, title, body, status, priority, assignee, assignee_type,
+                        milestone, parent, start_date, target_date, created_at, updated_at,
+                        deleted_at, local_version, org_id
+                 FROM workitems
+                 WHERE project_id = ?1 AND short_id = ?2",
+                params![project_id.as_ref().expect("project scope id"), short_id],
+                map_core,
+            )
+            .optional(),
+        )?,
+        AtomicWorkItemScope::Standalone { org_id } => map_db(
+            tx.query_row(
+                "SELECT id, short_id, title, body, status, priority, assignee, assignee_type,
+                        milestone, parent, start_date, target_date, created_at, updated_at,
+                        deleted_at, local_version, org_id
+                 FROM workitems
+                 WHERE org_id = ?1 AND project_id IS NULL AND short_id = ?2",
+                params![org_id, short_id],
+                map_core,
+            )
+            .optional(),
+        )?,
+    }
     .ok_or_else(|| format!("Work item '{}' not found", short_id))?;
+
+    // OCC precondition (service callers only): the caller read revision N
+    // and asked to mutate iff the row is still at N. Checked inside the
+    // IMMEDIATE tx, so a concurrent writer either committed before us
+    // (mismatch -> conflict) or queues behind us.
+    if let Some(expected) = service.expected_local_version {
+        if expected != core.local_version {
+            return Err(format!(
+                "{}:{}:{}",
+                crate::work_service::error::REVISION_CONFLICT,
+                expected,
+                core.local_version
+            ));
+        }
+    }
 
     // Read labels + extras inside the same tx so the snapshot is
     // strictly consistent with the row we just locked.
@@ -221,7 +442,7 @@ where
         None => ExtrasPayload::default(),
     };
 
-    let mut frontmatter = build_frontmatter(Some(project_id.clone()), &core, labels, &extras);
+    let mut frontmatter = build_frontmatter(project_id.clone(), &core, labels, &extras);
     let mut body = core.body.clone();
 
     // Snapshot every sync-tracked field's pre-mutation value so we can
@@ -231,11 +452,57 @@ where
     let before = SyncFieldSnapshot::capture(&frontmatter, &body);
     let history_before = WorkItemHistorySnapshot::capture(&frontmatter, &body);
     let tail_before = payload_tail_fingerprint(&frontmatter);
+    let scheduler_before = (
+        frontmatter.status.clone(),
+        frontmatter.start_date.clone(),
+        frontmatter.schedule.clone(),
+        frontmatter
+            .orchestrator_config
+            .as_ref()
+            .and_then(|config| config.selected_account_id.clone()),
+    );
 
     let result = mutator(&mut frontmatter, &mut body)?;
 
+    // Portable-FSM validation on status changes (design §9.3). Strict
+    // callers (the application service) get a hard reject; legacy paths
+    // run flag-only so current UI flows keep working while the violation
+    // is still visible in the audit stream.
+    let status_changed = core.status != frontmatter.status;
+    let mut fsm_violation: Option<String> = None;
+    if status_changed {
+        if let Err(violation) = crate::work_service::state::validate_legacy_transition(
+            &core.status,
+            &frontmatter.status,
+        ) {
+            if service.strict_fsm {
+                return Err(crate::work_service::error::invalid_transition(
+                    &core.status,
+                    &frontmatter.status,
+                ));
+            }
+            fsm_violation = Some(violation);
+        }
+    }
+
     let changed_fields = before.diff(&frontmatter, &body);
+    let assignment_changed =
+        core.assignee != frontmatter.assignee || core.assignee_type != frontmatter.assignee_type;
+    let assigned_human_id = human_assignee_id(
+        frontmatter.assignee.as_deref(),
+        frontmatter.assignee_type.as_deref(),
+    );
     let payload_tail_changed = payload_tail_fingerprint(&frontmatter) != tail_before;
+    let scheduler_changed = scheduler_before
+        != (
+            frontmatter.status.clone(),
+            frontmatter.start_date.clone(),
+            frontmatter.schedule.clone(),
+            frontmatter
+                .orchestrator_config
+                .as_ref()
+                .and_then(|config| config.selected_account_id.clone()),
+        );
 
     // Persist mutated state back. Always bump `local_version` so any
     // OCC observers (sync, future readers caching by version) detect it.
@@ -260,7 +527,7 @@ where
     } else {
         core.org_id.clone()
     };
-    if next_project_id.as_deref() != Some(project_id.as_str()) {
+    if next_project_id != project_id {
         let exists_at_dest: bool = if let Some(next_project_id) = next_project_id.as_ref() {
             map_db(
                 tx.query_row(
@@ -298,16 +565,18 @@ where
             priority      = ?4,
             assignee      = ?5,
             assignee_type = ?6,
-            milestone     = ?7,
-            parent        = ?8,
-            start_date    = ?9,
-            target_date   = ?10,
-            org_id        = ?11,
-            project_id    = ?12,
-            created_at    = ?13,
-            updated_at    = ?14,
-            local_version = ?15
-         WHERE id = ?16",
+            assigned_human_id = ?7,
+            milestone     = ?8,
+            parent        = ?9,
+            start_date    = ?10,
+            target_date   = ?11,
+            org_id        = ?12,
+            project_id    = ?13,
+            created_at    = ?14,
+            updated_at    = ?15,
+            local_version = ?16,
+            deleted_at    = ?18
+         WHERE id = ?17",
         params![
             frontmatter.title,
             body,
@@ -315,6 +584,7 @@ where
             frontmatter.priority,
             frontmatter.assignee,
             frontmatter.assignee_type,
+            assigned_human_id,
             frontmatter.milestone,
             frontmatter.parent,
             frontmatter.start_date,
@@ -325,8 +595,23 @@ where
             now,
             next_version,
             &core.work_item_id,
+            frontmatter
+                .deleted_at
+                .as_deref()
+                .map(crate::projects::io::helpers::from_iso8601),
         ],
     ))?;
+
+    if assignment_changed {
+        // A receipt acknowledges one assignment episode, not the Work Item for
+        // all time. Clear every viewer's old episode in the same transaction as
+        // the assignee write so reassignment can never commit half-way.
+        map_db(tx.execute(
+            "DELETE FROM team_inbox_read_receipts
+              WHERE source_kind = 'work_item_assigned' AND source_id = ?1",
+            params![&core.work_item_id],
+        ))?;
+    }
 
     // Replace label set.
     map_db(tx.execute(
@@ -353,7 +638,13 @@ where
     //   revision, regardless of whether the value diffed. This is
     //   what lets the merge cycle pin watermarks for fields where the
     //   resolver-adopted value happens to equal the pre-mutator value.
-    append_mutation_event(&history_before, &mut frontmatter, &body, &to_iso8601(now));
+    append_mutation_event(
+        &history_before,
+        &mut frontmatter,
+        &body,
+        &to_iso8601(now),
+        actor,
+    );
 
     let mut next_extras = ExtrasPayload::from_frontmatter(&frontmatter);
     next_extras.field_revisions = extras.field_revisions.clone();
@@ -384,7 +675,71 @@ where
         params![&core.work_item_id, next_extras_json],
     ))?;
 
+    // Audit + cross-process watermark, same transaction as the mutation
+    // (frozen persistence invariant, design §19). Every RMW path funnels
+    // through here, so UI patches, agent tools, sync merges and the
+    // future CLI are all audited without per-caller wiring.
+    let seq = crate::work_service::audit::bump_change_seq(&tx)?;
+    let mut audit_payload = serde_json::json!({
+        "changed_fields": changed_fields,
+    });
+    if status_changed {
+        audit_payload["status_from"] = serde_json::Value::String(core.status.clone());
+        audit_payload["status_to"] = serde_json::Value::String(frontmatter.status.clone());
+    }
+    if let Some(violation) = &fsm_violation {
+        audit_payload["fsm_violation"] = serde_json::Value::String(violation.clone());
+    }
+    if let Some(reason) = &service.reason {
+        audit_payload["reason"] = serde_json::Value::String(reason.clone());
+    }
+    crate::work_service::audit::append_audit_event(
+        &tx,
+        &crate::work_service::audit::AuditEventRow {
+            operation: service.operation.unwrap_or("work.patch"),
+            entity_type: "work_item",
+            entity_id: &core.work_item_id,
+            project_slug: match scope {
+                AtomicWorkItemScope::Project(slug) => Some(slug),
+                AtomicWorkItemScope::Standalone { .. } => None,
+            },
+            org_id: Some(&next_org_id),
+            actor,
+            revision: next_version,
+            seq,
+            payload: audit_payload,
+        },
+    )?;
+
     map_db(tx.commit())?;
+    if scheduler_changed {
+        crate::projects::events::notify_work_item_schedule_changed();
+    }
+    if status_changed {
+        use crate::work_service::state::{map_legacy_status, WorkItemState};
+        let was_terminal = matches!(
+            map_legacy_status(&core.status),
+            Some(WorkItemState::Completed | WorkItemState::Failed | WorkItemState::Cancelled)
+        );
+        let is_terminal = matches!(
+            map_legacy_status(&frontmatter.status),
+            Some(WorkItemState::Completed | WorkItemState::Failed | WorkItemState::Cancelled)
+        );
+        if is_terminal && !was_terminal {
+            crate::projects::events::notify_work_item_terminal(
+                crate::projects::events::WorkItemTerminalEvent {
+                    org_id: next_org_id.clone(),
+                    project_slug: match scope {
+                        AtomicWorkItemScope::Project(slug) => Some(slug.to_string()),
+                        AtomicWorkItemScope::Standalone { .. } => None,
+                    },
+                    short_id: core.short_id.clone(),
+                    parent: frontmatter.parent.clone(),
+                    status: frontmatter.status.clone(),
+                },
+            );
+        }
+    }
     Ok((result, changed_fields, payload_tail_changed))
 }
 
@@ -399,11 +754,14 @@ fn payload_tail_fingerprint(fm: &WorkItemFrontmatter) -> serde_json::Value {
     serde_json::json!({
         "project": fm.project,
         "parent": fm.parent,
+        "stage": fm.stage,
         "assignee_type": fm.assignee_type,
         "starred": fm.starred,
         "created_by": fm.created_by,
+        "origin_session": fm.origin_session,
         "todos": fm.todos,
         "comments": fm.comments,
+        "handoff": fm.handoff,
         "linked_sessions": fm.linked_sessions,
         "proof_of_work": fm.proof_of_work,
         "orchestrator_config": fm.orchestrator_config,
@@ -444,11 +802,42 @@ pub fn update_work_item_partial(
     Ok(data)
 }
 
+/// Standalone-org counterpart to [`update_work_item_partial`].
+///
+/// The mutation shares the same `BEGIN IMMEDIATE` boundary, history writer,
+/// assignment-receipt reset, and field-revision logic as project-scoped work
+/// items. A single collaboration outbox write is emitted after commit so
+/// teammates receive status, priority, assignment, todo, and comment changes
+/// without a frontend read-modify-write race.
+pub fn update_standalone_work_item_partial(
+    org_id: Option<&str>,
+    short_id: &str,
+    updates: &WorkItemPartialUpdate,
+) -> Result<WorkItemData, String> {
+    let org_id = org_id.unwrap_or("personal-org");
+    let (data, changed_fields, payload_tail_changed) = update_work_item_partial_scoped(
+        AtomicWorkItemScope::Standalone { org_id },
+        short_id,
+        HashMap::new(),
+        updates,
+    )?;
+    if !changed_fields.is_empty() || payload_tail_changed {
+        crate::sync::collab_bridge::record_work_item_write(
+            org_id,
+            None,
+            &data.frontmatter.id,
+            data.frontmatter.deleted_at.is_some(),
+        )?;
+    }
+    Ok(data)
+}
+
 /// True when the patch touches any field that lives only in the server
 /// payload jsonb (outside the sync-tracked field set).
 fn touches_payload_tail(updates: &WorkItemPartialUpdate) -> bool {
     updates.todos.is_some()
         || updates.comments.is_some()
+        || updates.handoff.is_some()
         || updates.linked_sessions.is_some()
         || updates.orchestrator_config.is_some()
         || updates.orchestrator_state.is_some()
@@ -460,6 +849,7 @@ fn touches_payload_tail(updates: &WorkItemPartialUpdate) -> bool {
         || updates.assignee_type.is_some()
         || updates.project.is_some()
         || updates.created_by.is_some()
+        || updates.stage.is_some()
 }
 
 /// Build the JSON payload that gets persisted to
@@ -525,10 +915,47 @@ pub fn update_work_item_partial_with_revisions(
     override_revisions: HashMap<String, FieldRevision>,
     updates: &WorkItemPartialUpdate,
 ) -> Result<(WorkItemData, Vec<&'static str>), String> {
-    let (data, changed_fields, _payload_tail_changed) = update_work_item_atomic_with_revisions(
-        project_slug,
+    let (data, changed_fields, _payload_tail_changed) = update_work_item_partial_scoped(
+        AtomicWorkItemScope::Project(project_slug),
         short_id,
         override_revisions,
+        updates,
+    )?;
+    Ok((data, changed_fields))
+}
+
+/// Standalone-org merge-cycle counterpart to
+/// [`update_work_item_partial_with_revisions`].
+///
+/// This intentionally emits no outbox row: the caller is applying an inbound
+/// remote snapshot and must not echo it back to the collaboration service.
+pub(crate) fn update_standalone_work_item_partial_with_revisions(
+    org_id: &str,
+    short_id: &str,
+    override_revisions: HashMap<String, FieldRevision>,
+    updates: &WorkItemPartialUpdate,
+) -> Result<(WorkItemData, Vec<&'static str>), String> {
+    let (data, changed_fields, _payload_tail_changed) = update_work_item_partial_scoped(
+        AtomicWorkItemScope::Standalone { org_id },
+        short_id,
+        override_revisions,
+        updates,
+    )?;
+    Ok((data, changed_fields))
+}
+
+fn update_work_item_partial_scoped(
+    scope: AtomicWorkItemScope<'_>,
+    short_id: &str,
+    override_revisions: HashMap<String, FieldRevision>,
+    updates: &WorkItemPartialUpdate,
+) -> Result<(WorkItemData, Vec<&'static str>, bool), String> {
+    update_work_item_atomic_with_revisions_scoped(
+        scope,
+        short_id,
+        override_revisions,
+        updates.actor.as_ref(),
+        AtomicServiceOptions::default(),
         |fm, body| {
             let now_iso = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
@@ -562,6 +989,9 @@ pub fn update_work_item_partial_with_revisions(
             if let Some(milestone) = updates.milestone.as_ref() {
                 fm.milestone = milestone.clone();
             }
+            if let Some(stage) = updates.stage.as_ref() {
+                fm.stage = *stage;
+            }
             if let Some(start_date) = updates.start_date.as_ref() {
                 fm.start_date = start_date.clone();
             }
@@ -576,6 +1006,9 @@ pub fn update_work_item_partial_with_revisions(
             }
             if let Some(comments) = updates.comments.as_ref() {
                 fm.comments = comments.clone();
+            }
+            if let Some(handoff) = updates.handoff.as_ref() {
+                fm.handoff = handoff.clone();
             }
             if let Some(linked_sessions) = updates.linked_sessions.as_ref() {
                 fm.linked_sessions = linked_sessions.clone();
@@ -607,8 +1040,7 @@ pub fn update_work_item_partial_with_revisions(
                 filename: short_id.to_string(),
             })
         },
-    )?;
-    Ok((data, changed_fields))
+    )
 }
 
 // ---------------------------------------------------------------------
@@ -697,6 +1129,19 @@ fn slices_equal_unordered(left: &[String], right: &[String]) -> bool {
     left_sorted == right_sorted
 }
 
+fn human_assignee_id(assignee: Option<&str>, assignee_type: Option<&str>) -> Option<String> {
+    let assignee = assignee?.trim();
+    if assignee.is_empty() {
+        return None;
+    }
+    let is_human = assignee_type
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.eq_ignore_ascii_case("member") || value.eq_ignore_ascii_case("human"))
+        .unwrap_or(true);
+    is_human.then(|| assignee.to_string())
+}
+
 struct AtomicCore {
     work_item_id: String,
     short_id: String,
@@ -750,9 +1195,11 @@ fn build_frontmatter(
         labels,
         milestone: core.milestone.clone(),
         parent: core.parent.clone(),
+        stage: extras.stage,
         start_date: core.start_date.clone(),
         target_date: core.target_date.clone(),
         created_by: extras.created_by.clone(),
+        origin_session: extras.origin_session.clone(),
         created_at: to_iso8601(core.created_at_ms),
         updated_at: to_iso8601(core.updated_at_ms),
         deleted_at: core.deleted_at_ms.map(to_iso8601),
@@ -761,6 +1208,7 @@ fn build_frontmatter(
         comments: extras.comments.clone(),
         history: extras.history.clone(),
         delegations: extras.delegations.clone(),
+        handoff: extras.handoff.clone(),
         linked_sessions: extras.linked_sessions.clone(),
         proof_of_work: extras.proof_of_work.clone(),
         orchestrator_config: extras.orchestrator_config.clone(),

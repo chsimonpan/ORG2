@@ -37,16 +37,25 @@ describe("imported history source helpers", () => {
     expect(isImportedHistoryReplayableSourceId("codex_app")).toBe(true);
     expect(isImportedHistoryReplayableSourceId("claude_code")).toBe(true);
     expect(isImportedHistoryReplayableSourceId("warp")).toBe(true);
-    expect(isImportedHistoryReplayableSourceId("qwen_code")).toBe(false);
+    expect(isImportedHistoryReplayableSourceId("mimo_code")).toBe(true);
+    expect(isImportedHistoryReplayableSourceId("omp")).toBe(true);
+    expect(isImportedHistoryReplayableSourceId("pi")).toBe(true);
+    expect(isImportedHistoryReplayableSourceId("qoder_cli")).toBe(true);
+    expect(isImportedHistoryReplayableSourceId("qwen_code")).toBe(true);
+    expect(isImportedHistoryReplayableSourceId("copilot")).toBe(true);
+    expect(isImportedHistoryReplayableSourceId("kimi")).toBe(true);
     expect(isImportedHistoryReplayableSourceId(null)).toBe(false);
   });
 
   it("filters detected external CLIs without replay support", () => {
     const filtered = getDetectedExternalCliSourcesWithoutReplay([
       probe("codex_app", true),
-      probe("qwen_code"),
+      probe("pi", true),
+      probe("qwen_code", true),
+      probe("copilot", true),
+      probe("unsupported_cli"),
     ]);
 
-    expect(filtered.map((item) => item.sourceId)).toEqual(["qwen_code"]);
+    expect(filtered.map((item) => item.sourceId)).toEqual(["unsupported_cli"]);
   });
 });

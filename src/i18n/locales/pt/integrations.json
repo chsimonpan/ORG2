@@ -1742,7 +1742,9 @@
           "rename": "Renomear",
           "search": "Pesquisar"
         }
-      }
+      },
+      "liveStatusToggle": "Status do agente em tempo real",
+      "liveStatusToggleDesc": "Mostra se os agentes de CLI estão trabalhando ou aguardando. Desativar mantém a captura de proveniência."
     },
     "codexConfig": {
       "sectionTitle": "Configuração",

@@ -3,15 +3,13 @@ import { gitPush } from "@src/api/http/git/operations";
 import { getGitRemotes } from "@src/api/http/git/remotes";
 import { createPRLocal } from "@src/api/tauri/github";
 import { createLogger } from "@src/hooks/logger";
+import { announceBranchRemoteMutation } from "@src/util/git/branchRemoteMutation";
+import { parseRepoFullNameFromRemote } from "@src/util/git/githubRemote";
 
 const logger = createLogger("createPullRequest");
 
 export function parseGithubRepoFullName(remoteUrl: string): string | null {
-  const sshMatch = remoteUrl.match(/git@[^:]+:(.+?)(?:\.git)?$/);
-  if (sshMatch) return sshMatch[1];
-  const httpsMatch = remoteUrl.match(/https?:\/\/[^/]+\/(.+?)(?:\.git)?$/);
-  if (httpsMatch) return httpsMatch[1];
-  return null;
+  return parseRepoFullNameFromRemote(remoteUrl);
 }
 
 export interface CreatePullRequestParams {
@@ -84,6 +82,13 @@ export async function createPullRequest(
       branch,
       baseBranch
     );
+
+    announceBranchRemoteMutation({
+      repoId,
+      repoPath,
+      branchName: branch,
+      reason: "pull-request-created",
+    });
 
     return { url: prResponse.url };
   } catch (error) {

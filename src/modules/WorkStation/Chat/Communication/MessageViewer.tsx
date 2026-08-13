@@ -1,4 +1,3 @@
-import { useAtomValue } from "jotai";
 import { ChevronsUpDown } from "lucide-react";
 import React, {
   useCallback,
@@ -10,16 +9,15 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { AgentOrgRunMemberView } from "@src/api/tauri/agent";
+import type { AgentOrgRunMemberView, AgentOrgTask } from "@src/api/tauri/agent";
 import Button from "@src/components/Button";
-import { streamingDeltaContentAtom } from "@src/engines/SessionCore/core/atoms";
+import { useStreamingDeltaForSession } from "@src/engines/SessionCore";
 import {
   derivePlanApprovalViewState,
   isPlanDisplayEvent,
 } from "@src/engines/SessionCore/derived/planDisplayEvents";
+import { usePendingPlanApproval } from "@src/hooks/session/usePendingPlanApproval";
 import type { SessionReplayPlaceholderMode } from "@src/modules/WorkStation/shared";
-import { pendingPlanApprovalsAtom } from "@src/store/session/planApprovalAtom";
-import { focusJourneyMessage } from "@src/modules/WorkStation/Chat/Journey/journeyMessageJump";
 
 import { isEmailBubbleEvent } from "./EmailMessageBubble";
 import { EmptyState } from "./EmptyState";
@@ -114,6 +112,8 @@ export interface MessageViewerProps {
    * view); bubbles fall back to a generic "Agent" label in that case.
    */
   orgMembers?: ReadonlyArray<AgentOrgRunMemberView>;
+  /** Durable task snapshot for Agent Org sessions. Undefined for ordinary sessions. */
+  agentOrgTasks?: ReadonlyArray<AgentOrgTask>;
 }
 
 export const MessageViewer: React.FC<MessageViewerProps> = ({
@@ -130,12 +130,12 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
   currentEventId,
   setViewMode,
   orgMembers,
+  agentOrgTasks,
 }) => {
   const handleNavigateToTodoList = useCallback(() => {
     setViewMode?.("todo");
   }, [setViewMode]);
   const { t } = useTranslation(["common", "sessions"]);
-  const approvalMap = useAtomValue(pendingPlanApprovalsAtom);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const loadMoreScrollAnchorRef = useRef<{
     scrollTop: number;
@@ -166,33 +166,14 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
   const canLoadMoreMessages = hiddenMessageCount > 0;
   const totalVisibleMessages = visibleMessages.length;
   const showNewMessageDivider = viewMode === "chat" && totalVisibleMessages > 0;
-  const streamingMap = useAtomValue(streamingDeltaContentAtom);
   const latestVisibleMessage = visibleMessages[visibleMessages.length - 1];
-  const latestLiveDelta =
+  const latestLiveDelta = useStreamingDeltaForSession(
     latestVisibleMessage?.event.args?.syntheticLive === true
-      ? streamingMap.get(latestVisibleMessage.event.sessionId)
-      : undefined;
+      ? latestVisibleMessage.event.sessionId
+      : null
+  );
   const liveContentLength =
     latestLiveDelta?.kind === "message" ? latestLiveDelta.content.length : 0;
-
-  const journeyTargetId = selectedMessage?.eventId ?? null;
-
-  useEffect(() => {
-    if (!journeyTargetId) return;
-    const targetIndex = messages.findIndex(
-      (message) => message.eventId === journeyTargetId
-    );
-    if (targetIndex >= 0) {
-      setMessageWindow((current) =>
-        current.key === replayWindowKey &&
-        current.count >= messages.length - targetIndex
-          ? current
-          : { key: replayWindowKey, count: messages.length - targetIndex }
-      );
-    }
-    const frame = window.requestAnimationFrame(() => focusJourneyMessage(journeyTargetId));
-    return () => window.cancelAnimationFrame(frame);
-  }, [journeyTargetId, messages, replayWindowKey, renderedMessageCount]);
 
   const handleLoadMoreMessages = useCallback(() => {
     const scrollContainer = scrollContainerRef.current;
@@ -255,7 +236,21 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
     return null;
   }, [messages, viewMode]);
 
-  if (messages.length === 0) {
+  const selectedPlanMessage =
+    viewMode === "preview" && previewSelectedPlan && selectedMessage?.event
+      ? isPlanDisplayEvent(selectedMessage.event)
+        ? selectedMessage
+        : null
+      : null;
+  const activePlanMessage =
+    controlledActivePlanMessage ?? selectedPlanMessage ?? latestPlanMessage;
+  const pendingPlan = usePendingPlanApproval(
+    activePlanMessage?.event.sessionId
+  );
+  const canRenderDurableAgentOrgBoard =
+    viewMode === "todo" && agentOrgTasks !== undefined;
+
+  if (messages.length === 0 && !canRenderDurableAgentOrgBoard) {
     return (
       <div className="allow-select-deep flex h-full min-h-0 w-full flex-col">
         <EmptyState viewMode={viewMode} sessionReplayMode={sessionReplayMode} />
@@ -266,25 +261,12 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
   if (viewMode === "todo") {
     return (
       <div className="allow-select-deep flex h-full min-h-0 w-full flex-col overflow-hidden">
-        <TodoKanban messages={messages} />
+        <TodoKanban messages={messages} agentOrgTasks={agentOrgTasks} />
       </div>
     );
   }
 
-  const selectedPlanMessage =
-    viewMode === "preview" && previewSelectedPlan && selectedMessage?.event
-      ? isPlanDisplayEvent(selectedMessage.event)
-        ? selectedMessage
-        : null
-      : null;
-
-  const activePlanMessage =
-    controlledActivePlanMessage ?? selectedPlanMessage ?? latestPlanMessage;
-
   if (viewMode === "preview" && activePlanMessage) {
-    const pendingPlan = approvalMap.get(
-      activePlanMessage.event.sessionId
-    )?.current;
     const plan = getPlanDocViewModel(activePlanMessage.event, pendingPlan);
     const statusView = getPlanDocStatusViewModel(
       activePlanMessage.event,
@@ -371,30 +353,18 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
                     })}
                   />
                 )}
-                <div
-                  data-journey-message-id={message.eventId}
-                  data-journey-highlight={
-                    message.eventId === journeyTargetId ? "true" : undefined
+                <BubbleWrapper
+                  message={message}
+                  viewMode={viewMode}
+                  index={index}
+                  total={totalVisibleMessages}
+                  onMessageClick={onMessageClick}
+                  onNavigateToTodoList={
+                    setViewMode ? handleNavigateToTodoList : undefined
                   }
-                  className={
-                    message.eventId === journeyTargetId
-                      ? "rounded outline outline-2 outline-primary-5"
-                      : undefined
-                  }
-                >
-                  <BubbleWrapper
-                    message={message}
-                    viewMode={viewMode}
-                    index={index}
-                    total={totalVisibleMessages}
-                    onMessageClick={onMessageClick}
-                    onNavigateToTodoList={
-                      setViewMode ? handleNavigateToTodoList : undefined
-                    }
-                    showChrome={showChrome}
-                    orgMembers={orgMembers}
-                  />
-                </div>
+                  showChrome={showChrome}
+                  orgMembers={orgMembers}
+                />
               </React.Fragment>
             );
           })}

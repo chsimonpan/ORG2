@@ -14,9 +14,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
 import { ROUTES } from "@src/config/routes";
-import type { CalendarEvent } from "@src/features/CalendarView";
-import type { GanttTask } from "@src/features/GanttChart";
-import type { KanbanTask, TaskStatus } from "@src/features/KanbanBoard";
+import type { TaskStatus } from "@src/features/KanbanBoard";
 import { createLogger } from "@src/hooks/logger";
 import type { ProjectData } from "@src/modules/ProjectManager/shared";
 import type {
@@ -45,6 +43,7 @@ function isWorkItemStatus(status: TaskStatus): status is WorkItemStatus {
 }
 
 interface UseWorkItemsHandlersParams {
+  projectSlug?: string | null;
   selectedWorkItemId: string | null;
   showProperties: boolean;
   propertiesWasOpenRef: MutableRefObject<boolean | null>;
@@ -85,6 +84,7 @@ interface UseWorkItemsHandlersParams {
 }
 
 export function useWorkItemsHandlers({
+  projectSlug,
   selectedWorkItemId,
   showProperties,
   propertiesWasOpenRef,
@@ -189,12 +189,16 @@ export function useWorkItemsHandlers({
         status: fileStatus,
       });
 
-      await emit("orgii-data-changed");
+      await emit("orgii-data-changed", {
+        project_slug: projectSlug ?? undefined,
+        work_item_id: workItemId ?? undefined,
+        source: "work-items-create",
+      });
       if (workItemId) {
         selectAndCollapseProperties(workItemId);
       }
     },
-    [createWorkItemApi, selectAndCollapseProperties, t]
+    [createWorkItemApi, projectSlug, selectAndCollapseProperties, t]
   );
 
   const handleAddTask = useCallback(
@@ -217,7 +221,11 @@ export function useWorkItemsHandlers({
     async (workItemId: string) => {
       const shortId = getShortId(workItemId) ?? undefined;
       await deleteWorkItemApi(workItemId, shortId);
-      await emit("orgii-data-changed");
+      await emit("orgii-data-changed", {
+        project_slug: projectSlug ?? undefined,
+        work_item_id: shortId,
+        source: "work-items-delete",
+      });
 
       if (selectedWorkItemId === workItemId) {
         setSelectedWorkItemId(null);
@@ -228,6 +236,7 @@ export function useWorkItemsHandlers({
     [
       deleteWorkItemApi,
       getShortId,
+      projectSlug,
       selectedWorkItemId,
       setSelectedWorkItemId,
       refreshWorkItems,
@@ -243,16 +252,6 @@ export function useWorkItemsHandlers({
     [getShortId, refreshWorkItems, restoreWorkItemApi]
   );
 
-  const handleKanbanTaskClick = useCallback(
-    (task: KanbanTask) => selectAndCollapseProperties(task.id),
-    [selectAndCollapseProperties]
-  );
-
-  const handleGanttTaskClick = useCallback(
-    (task: GanttTask) => selectAndCollapseProperties(task.id),
-    [selectAndCollapseProperties]
-  );
-
   const handleGanttTaskUpdate = useCallback(
     (taskId: string, updates: { startDate?: Date; endDate?: Date }) => {
       // Update work item dates when task is dragged/resized in Gantt chart
@@ -266,11 +265,6 @@ export function useWorkItemsHandlers({
       handleUpdate(taskId, dateUpdates);
     },
     [handleUpdate]
-  );
-
-  const handleCalendarEventClick = useCallback(
-    (event: CalendarEvent) => selectAndCollapseProperties(event.id),
-    [selectAndCollapseProperties]
   );
 
   const handleCloseWorkItemDetail = useCallback(() => {
@@ -300,14 +294,11 @@ export function useWorkItemsHandlers({
     handleTabChange,
     handleToggleProperties,
     handleKanbanTaskMove,
-    handleKanbanTaskClick,
     handleAddTask,
     handleAddListItem,
     handleDelete,
     handleRestore,
-    handleGanttTaskClick,
     handleGanttTaskUpdate,
-    handleCalendarEventClick,
     handleCloseWorkItemDetail,
     handleProjectUpdate,
   };

@@ -152,7 +152,7 @@ pub(super) async fn materialize_org_member_sessions(
         let rust_org_name = org_name.clone();
         let rust_model = model.clone();
         let rust_account_id = account_id.clone();
-        let rust_key_source = key_source.clone();
+        let rust_key_source = key_source;
         let rust_agent_exec_mode = agent_exec_mode.clone();
         let rust_native_harness_type = native_harness_type.clone();
         let rust_work_item_id = work_item_id.clone();
@@ -191,6 +191,12 @@ pub(super) async fn materialize_org_member_sessions(
                     updated_at: now.clone(),
                     session_type: session_type::ORG_MEMBER.to_string(),
                     work_item_id: rust_work_item_id.clone(),
+                    // Same rule as the launch resolver: a work-item-linked
+                    // session is a Project session. Members inherit it so the
+                    // PM tools aren't policy-denied for the team doing the work.
+                    product_mode: rust_work_item_id
+                        .as_ref()
+                        .map(|_| "project".to_string()),
                     agent_role: Some(member.role.clone()),
                     project_slug: rust_project_slug.clone(),
                     agent_definition_id: Some(member.agent_id.clone()),
@@ -250,6 +256,8 @@ pub(super) async fn materialize_org_member_sessions(
                 account_id: member_runtime_account_id(member_config, &account_id),
                 repo_path: Some(workspace_path.clone()).filter(|path| !path.is_empty()),
                 branch: None,
+                worktree_path: None,
+                worktree_base_ref: None,
                 hosted_token: None,
                 isolate: false,
                 worktree_path: None,
@@ -264,6 +272,8 @@ pub(super) async fn materialize_org_member_sessions(
                 project_slug: project_slug.clone(),
                 work_item_id: work_item_id.clone(),
                 agent_role: None,
+                product_mode: work_item_id.as_ref().map(|_| "project".to_string()),
+                durable_run_id: None,
                 user_input: String::new(),
                 ide_context: None,
                 mode: agent_exec_mode.clone(),
@@ -328,9 +338,12 @@ pub(super) async fn send_initial_turn(
     ide_context: Option<IdeContext>,
     agent_definition_id: Option<String>,
     sub_agent_ids: Vec<String>,
+    intent_org_run_id: Option<String>,
+    durable_run_id: Option<String>,
     source: crate::foundation::session_bridge::TurnIntentBridgeSource,
 ) -> Result<(), String> {
     if sub_agent_ids.is_empty() {
+        let client_message_id = durable_run_id.clone();
         crate::state::commands::session::message::send_message_impl(
             state,
             session_id.to_string(),
@@ -347,8 +360,10 @@ pub(super) async fn send_initial_turn(
             ide_context,
             false,
             false,
+            client_message_id,
+            durable_run_id,
             None,
-            None,
+            intent_org_run_id,
             source,
         )
         .await?;
@@ -368,6 +383,7 @@ pub(super) async fn send_initial_turn(
     .await?;
     crate::init::init_session(state, launch_spec).await?;
 
+    let client_message_id = durable_run_id.clone();
     crate::state::commands::session::message::send_message_impl(
         state,
         session_id.to_string(),
@@ -384,8 +400,10 @@ pub(super) async fn send_initial_turn(
         ide_context,
         false,
         false,
+        client_message_id,
+        durable_run_id,
         None,
-        None,
+        intent_org_run_id,
         crate::foundation::session_bridge::TurnIntentBridgeSource::AgentOrg,
     )
     .await?;

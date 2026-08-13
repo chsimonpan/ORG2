@@ -79,7 +79,7 @@
     "heading": "從 GitHub Issues 建立 Project",
     "description": "選擇一個 GitHub repo，建立 ORGII Project，並將 GitHub Issues 同步為 work items。",
     "importButton": "匯入 GitHub Issues",
-    "projectDescription": "從 {{owner}}/{{repo}} 的 GitHub Issues 同步。",
+    "projectDescription": "GitHub Issues · {{owner}}/{{repo}}",
     "fields": {
       "projectName": "Project 名稱",
       "repo": "GitHub repo",
@@ -149,18 +149,25 @@
       "overview": "概覽",
       "profile": "概覽",
       "syncMethods": "同步方式",
-      "orgNameDescription": "此專案組織的顯示名稱。",
+      "orgNameDescription": "此專案組織的顯示名稱",
       "orgKey": "組織標識",
-      "orgKeyDescription": "用於組織範圍專案 ID 的穩定短標識。",
-      "projectCountDescription": "目前歸屬此組織的原生專案數。",
+      "orgKeyDescription": "用於組織範圍專案 ID 的穩定短標識",
+      "projectCountDescription": "目前歸屬此組織的原生專案數",
       "gitFolderSync": "Git 資料夾同步",
-      "gitFolderSyncDescription": "透過 Git 工作樹鏡像此組織的專案和工作項。",
+      "gitFolderSyncDescription": "透過 Git 工作樹鏡像此組織的專案和工作項",
       "notConfigured": "未設定",
-      "syncNowDescription": "匯入遠端檔案變更並匯出本機資料庫變更。",
+      "syncNowDescription": "匯入遠端檔案變更並匯出本機資料庫變更",
       "syncSummary": "{{projects}} 個專案，{{workItems}} 個工作項，{{conflicts}} 個衝突",
-      "syncHowItWorks": "Git 資料夾同步會將此組織連接到現有 Git 倉庫。ORGII 會把該組織匯出的專案和工作項存放在倉庫內的 `.orgii/projects/...` 下，從那裡匯入檔案變更，將本機資料庫變更匯出回檔案，並在遇到衝突時暫停，等待你檢查後再覆蓋任何內容。",
+      "syncHowItWorks": "Git 資料夾同步會將此組織連接到現有 Git 倉庫。ORGII 會把該組織匯出的專案和工作項存放在倉庫內的 `.orgii/projects/...` 下，從那裡匯入檔案變更，將本機資料庫變更匯出回檔案，並在遇到衝突時暫停，等待你檢查後再覆蓋任何內容",
       "noProjectsForCatalog": "此組織還沒有專案。",
-      "noProjectsForCatalogHint": "先在此組織中建立專案，然後再管理共享成員或標籤。"
+      "noProjectsForCatalogHint": "先在此組織中建立專案，然後再管理共享標籤",
+      "dangerZone": "危險區域",
+      "deleteOrg": "刪除此組織",
+      "deleteOrgDescription": "永久刪除 {{org}} 及其所有本機專案和工作項目。此操作無法復原",
+      "personalOrgDeleteDisabled": "預設個人組織是永久的，無法刪除",
+      "deleteTypeToConfirm": "輸入 {{org}} 以確認",
+      "deleteOrgAction": "刪除組織",
+      "deletedToast": "已刪除 {{org}}"
     }
   },
   "properties": {
@@ -361,6 +368,10 @@
     },
     "activity": {
       "title": "動態",
+      "discussionTitle": "討論",
+      "activityHistory": "活動記錄",
+      "activityHistoryCount": "{{count}} 項事件",
+      "noComments": "尚無留言",
       "subscribe": "訂閱",
       "unsubscribe": "取消訂閱",
       "commentPlaceholder": "留下評論...",
@@ -382,6 +393,16 @@
       "clearedField": "清除了{{field}}",
       "changedDescription": "更新了描述",
       "editedFields": "編輯了 {{count}} 個字段:",
+      "groupedChanges": "進行了 {{count}} 項更改",
+      "groupedTodoChanges": "更新了待辦 · {{count}} 項操作",
+      "todoAdded": "新增了「{{todo}}」",
+      "todoRemoved": "刪除了「{{todo}}」",
+      "todoCompleted": "完成了「{{todo}}」",
+      "todoReopened": "重新開啟了「{{todo}}」",
+      "todoStarted": "開始了「{{todo}}」",
+      "todoMarkedPending": "將「{{todo}}」標記為待處理",
+      "todoRenamed": "將「{{from}}」重新命名為「{{to}}」",
+      "todoUpdated": "更新了「{{todo}}」",
       "justNow": "剛剛",
       "daysAgo": "{{count}}天前",
       "hoursAgo": "{{count}}小時前",
@@ -404,7 +425,8 @@
         "todos": "待辦事項",
         "comments": "評論",
         "schedule": "計劃",
-        "orchestratorConfig": "Orchestrator 配置"
+        "orchestratorConfig": "Orchestrator 配置",
+        "handoff": "工作交接"
       }
     },
     "todos": {
@@ -480,6 +502,7 @@
       "title": "Agent 工作流",
       "startAgent": "啓動 Agent",
       "startAgentAndChat": "啓動 Agent 並打開 Chat",
+      "noWorkspaceForAgent": "請先開啟一個儲存庫工作區，再對該事項啟動 agent。",
       "running": "運行中...",
       "pendingLaunch": "等待啓動...",
       "completed": "已完成",
@@ -612,7 +635,27 @@
       "cycles": "輪次"
     },
     "viewWorkItems": "查看 Work Items",
-    "fromRoutine": "来自 Routine：{{name}}"
+    "fromRoutine": "来自 Routine：{{name}}",
+    "subItems": {
+      "title": "子任務",
+      "parent": "父任務",
+      "progress": "已完成 {{completed}} / {{total}}",
+      "add": "新增子任務",
+      "addFirst": "新增第一個子任務",
+      "titlePlaceholder": "輸入子任務標題",
+      "stagePicker": "子任務階段",
+      "noStage": "無階段",
+      "stage": "階段 {{stage}}",
+      "openStatus": "未完成",
+      "completedStatus": "已完成",
+      "cancelledStatus": "已取消",
+      "createError": "無法建立子任務，請重試。"
+    },
+    "sessionRail": {
+      "notOnDeviceTitle": "會話不在此裝置",
+      "notOnDeviceHint": "該會話在其他裝置上執行，轉錄未同步到本機。",
+      "finalOutput": "最終輸出"
+    }
   },
   "settings": {
     "sidebarGeneral": "常規",
@@ -695,6 +738,11 @@
         "notAttached": "未綁定",
         "attach": "綁定",
         "detach": "解綁",
+        "detachProjectMenuLabel": "解除 GitHub 關聯",
+        "detachProjectTitle": "解除 {{project}} 與 GitHub 的關聯？",
+        "detachProjectDescription": "GitHub Issues 同步將停止。本地專案和已匯入的工作項會保留在 ORGII 中。",
+        "detachProjectAction": "解除 {{project}} 與 GitHub 的關聯",
+        "detachProjectSuccess": "已解除 {{project}} 與 GitHub 的關聯",
         "changeWarning": "在綁定新適配器前，請先解綁當前適配器。"
       },
       "accountPicker": {

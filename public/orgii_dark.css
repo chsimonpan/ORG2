@@ -97,6 +97,7 @@
 body {
   --color-bg-1: #0f0f0f;
   --color-bg-2: #141414;
+  --windows-native-chrome-opacity: 82%;
   --color-bg-3: #2a2a2b;
   --color-bg-4: #313132;
   --color-neutral-1: #f7f8fa;
@@ -111,7 +112,7 @@ body {
   --color-border-3: #5f5f60;
   --color-fill-1: #1f1f1f;
   --color-fill-2: #212121;
-  --color-fill-3: #262626;
+  --color-fill-3: #2e2e30;
   --color-fill-4: #3c3c3f;
   --sidebar-tab-pill-selected-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
 
@@ -155,18 +156,14 @@ body {
   --color-pane-input: var(--color-chat-input);
   --color-button-hover: var(--color-fill-3);
 
-  /* Main App */
-  --color-surface-container: #1a1a1a;
+  /* Shared primary surfaces */
+  --color-primary-pane-bg: var(--color-bg-2);
+  --color-primary-container: #1a1a1a;
 
   /* Chat Panel */
-  /* `--color-chat-pane-base` holds the unmixed surface color so the chat
-   * panel root can rebind `--color-chat-pane` to a `color-mix()` without
-   * a circular var reference. See orgii_main.css for the full explanation. */
-  --color-chat-pane-base: var(--color-workstation-bg);
-  --color-chat-pane: var(--color-chat-pane-base);
+  --color-chat-pane: var(--color-primary-pane-bg);
   --color-chat-container: #202020;
   --color-chat-input: #2b2b2b;
-  --color-chat-panel-info-container: var(--color-chat-input);
   --color-event-block: #181818;
   --color-event-block-fade: var(--color-event-block);
   --color-diff-add: #123a1b;
@@ -179,6 +176,17 @@ body {
   --color-primary-5: #349afd;
   --color-primary-6: #43aafd;
   --color-primary-7: #6ec2fe;
+  --color-purple-1: #271052;
+  --color-purple-2: #3c1e70;
+  --color-purple-3: #553098;
+  --color-purple-4: #6e40c9;
+  --color-purple-5: #8957e5;
+  --color-purple-6: #a371f7;
+  --color-purple-7: #bc8cff;
+  --color-merged-button-bg: #a371f7;
+  --color-merged-button-hover: #bc8cff;
+  --color-merged-button-active: #d8b9ff;
+  --color-merged-button-contrast: #0d1117;
   --color-danger-1: #4d0000;
   --color-danger-2: #6f0f0f;
   --color-danger-3: #942020;

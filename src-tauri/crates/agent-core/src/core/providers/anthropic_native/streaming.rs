@@ -36,7 +36,7 @@ impl LLMProvider for AnthropicClient {
         messages: &[Value],
         tools: Option<&[Value]>,
         model: &str,
-        max_tokens: Option<u32>,
+        max_tokens: u32,
         temperature: f32,
     ) -> Result<LLMResponse, ProviderError> {
         self.chat_with_options(
@@ -59,7 +59,7 @@ impl LLMProvider for AnthropicClient {
         messages: &[Value],
         tools: Option<&[Value]>,
         model: &str,
-        max_tokens: Option<u32>,
+        max_tokens: u32,
         temperature: f32,
         options: ChatOptions,
     ) -> Result<LLMResponse, ProviderError> {
@@ -192,7 +192,7 @@ impl LLMProvider for AnthropicClient {
         messages: &[Value],
         tools: Option<&[Value]>,
         model: &str,
-        max_tokens: Option<u32>,
+        max_tokens: u32,
         temperature: f32,
         on_delta: &(dyn Fn(StreamDelta) + Send + Sync),
         cancel_flag: Option<&std::sync::atomic::AtomicBool>,
@@ -416,9 +416,11 @@ impl LLMProvider for AnthropicClient {
 
             buffer.push_str(&String::from_utf8_lossy(&chunk));
 
-            while let Some(line_end) = buffer.find('\n') {
-                let line = buffer[..line_end].trim().to_string();
-                buffer = buffer[line_end + 1..].to_string();
+            let mut consumed = 0usize;
+            while let Some(relative_end) = buffer[consumed..].find('\n') {
+                let line_end = consumed + relative_end;
+                let line = buffer[consumed..line_end].trim();
+                consumed = line_end + 1;
 
                 if line.is_empty() || line.starts_with(':') {
                     continue;
@@ -460,6 +462,9 @@ impl LLMProvider for AnthropicClient {
                 }
             }
 
+            if consumed > 0 {
+                buffer.drain(..consumed);
+            }
             if stream_done {
                 break;
             }

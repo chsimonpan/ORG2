@@ -8,6 +8,8 @@ import type { TabDragPillPayload } from "@src/modules/WorkStation/shared/TabBar/
 
 export interface NavigationMenuRowAction {
   icon?: LucideIcon;
+  /** Optional class applied to the rendered Lucide icon (for example refresh spin). */
+  iconClassName?: string;
   label: string;
   active?: boolean;
   /** Stable rendered selector for high-value header/row actions. */
@@ -53,6 +55,12 @@ export interface NavigationMenuItem {
   /** Indents the row and draws a vertical guide line for inline child rows. */
   showIndentGuide?: boolean;
   visualTone?: "default" | "secondary";
+  /**
+   * The viewer pinned this row. Set by the row builders (local and cloud) so
+   * grouping can lift pinned rows without inferring membership from which
+   * separator happens to precede them.
+   */
+  pinned?: boolean;
   /** Show hover-only row action buttons. */
   showMoreActions?: boolean;
   rowActions?: NavigationMenuRowAction[];
@@ -65,9 +73,22 @@ export interface NavigationMenuItem {
   /** Tab type for proper tab handling */
   tabType?: "app" | "terminal" | "browser" | "editor";
   children?: NavigationMenuItem[];
+  /**
+   * For a row that has `children` (renders as an expandable parent): the row
+   * is ITSELF a navigable target, not just a group header. A body/label click
+   * selects the item (like a leaf); only the dedicated chevron toggles the
+   * submenu. Cloud fork-thread roots set this so the source session stays
+   * openable after a fork adds child rows. Default (group headers such as the
+   * Work Items list) keeps body-click = toggle.
+   */
+  navigableParent?: boolean;
+  /** Keep a parent row's disclosure control beside its label instead of right-aligning it. */
+  disclosureFollowsLabel?: boolean;
   shortcut?: string;
   disabled?: boolean;
   dataTestId?: string;
+  /** Stable target consumed by an in-product guided tour. */
+  tourTarget?: string;
   /**
    * When set, the row becomes draggable. Dropping it onto a chat input or
    * session creator inserts a context pill using the existing tab-drag-end

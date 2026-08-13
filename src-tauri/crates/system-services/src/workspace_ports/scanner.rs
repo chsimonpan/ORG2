@@ -38,6 +38,7 @@ pub(crate) struct RawListeningPort {
 struct ProcessMetadata {
     process_name: Option<String>,
     command_line: Option<String>,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     cwd: Option<String>,
 }
 
@@ -351,7 +352,7 @@ impl std::fmt::Display for ScanError {
 fn scan_platform_listening_ports() -> Result<Vec<RawListeningPort>, ScanError> {
     #[cfg(target_os = "macos")]
     {
-        return scan_darwin_lsof_ports();
+        scan_darwin_lsof_ports()
     }
     #[cfg(target_os = "linux")]
     {
@@ -777,7 +778,6 @@ fn load_windows_process_metadata(pids: &HashSet<u32>) -> HashMap<u32, ProcessMet
                     .get("CommandLine")
                     .and_then(|value| value.as_str())
                     .map(str::to_string),
-                cwd: None,
             },
         );
     }

@@ -1,5 +1,4 @@
 use database::db::get_connection;
-use core_types::session::ParentSessionRelation;
 use orgtrack_core::canonical::{
     AgentMetadata, SessionRecord, SOURCE_ORGII_CLI_SESSIONS, SOURCE_ORGII_RUST_AGENTS,
 };
@@ -15,65 +14,9 @@ pub fn upsert_aggregate_sessions(records: &[SessionAggregateRecord]) -> Result<(
     let conn = get_connection().map_err(|err| err.to_string())?;
     let store = SqliteRecordStore::new(&conn);
     for record in records {
-        if let Some(parent_id) = compact_parent_id(record) {
-            if let Some(parent) = agent_core::session::persistence::get_session(parent_id)
-                .map_err(|err| err.to_string())?
-            {
-                // `get_session` deliberately includes archived rows. The
-                // compact child is the sole evidence that its exact parent
-                // belongs in this projection.
-                store.upsert_session(&native_to_core_session(parent))?;
-            }
-        }
         store.upsert_session(&aggregate_to_core_session(record))?;
     }
     Ok(())
-}
-
-fn compact_parent_id(record: &SessionAggregateRecord) -> Option<&str> {
-    (record.parent_session_relation == Some(ParentSessionRelation::CompactContinuation))
-        .then_some(record.parent_session_id.as_deref())
-        .flatten()
-}
-
-fn native_to_core_session(
-    record: agent_core::session::persistence::UnifiedSessionRecord,
-) -> SessionRecord {
-    let rust_agent_type = match record.session_type.as_str() {
-        agent_core::session::persistence::session_type::DESKTOP => Some("os".to_string()),
-        agent_core::session::persistence::session_type::CODING
-        | agent_core::session::persistence::session_type::ORG_MEMBER => Some("sde".to_string()),
-        agent_core::session::persistence::session_type::GATEWAY => Some("gateway".to_string()),
-        _ => Some("custom".to_string()),
-    };
-    SessionRecord {
-        schema_version: ORGTRACK_SCHEMA_VERSION,
-        source: SOURCE_ORGII_RUST_AGENTS.to_string(),
-        source_session_id: record.session_id.clone(),
-        session_id: record.session_id,
-        title: record.name.clone(),
-        status: Some(record.status),
-        created_at: Some(record.created_at),
-        updated_at: Some(record.updated_at),
-        completed_at: None,
-        workspace_path: record.workspace_path.or(record.worktree_path),
-        branch: record.worktree_branch.or(record.base_branch),
-        parent_session_id: record.parent_session_id,
-        org_member_id: record.org_member_id,
-        collaboration_origin: None,
-        metadata: AgentMetadata {
-            dispatch_category: Some("rust_agent".to_string()),
-            rust_agent_type,
-            agent_exec_mode: record.agent_exec_mode,
-            model: record.model,
-            key_source: Some(record.key_source.to_string()),
-            origin: Some(SOURCE_ORGII_RUST_AGENTS.to_string()),
-            display_name: Some(record.name),
-            parent_session_relation: record.parent_session_relation,
-            ..AgentMetadata::default()
-        },
-        journey: Default::default(),
-    }
 }
 
 /// One-time startup reconcile of the orgtrack session mirror.
@@ -106,7 +49,7 @@ pub fn reconcile_native_session_mirror() -> Result<(), String> {
     }
 
     let native = super::aggregation::list_all_sessions(Some(&super::types::SessionFilter {
-        category: Some("cli,agent,os".to_string()),
+        category: Some("cli,agent,os,human".to_string()),
         include_external_history: Some(false),
         ..Default::default()
     }))?;
@@ -185,7 +128,9 @@ pub fn upsert_rust_agent_session(session_id: &str) -> Result<(), String> {
 fn aggregate_to_core_session(record: &SessionAggregateRecord) -> SessionRecord {
     let source = match record.category {
         SessionCategory::Cli => SOURCE_ORGII_CLI_SESSIONS,
-        SessionCategory::Agent | SessionCategory::Os => SOURCE_ORGII_RUST_AGENTS,
+        SessionCategory::Agent | SessionCategory::Os | SessionCategory::Human => {
+            SOURCE_ORGII_RUST_AGENTS
+        }
     };
     SessionRecord {
         schema_version: ORGTRACK_SCHEMA_VERSION,
@@ -222,10 +167,8 @@ fn aggregate_to_core_session(record: &SessionAggregateRecord) -> SessionRecord {
                 .clone()
                 .or_else(|| record.display_label.clone())
                 .or_else(|| Some(record.name.clone())),
-            parent_session_relation: record.parent_session_relation,
             parsed_categories: Default::default(),
         },
-        journey: Default::default(),
     }
 }
 
@@ -233,6 +176,7 @@ fn dispatch_category_for(category: SessionCategory) -> &'static str {
     match category {
         SessionCategory::Cli => "cli_agent",
         SessionCategory::Agent | SessionCategory::Os => "rust_agent",
+        SessionCategory::Human => "human_session",
     }
 }
 
@@ -248,6 +192,6 @@ fn rust_agent_type_for(record: &SessionAggregateRecord) -> Option<String> {
                 Some("custom".to_string())
             }
         }
-        SessionCategory::Cli => None,
+        SessionCategory::Cli | SessionCategory::Human => None,
     }
 }

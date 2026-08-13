@@ -21,13 +21,19 @@ import {
   acquireCloudWorkItemLock,
   releaseCloudWorkItemLock,
 } from "@src/features/Org2Cloud/cloudWorkItemLock";
-import { org2CloudAuthAtom } from "@src/features/Org2Cloud/org2CloudAuthAtom";
+import {
+  org2CloudAuthAtom,
+  org2CloudAuthIdentityKey,
+} from "@src/features/Org2Cloud/org2CloudAuthAtom";
 import {
   ensureCloudMemberNames,
   org2CloudMemberNamesAtom,
   resolveCloudMemberName,
 } from "@src/features/Org2Cloud/org2CloudMemberNamesAtom";
-import { org2CloudOrgsAtom } from "@src/features/Org2Cloud/org2CloudOrgsAtom";
+import {
+  org2CloudOrgsAtom,
+  org2CloudRosterVersionAtom,
+} from "@src/features/Org2Cloud/org2CloudOrgsAtom";
 import {
   isCloudOrgMembershipPending,
   resolveCloudOrgForProjectOrg,
@@ -92,7 +98,7 @@ const UNRESOLVED: CollabOrgResolution = { status: "unresolved" };
  * unsubscribe function. Exported for the node vitest env (the repo has no
  * hook-render harness) — the hook's effect is a thin binding over this.
  */
-export function watchCollabOrgResolution(
+function startCollabOrgResolutionWatch(
   projectSlug: string,
   onResolution: (resolution: ResolvedCollabOrgResolution) => void
 ): () => void {
@@ -156,6 +162,67 @@ export function watchCollabOrgResolution(
     stopped = true;
     unsubscribe();
   };
+}
+
+interface SharedCollabResolutionWatch {
+  listeners: Set<(resolution: ResolvedCollabOrgResolution) => void>;
+  lastResolution: ResolvedCollabOrgResolution | null;
+  stop: () => void;
+}
+
+const sharedCollabResolutionWatches = new Map<
+  string,
+  SharedCollabResolutionWatch
+>();
+
+/**
+ * Multicast one project-org probe across every rendered presentation of the
+ * same work item. Entries exist only while at least one consumer is mounted,
+ * so repeated tab open/close cycles cannot retain project state.
+ */
+export function watchCollabOrgResolution(
+  projectSlug: string,
+  onResolution: (resolution: ResolvedCollabOrgResolution) => void
+): () => void {
+  let shared = sharedCollabResolutionWatches.get(projectSlug);
+  if (!shared) {
+    shared = {
+      listeners: new Set(),
+      lastResolution: null,
+      stop: () => undefined,
+    };
+    sharedCollabResolutionWatches.set(projectSlug, shared);
+    const ownedShared = shared;
+    shared.stop = startCollabOrgResolutionWatch(projectSlug, (resolution) => {
+      ownedShared.lastResolution = resolution;
+      for (const listener of ownedShared.listeners) listener(resolution);
+    });
+  }
+
+  shared.listeners.add(onResolution);
+  if (shared.lastResolution) {
+    const currentResolution = shared.lastResolution;
+    queueMicrotask(() => {
+      if (shared?.listeners.has(onResolution)) onResolution(currentResolution);
+    });
+  }
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const current = sharedCollabResolutionWatches.get(projectSlug);
+    if (!current) return;
+    current.listeners.delete(onResolution);
+    if (current.listeners.size === 0) {
+      current.stop();
+      sharedCollabResolutionWatches.delete(projectSlug);
+    }
+  };
+}
+
+export function getSharedCollabResolutionWatchCount(): number {
+  return sharedCollabResolutionWatches.size;
 }
 
 interface LockHolderDisplay {
@@ -262,17 +329,24 @@ export function useWorkItemCollabLock(
   const localMemberId = cloudOrgId ? cloudAuth?.userId : undefined;
 
   const memberNames = useAtomValue(org2CloudMemberNamesAtom);
+  const rosterVersionByOrg = useAtomValue(org2CloudRosterVersionAtom);
+  const rosterVersion = cloudOrgId ? (rosterVersionByOrg[cloudOrgId] ?? 0) : 0;
   const lockedByMemberId = executionLock?.lockedByMemberId;
 
   useEffect(() => {
     if (!cloudOrgId || !lockedByMemberId) return;
     if (lockedByMemberId === localMemberId) return;
     void ensureCloudMemberNames(cloudOrgId);
-  }, [cloudOrgId, lockedByMemberId, localMemberId]);
+  }, [cloudOrgId, lockedByMemberId, localMemberId, rosterVersion]);
 
   const holderDisplayName =
     cloudOrgId && lockedByMemberId
-      ? resolveCloudMemberName(memberNames, cloudOrgId, lockedByMemberId)
+      ? resolveCloudMemberName(
+          memberNames,
+          cloudOrgId,
+          lockedByMemberId,
+          cloudAuth ? org2CloudAuthIdentityKey(cloudAuth) : undefined
+        )
       : null;
 
   const holder = useMemo(

@@ -9,23 +9,11 @@
  */
 import { readAwaitMetaFromResult } from "@src/engines/ChatPanel/rendering/adapters/awaitMeta";
 import type { SessionEvent } from "@src/engines/SessionCore/core/types";
-
-const UI_CANONICAL_ALIASES: Readonly<Record<string, string>> = {
-  read: "read_file",
-  cat: "read_file",
-  file_read: "read_file",
-  list_directory: "list_dir",
-  file_search: "glob_file_search",
-  todowrite: "manage_todo",
-  todo_write: "manage_todo",
-  browser: "browser_navigate",
-  browser_act: "browser_navigate",
-};
-
-function normalizeCanonical(value: string): string {
-  const normalized = value.trim().toLowerCase();
-  return UI_CANONICAL_ALIASES[normalized] ?? normalized;
-}
+import {
+  resolveToolSimulatorApp,
+  resolveToolUiCanonical,
+} from "@src/engines/SessionCore/rendering/registry/toolClassifierRegistry";
+import { isShellSearchCommand } from "@src/util/terminal/searchCommandParser";
 
 /**
  * Get UI canonical name from a SessionEvent.
@@ -33,7 +21,7 @@ function normalizeCanonical(value: string): string {
  */
 function getUiCanonical(event: SessionEvent): string {
   if (event.uiCanonical) return event.uiCanonical;
-  return normalizeCanonical(event.functionName || event.actionType || "");
+  return resolveToolUiCanonical(event.functionName || event.actionType || "");
 }
 
 // ============================================
@@ -54,13 +42,31 @@ const SUMMARY_CATEGORY_BY_CANONICAL: Readonly<
 };
 
 /**
+ * A `run_shell` event whose command is really a code search — a pure grep/rg
+ * pipeline (`grep -rn "foo" src | head`). These render as search rows
+ * (ShellAdapter → SearchBlock) and group with explorations, not terminals.
+ */
+export function isShellSearchCommandEvent(event: SessionEvent): boolean {
+  if (getUiCanonical(event) !== "run_shell") return false;
+  const extracted = event.extracted?.kind === "shell" ? event.extracted : null;
+  const command =
+    extracted?.command ??
+    event.command ??
+    (typeof event.args?.command === "string" ? event.args.command : "");
+  return isShellSearchCommand(command);
+}
+
+/**
  * Classify an event into an action summary category.
  * Returns null if the event is not an exploration/lookup action.
  */
 export function getActionSummaryCategory(
   event: SessionEvent
 ): ActionSummaryCategory | null {
-  return SUMMARY_CATEGORY_BY_CANONICAL[getUiCanonical(event)] ?? null;
+  const category = SUMMARY_CATEGORY_BY_CANONICAL[getUiCanonical(event)] ?? null;
+  if (category) return category;
+  if (isShellSearchCommandEvent(event)) return "search";
+  return null;
 }
 
 /**
@@ -85,28 +91,12 @@ export const isFileModificationEvent = (event: SessionEvent): boolean => {
   return isEditFileEvent(event) || isDeleteFileEvent(event);
 };
 
-const SIMULATOR_APP_BY_CANONICAL: Readonly<Record<string, string>> = {
-  read_file: "CODE_EDITOR",
-  edit_file: "CODE_EDITOR",
-  edit_file_by_replace: "CODE_EDITOR",
-  delete_file: "CODE_EDITOR",
-  apply_patch: "CODE_EDITOR",
-  manage_todo: "CHANNELS",
-  control_browser_with_agent_browser: "BROWSER",
-  control_browser_with_playwright: "BROWSER",
-  control_external_browser: "BROWSER",
-  control_internal_browser: "BROWSER",
-  browser_navigate: "BROWSER",
-  browser_act: "BROWSER",
-};
-
 /** Serializable simulator classification shared by main-thread and Worker paths. */
 export function getToolSimulatorApp(
   rawName: string,
   normalizedName?: string
 ): string | null {
-  const canonical = normalizeCanonical(normalizedName ?? rawName);
-  return SIMULATOR_APP_BY_CANONICAL[canonical] ?? null;
+  return resolveToolSimulatorApp(rawName, normalizedName);
 }
 
 export function isEventInSimulatorApp(
@@ -187,9 +177,33 @@ export const isTerminalActivityEvent = (event: SessionEvent): boolean => {
   return isTerminalCommandEvent(event);
 };
 
+/**
+ * MCP tool calls arrive in several wire shapes across agent providers:
+ * - canonical `mcp_tool` events;
+ * - Rust bridge names (`mcp__server__tool`, `mcp_server_tool`);
+ * - provider namespaces (`codex_app__read_thread_terminal`);
+ * - legacy events carrying an explicit `args.server` field.
+ */
+export const isMcpToolEvent = (event: SessionEvent): boolean => {
+  const functionName = event.functionName.toLowerCase();
+  return (
+    getUiCanonical(event) === "mcp_tool" ||
+    functionName.startsWith("mcp_") ||
+    functionName.includes("__") ||
+    typeof event.args?.server === "string"
+  );
+};
+
+/** Activity that belongs in the collapsible command/MCP stack. */
+export const isCommandGroupActivityEvent = (event: SessionEvent): boolean => {
+  return isTerminalActivityEvent(event) || isMcpToolEvent(event);
+};
+
 /** A shell command that can anchor a Terminal activity group. */
 export const isTerminalCommandEvent = (event: SessionEvent): boolean => {
   if (getUiCanonical(event) !== "run_shell") return false;
+  // Grep/rg pipelines belong to the exploration summary, not terminal stacks.
+  if (isShellSearchCommandEvent(event)) return false;
 
   const extracted = event.extracted?.kind === "shell" ? event.extracted : null;
   const action = extracted?.action ?? event.args?.action;
@@ -215,6 +229,8 @@ export const isManageTodoEvent = (event: SessionEvent): boolean => {
  * shape stamped by both producers:
  * - Rust `lifecycle::build_session_error_event` (id `session-error-…`)
  * - FE `makeErrorEvent` in sync/adapters/shared/eventFactories.ts
+ * - normalized CLI/native-transcript chunks (`actionType` / `functionName`
+ *   / `displayVariant` = `error`)
  *
  * Mirrors Claude Code's `isApiErrorMessage` contract: every render,
  * filter, and collapse path must treat these as always-visible — a
@@ -224,8 +240,26 @@ export const isManageTodoEvent = (event: SessionEvent): boolean => {
  */
 export const isAgentErrorEvent = (event: SessionEvent): boolean => {
   return (
-    event.functionName === "system" &&
-    event.displayStatus === "failed" &&
-    event.displayVariant === "message"
+    event.displayVariant === "error" ||
+    event.actionType === "error" ||
+    event.functionName === "error" ||
+    (event.functionName === "system" &&
+      event.displayStatus === "failed" &&
+      event.displayVariant === "message")
   );
+};
+
+export const getAgentErrorMessage = (event: SessionEvent): string | null => {
+  if (!isAgentErrorEvent(event)) return null;
+
+  for (const value of [
+    event.result?.error,
+    event.result?.error_message,
+    event.result?.observation,
+    event.displayText,
+  ]) {
+    if (typeof value === "string" && value.trim()) return value;
+  }
+
+  return null;
 };

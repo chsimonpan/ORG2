@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useMemo } from "react";
 
 import { useAgentTurnContext } from "@src/engines/ChatPanel/ChatHistory/AgentTurnContext";
 import type { RustOrgTaskItem } from "@src/engines/SessionCore/core/types";
+import { resolveOrgTaskOperationOutcome } from "@src/engines/SessionCore/rendering/orgTaskOutcome";
 import {
   statusToLifecycle,
   useLifecycleLabels,
@@ -46,13 +47,14 @@ export function orgTaskItemToCardData(
 
 function renderListCard(
   props: UniversalEventProps,
-  groupSenderName?: string | null
+  groupSenderName?: string | null,
+  kindOverride?: TaskListCardData["kind"]
 ) {
   if (props.rustExtracted?.kind !== "orgTask") return null;
   const extracted = props.rustExtracted;
   const tasks = extracted.tasks ?? [];
   const card: TaskListCardData = {
-    kind: extracted.action === "get" ? "get" : "list",
+    kind: kindOverride ?? (extracted.action === "get" ? "get" : "list"),
     tasks: tasks.map(orgTaskItemToCardData),
     total: extracted.total,
     orgRunId: extracted.orgRunId,
@@ -78,6 +80,17 @@ export const OrgTaskAdapter: React.FC<UniversalEventProps> = (props) => {
   const title =
     labels[state] || props.functionName || props.eventType || "Task";
   const groupSenderName = turnContext?.groupSenderName ?? null;
+  const operationOutcome = useMemo(
+    () =>
+      props.rustExtracted?.kind === "orgTask"
+        ? resolveOrgTaskOperationOutcome(
+            props.rustExtracted,
+            props.result,
+            props.status
+          )
+        : null,
+    [props.result, props.rustExtracted, props.status]
+  );
 
   if (props.rustExtracted?.kind !== "orgTask") {
     return (
@@ -89,7 +102,7 @@ export const OrgTaskAdapter: React.FC<UniversalEventProps> = (props) => {
         isLoading={
           props.status === "running" && props.showActiveEventPainting === true
         }
-        defaultCollapsed={false}
+        defaultCollapsed={true}
         eventId={props.eventId}
         callId={props.callId}
         sessionId={props.sessionId}
@@ -100,13 +113,37 @@ export const OrgTaskAdapter: React.FC<UniversalEventProps> = (props) => {
 
   const extracted = props.rustExtracted;
   const isSimulator = props.variant === "simulator";
+  // Narrowing above guarantees an Agent Org outcome was resolved.
+  const resolvedOperationOutcome = operationOutcome ?? "failed";
 
-  if (extracted.action === "list")
+  if (extracted.action === "list" && resolvedOperationOutcome === "succeeded")
     return renderListCard(props, groupSenderName);
+  if (
+    extracted.action === "create" &&
+    resolvedOperationOutcome === "succeeded" &&
+    (extracted.tasks?.length ?? 0) > 1
+  ) {
+    return renderListCard(props, groupSenderName, "graph");
+  }
   const task = extracted.task ?? extracted.tasks?.[0];
-  if (!task) return null;
+  if (!task) {
+    return (
+      <ToolCallBlock
+        toolName={props.functionName || props.eventType || "task"}
+        title={title}
+        args={props.args}
+        result={props.result}
+        isLoading={resolvedOperationOutcome === "pending"}
+        defaultCollapsed={true}
+        eventId={props.eventId}
+        callId={props.callId}
+        sessionId={props.sessionId}
+        payloadRefs={props.payloadRefs}
+      />
+    );
+  }
 
-  if (extracted.action === "get") {
+  if (extracted.action === "get" && resolvedOperationOutcome === "succeeded") {
     return renderListCard(
       {
         ...props,
@@ -120,7 +157,11 @@ export const OrgTaskAdapter: React.FC<UniversalEventProps> = (props) => {
   }
 
   const blockAction: OrgTaskAction =
-    extracted.action === "create" ? "create" : "update";
+    extracted.action === "create"
+      ? "create"
+      : extracted.action === "delete"
+        ? "delete"
+        : "update";
 
   return (
     <div
@@ -132,13 +173,15 @@ export const OrgTaskAdapter: React.FC<UniversalEventProps> = (props) => {
         title={taskTitle(task)}
         description={task.description}
         ownerName={resolveOrgTaskOwnerDisplay(task)}
-        status={task.status}
+        status={blockAction === "delete" ? undefined : task.status}
         priority={task.priority}
         blocks={task.blocks ?? []}
         blockedBy={task.blockedBy ?? []}
         ownerChanged={extracted.ownerChanged}
         statusChanged={extracted.statusChanged}
         taskAssignedDispatched={extracted.taskAssignedDispatched}
+        operationOutcome={resolvedOperationOutcome}
+        operationMessage={extracted.guidance ?? extracted.errorMessage}
         isLoading={
           props.status === "running" && props.showActiveEventPainting === true
         }

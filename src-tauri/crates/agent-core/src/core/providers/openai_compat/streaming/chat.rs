@@ -1,7 +1,6 @@
 //! Non-streaming `chat()` implementation for OpenAI-compatible providers.
 
 use serde_json::Value;
-use std::collections::HashMap;
 use tracing::{info, warn};
 
 use super::super::client::OpenAICompatClient;
@@ -23,7 +22,7 @@ pub(super) async fn run_chat(
     messages: &[Value],
     tools: Option<&[Value]>,
     model: &str,
-    max_tokens: Option<u32>,
+    max_tokens: u32,
     _temperature: f32,
 ) -> Result<LLMResponse, ProviderError> {
     // Azure gateway: strip provider prefix but don't add litellm prefix.
@@ -47,15 +46,7 @@ pub(super) async fn run_chat(
     );
 
     let sanitized_messages = sanitize_openai_compat_messages(messages);
-    // DeepSeek chat completions are text-only: image_url blocks must be
-    // replaced with text placeholders. The provider-spec check alone misses
-    // DeepSeek models routed through aggregators (e.g. zenmux), so also match
-    // the resolved wire model id.
-    let is_deepseek_wire = crate::providers::wire_sanitize::is_deepseek_text_only_wire(
-        this.provider_spec.name,
-        &resolved_model,
-    );
-    let wire_messages = if is_deepseek_wire {
+    let wire_messages = if this.provider_spec.name == provider_id::DEEPSEEK {
         sanitize_deepseek_messages(&sanitized_messages)
     } else {
         super::super::wire_expand::expand_tool_images_for_openai_wire(&sanitized_messages)
@@ -102,12 +93,12 @@ pub(super) async fn run_chat(
             None
         },
         max_tokens: match wire_policy.token_limit_field {
-            ChatTokenLimitField::MaxTokens => max_tokens,
+            ChatTokenLimitField::MaxTokens => Some(max_tokens),
             ChatTokenLimitField::MaxCompletionTokens => None,
         },
         max_completion_tokens: match wire_policy.token_limit_field {
             ChatTokenLimitField::MaxTokens => None,
-            ChatTokenLimitField::MaxCompletionTokens => max_tokens,
+            ChatTokenLimitField::MaxCompletionTokens => Some(max_tokens),
         },
         temperature: if wire_policy.send_temperature {
             Some(_temperature)
@@ -181,17 +172,10 @@ pub(super) async fn run_chat(
         .next()
         .ok_or_else(|| ProviderError::ParseError("No choices in response".to_string()))?;
 
-    let mut usage = HashMap::new();
-    if let Some(api_usage) = parsed.usage {
-        usage.insert("prompt_tokens".to_string(), api_usage.prompt_tokens);
-        usage.insert("completion_tokens".to_string(), api_usage.completion_tokens);
-        usage.insert("total_tokens".to_string(), api_usage.total_tokens);
-        if let Some(ref details) = api_usage.prompt_tokens_details {
-            if details.cached_tokens > 0 {
-                usage.insert("cache_read_tokens".to_string(), details.cached_tokens);
-            }
-        }
-    }
+    let usage = parsed
+        .usage
+        .map(|api_usage| api_usage.to_usage_map())
+        .unwrap_or_default();
 
     let tool_calls = choice
         .message
@@ -274,4 +258,66 @@ fn split_inline_thinking(
     };
 
     (content_out, merged_reasoning)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::providers::registry::{find_by_name, provider_id};
+    use crate::providers::traits::{usage_key, LLMProvider, ProviderConfig};
+    use std::collections::HashMap;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn non_streaming_standard_usage_normalizes_cached_tokens() {
+        crate::test_support::install_crypto_provider_for_tests();
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{
+                    "message": {"content": "ok"},
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 1200,
+                    "completion_tokens": 300,
+                    "total_tokens": 1500,
+                    "prompt_tokens_details": {"cached_tokens": 800}
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let spec = find_by_name(provider_id::OPENAI).expect("OpenAI provider registered");
+        let client = OpenAICompatClient::new(
+            ProviderConfig {
+                api_key: "test-key".to_string(),
+                api_base: Some(server.uri()),
+                extra_headers: HashMap::new(),
+                is_azure: false,
+            },
+            spec,
+            "gpt-4.1".to_string(),
+        );
+
+        let response = client
+            .chat(
+                &[serde_json::json!({"role": "user", "content": "hello"})],
+                None,
+                "gpt-4.1",
+                1024,
+                0.0,
+            )
+            .await
+            .expect("OpenAI-compatible response should parse");
+
+        assert_eq!(response.usage[usage_key::PROMPT_TOKENS], 400);
+        assert_eq!(response.usage[usage_key::COMPLETION_TOKENS], 300);
+        assert_eq!(response.usage[usage_key::TOTAL_TOKENS], 1500);
+        assert_eq!(response.usage[usage_key::CACHE_READ_TOKENS], 800);
+        assert!(!response.usage.contains_key(usage_key::CACHE_WRITE_TOKENS));
+    }
 }

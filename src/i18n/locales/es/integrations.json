@@ -1739,7 +1739,9 @@
           "rename": "Renombrar",
           "search": "Buscar"
         }
-      }
+      },
+      "liveStatusToggle": "Estado del agente en vivo",
+      "liveStatusToggleDesc": "Muestra si los agentes CLI están trabajando o esperando. Desactivarlo mantiene la captura de procedencia."
     },
     "codexConfig": {
       "sectionTitle": "Configuración",

@@ -1,11 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getGitRemotes } from "@src/api/http/git/remotes";
+import { resolveGitHubRepoNetworkIdentityLocal } from "@src/api/tauri/github";
 
 import {
+  MAX_RESOLVER_CACHE_ENTRIES,
+  REPO_NETWORK_LOOKUP_CONCURRENCY,
   clearShareableScopeKeyCache,
+  peekMatchingOrgRepoScope,
   peekShareableScopeKey,
   resolveLocalCheckoutForScopeKey,
+  resolveMatchingOrgRepoScope,
+  resolveRepoNetworkScopeKey,
   resolveShareableScopeKey,
   resolveShareableScopeKeys,
   subscribeShareableScopeKeys,
@@ -14,8 +20,17 @@ import {
 vi.mock("@src/api/http/git/remotes", () => ({
   getGitRemotes: vi.fn(),
 }));
+vi.mock("@src/api/tauri/github", () => ({
+  resolveGitHubRepoNetworkIdentityLocal: vi.fn(),
+}));
 
 const remotesMock = vi.mocked(getGitRemotes);
+const networkIdentityMock = vi.mocked(resolveGitHubRepoNetworkIdentityLocal);
+
+beforeEach(() => {
+  networkIdentityMock.mockRejectedValue(new Error("not configured"));
+  clearShareableScopeKeyCache();
+});
 
 function remoteEntry(name: string, url: string) {
   return { name, url, fetch_url: url, push_url: url };
@@ -67,21 +82,35 @@ describe("resolveShareableScopeKey (git-remote-only sharing, design §8.3)", () 
     expect(remotesMock).not.toHaveBeenCalled();
   });
 
-  it("does NOT cache a transport failure — the next call retries and heals", async () => {
+  it("negative-caches a transport failure briefly, then retries and heals", async () => {
     // getGitRemotes swallows transport errors and reports undefined; a repo
     // must never be permanently marked unshareable by a hiccup (e.g. the
-    // git server still booting at app start).
-    remotesMock.mockResolvedValueOnce(undefined);
-    await expect(resolveShareableScopeKey("/repo/alpha")).resolves.toBe(null);
-    expect(peekShareableScopeKey("/repo/alpha")).toBeUndefined();
+    // git server still booting at app start). Within the short failure
+    // window callers get "no keys" without re-firing the IPC (render-path
+    // callers would otherwise retry per re-render); after it, retry heals.
+    vi.useFakeTimers();
+    try {
+      remotesMock.mockResolvedValueOnce(undefined);
+      await expect(resolveShareableScopeKey("/repo/alpha")).resolves.toBe(null);
+      expect(peekShareableScopeKey("/repo/alpha")).toBeUndefined();
 
-    remotesMock.mockResolvedValue({
-      remotes: [remoteEntry("origin", "git@github.com:acme/alpha.git")],
-    });
-    await expect(resolveShareableScopeKey("/repo/alpha")).resolves.toBe(
-      "github.com/acme/alpha"
-    );
-    expect(peekShareableScopeKey("/repo/alpha")).toBe("github.com/acme/alpha");
+      remotesMock.mockClear();
+      remotesMock.mockResolvedValue({
+        remotes: [remoteEntry("origin", "git@github.com:acme/alpha.git")],
+      });
+      await expect(resolveShareableScopeKey("/repo/alpha")).resolves.toBe(null);
+      expect(remotesMock).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(30_000);
+      await expect(resolveShareableScopeKey("/repo/alpha")).resolves.toBe(
+        "github.com/acme/alpha"
+      );
+      expect(peekShareableScopeKey("/repo/alpha")).toBe(
+        "github.com/acme/alpha"
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("dedupes concurrent lookups for one path and notifies subscribers once", async () => {
@@ -182,6 +211,26 @@ describe("resolveLocalCheckoutForScopeKey (fork relay: scope key → local path)
     ).resolves.toBe("/repo/fork");
   });
 
+  it("matches differently named GitHub forks through their common source", async () => {
+    networkIdentityMock.mockImplementation(async (fullName) => ({
+      full_name: fullName,
+      source_full_name: "org2ai/ORG2",
+    }));
+    const resolve = resolverFor({
+      "C:\\Repos\\ORGII": ["github.com/org2ai/org2"],
+    });
+
+    await expect(
+      resolveLocalCheckoutForScopeKey(
+        "github.com/vantanode/org2",
+        ["C:\\Repos\\ORGII"],
+        resolve
+      )
+    ).resolves.toBe("C:\\Repos\\ORGII");
+    expect(networkIdentityMock).toHaveBeenCalledWith("org2ai/org2");
+    expect(networkIdentityMock).toHaveBeenCalledWith("vantanode/org2");
+  });
+
   it("returns null when no local checkout matches (fork opens without a workspace)", async () => {
     await expect(
       resolveLocalCheckoutForScopeKey(
@@ -238,5 +287,96 @@ describe("resolveLocalCheckoutForScopeKey (fork relay: scope key → local path)
         resolve
       )
     ).resolves.toBe("/repo/alpha");
+  });
+});
+
+describe("GitHub fork-network org scope matching", () => {
+  it("returns the original wire scope after canonical upstreams match", async () => {
+    networkIdentityMock.mockImplementation(async (fullName) => ({
+      full_name: fullName,
+      source_full_name: "org2ai/ORG2",
+    }));
+
+    await expect(
+      resolveMatchingOrgRepoScope(
+        ["github.com/org2ai/org2"],
+        ["github.com/vantanode/org2"]
+      )
+    ).resolves.toBe("github.com/vantanode/org2");
+    expect(
+      peekMatchingOrgRepoScope(
+        ["github.com/org2ai/org2"],
+        ["github.com/vantanode/org2"]
+      )
+    ).toBe("github.com/vantanode/org2");
+  });
+
+  it("does not merge repositories from different fork networks", async () => {
+    networkIdentityMock.mockImplementation(async (fullName) => ({
+      full_name: fullName,
+      source_full_name: fullName,
+    }));
+    await expect(
+      resolveMatchingOrgRepoScope(
+        ["github.com/acme/one"],
+        ["github.com/acme/two"]
+      )
+    ).resolves.toBeNull();
+  });
+
+  it("bounds the long-lived GitHub network cache with LRU eviction", async () => {
+    networkIdentityMock.mockClear();
+    networkIdentityMock.mockImplementation(async (fullName) => ({
+      full_name: fullName,
+      source_full_name: fullName,
+    }));
+    for (let index = 0; index <= MAX_RESOLVER_CACHE_ENTRIES; index += 1) {
+      await resolveRepoNetworkScopeKey(`github.com/acme/repo-${index}`);
+    }
+    expect(networkIdentityMock).toHaveBeenCalledTimes(
+      MAX_RESOLVER_CACHE_ENTRIES + 1
+    );
+
+    await resolveRepoNetworkScopeKey("github.com/acme/repo-0");
+    expect(networkIdentityMock).toHaveBeenCalledTimes(
+      MAX_RESOLVER_CACHE_ENTRIES + 2
+    );
+  });
+
+  it("bounds concurrent provider identity lookups", async () => {
+    networkIdentityMock.mockClear();
+    let active = 0;
+    let maxActive = 0;
+    const releases: Array<() => void> = [];
+    networkIdentityMock.mockImplementation(
+      (fullName) =>
+        new Promise((resolve) => {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          releases.push(() => {
+            active -= 1;
+            resolve({ full_name: fullName, source_full_name: fullName });
+          });
+        })
+    );
+
+    const lookups = Array.from(
+      { length: REPO_NETWORK_LOOKUP_CONCURRENCY + 3 },
+      (_, index) => resolveRepoNetworkScopeKey(`github.com/acme/cap-${index}`)
+    );
+    await vi.waitFor(() => {
+      expect(networkIdentityMock).toHaveBeenCalledTimes(
+        REPO_NETWORK_LOOKUP_CONCURRENCY
+      );
+    });
+    expect(maxActive).toBe(REPO_NETWORK_LOOKUP_CONCURRENCY);
+
+    while (releases.length > 0) {
+      releases.shift()?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    await Promise.all(lookups);
+    expect(maxActive).toBe(REPO_NETWORK_LOOKUP_CONCURRENCY);
   });
 });

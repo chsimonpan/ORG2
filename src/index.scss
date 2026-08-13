@@ -21,6 +21,29 @@
 @import "./features/CodeMirror/styles/diff-tokens";
 @import "./features/CodeMirror/styles/editor-tokens";
 
+body {
+  --scrollbar-thumb-color: color-mix(
+    in srgb,
+    var(--color-fill-2) 58%,
+    transparent
+  );
+  --scrollbar-thumb-hover-color: color-mix(
+    in srgb,
+    var(--color-fill-3) 72%,
+    transparent
+  );
+}
+
+// A desktop window that is hidden or unfocused must not keep WebView2's GPU
+// compositor awake for decorative pulses, progress bars, cursors, or skeletons.
+// Animations resume from their current phase as soon as the window regains
+// focus; transitions and application state are unaffected.
+html[data-window-focused="false"] *,
+html[data-window-focused="false"] *::before,
+html[data-window-focused="false"] *::after {
+  animation-play-state: paused !important;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -285,12 +308,12 @@ img {
 }
 
 *::-webkit-scrollbar-thumb {
-  background: var(--color-fill-3);
+  background: var(--scrollbar-thumb-color);
   border-radius: 2px;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: var(--color-fill-4);
+  background: var(--scrollbar-thumb-hover-color);
 }
 
 *::-webkit-scrollbar-corner {
@@ -317,7 +340,7 @@ img {
 // Keep CodeMirror on the same visible scrollbar treatment as the rest of the app.
 .cm-scroller {
   scrollbar-width: thin !important;
-  scrollbar-color: var(--color-fill-3) transparent !important;
+  scrollbar-color: var(--scrollbar-thumb-color) transparent !important;
 
   &::-webkit-scrollbar {
     width: 4px !important;
@@ -331,12 +354,12 @@ img {
   }
 
   &::-webkit-scrollbar-thumb {
-    background: var(--color-fill-3) !important;
+    background: var(--scrollbar-thumb-color) !important;
     border-radius: 2px !important;
   }
 
   &::-webkit-scrollbar-thumb:hover {
-    background: var(--color-fill-4) !important;
+    background: var(--scrollbar-thumb-hover-color) !important;
   }
 }
 
@@ -348,26 +371,6 @@ img {
   // on hidden components that could scroll the root element
   overflow: clip;
   background: var(--color-bg-2);
-}
-
-// KeepAlive wraps each cached route in its own DOM node. The wrapper must
-// fill MainAppShell; otherwise cached pages can shrink to their intrinsic
-// table width and expose the gray parent surface after route clicks.
-.keepalive-cache-div {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  overflow: hidden;
-}
-
-// Hide inactive keepalive cache nodes immediately to prevent
-// previous page "shadow" from showing during route transitions.
-// keepalive-for-react swaps active/inactive classes on its cache divs
-// but doesn't apply display:none — the old page remains visible for
-// one frame between the class swap and DOM removal.
-.keepalive-cache-div.inactive {
-  display: none;
 }
 
 // Remove border radius in fullscreen mode
@@ -417,6 +420,106 @@ select,
   -webkit-touch-callout: default;
 }
 
+/*
+ * Optional web-style pointer cursors for semantic interactive controls.
+ *
+ * :where() keeps this rule at zero specificity so deliberate component
+ * cursors (text, grab, resize, wait, not-allowed, etc.) continue to win.
+ */
+:where(html[data-pointer-cursors="true"]) {
+  --interactive-cursor: pointer;
+}
+
+:where(html[data-pointer-cursors="false"]) {
+  --interactive-cursor: default;
+}
+
+/*
+ * Tailwind's cursor-pointer utility is used by custom click targets that may
+ * not expose native or ARIA semantics. Route it through the same preference.
+ */
+.cursor-pointer {
+  cursor: var(--interactive-cursor, default);
+}
+
+:where(html[data-pointer-cursors="true"])
+  :where(
+    a[href],
+    area[href],
+    button:not(:disabled),
+    input:not(:disabled):is(
+        [type="button"],
+        [type="checkbox"],
+        [type="color"],
+        [type="file"],
+        [type="radio"],
+        [type="range"],
+        [type="reset"],
+        [type="submit"]
+      ),
+    select:not(:disabled),
+    summary,
+    [role="button"],
+    [role="checkbox"],
+    [role="link"],
+    [role="menuitem"],
+    [role="menuitemcheckbox"],
+    [role="menuitemradio"],
+    [role="option"],
+    [role="radio"],
+    [role="switch"],
+    [role="tab"],
+    [role="treeitem"]
+  ):where(:not(:disabled):not([aria-disabled="true"])) {
+  cursor: var(--interactive-cursor, default);
+}
+
+/*
+ * The opt-out must beat component-local pointer declarations so the switch
+ * has consistent app-wide behavior. Disabled, busy, draggable, and explicit
+ * special-cursor utilities keep their stronger affordances.
+ */
+:where(html[data-pointer-cursors="false"])
+  :where(
+    a[href],
+    area[href],
+    button,
+    input:is(
+      [type="button"],
+      [type="checkbox"],
+      [type="color"],
+      [type="file"],
+      [type="radio"],
+      [type="range"],
+      [type="reset"],
+      [type="submit"]
+    ),
+    select,
+    summary,
+    [role="button"],
+    [role="checkbox"],
+    [role="link"],
+    [role="menuitem"],
+    [role="menuitemcheckbox"],
+    [role="menuitemradio"],
+    [role="option"],
+    [role="radio"],
+    [role="switch"],
+    [role="tab"],
+    [role="treeitem"],
+    .kanban-task-card--interactive,
+    .kanban-task-card__impact-action,
+    .cursor-pointer
+  ):where(
+    :not(:disabled):not([aria-busy="true"]):not([aria-disabled="true"]):not(
+        [draggable="true"]
+      ):not(.cursor-grab):not(.cursor-grabbing):not(.cursor-not-allowed):not(
+        .cursor-progress
+      ):not(.cursor-text):not(.cursor-wait)
+  ) {
+  cursor: default !important;
+}
+
 [data-browser-url-bar-input]::selection {
   background: color-mix(in srgb, var(--color-primary-6) 82%, black) !important;
   color: white !important;
@@ -446,14 +549,44 @@ html[data-host-desktop="macos"] .sidebar-base {
   background: transparent;
 }
 
-html[data-host-desktop="windows"],
 html[data-host-desktop="windows"] body,
 html[data-host-desktop="windows"] #root {
-  background: var(--color-bg-2);
+  background: transparent;
 }
 
 html[data-host-desktop="windows"] .sidebar-base {
-  background: var(--sidebar-bg);
+  background: transparent;
+}
+
+// Match the surface revealed beneath the rounded work area to the translucent
+// Windows chrome used by the top bar and navigation sidebar. Falling through
+// to the opaque root background makes the corner look like a separate layer.
+html[data-host-desktop="windows"] .windows-main-page-underlay {
+  background: color-mix(
+    in srgb,
+    var(--color-bg-2) var(--windows-native-chrome-opacity, 30%),
+    transparent
+  );
+}
+
+// Only the inner top-left corner of the main work surface is rounded.
+html[data-host-desktop="windows"] .windows-main-page-surface {
+  overflow: hidden;
+  border-top-left-radius: var(--radius-page);
+}
+
+// Windows uses a frameless Tauri window with DWM owning the outer shape.
+// Clip the HTML header to the same radius so its translucent fill cannot
+// square off the native top corners.
+html[data-host-desktop="windows"] [data-windows-top-bar="true"] {
+  overflow: hidden;
+  border-top-left-radius: var(--border-radius-window);
+  border-top-right-radius: var(--border-radius-window);
+  background: color-mix(
+    in srgb,
+    var(--color-bg-2) var(--windows-native-chrome-opacity, 30%),
+    transparent
+  );
 }
 
 // Ensure popup layers are not clipped by body's overflow: hidden
@@ -478,7 +611,7 @@ html[data-host-desktop="windows"] .sidebar-base {
   }
 
   &:hover {
-    scrollbar-color: #e0e0e0 transparent !important; // for Firefox, visible on hover
+    scrollbar-color: var(--scrollbar-thumb-color) transparent !important; // for Firefox, visible on hover
 
     &::-webkit-scrollbar-thumb {
       background-color: transparent !important; // for Chrome, Safari, and Opera, visible on hover
@@ -555,7 +688,7 @@ body.drag-over::after {
   background: transparent;
 }
 .scrollbar-x-hover::-webkit-scrollbar-thumb {
-  background: var(--color-fill-3);
+  background: var(--scrollbar-thumb-color);
   border-radius: 2px;
 }
 
@@ -597,9 +730,11 @@ body.drag-over::after {
     0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
-/* Visible thin scrollbar for dropdown option lists (Settings > Timezone,
- * table selectors, etc.). Tailwind has no first-class scrollbar pseudo
- * utilities, so we expose this as a global helper class. */
+/* Native overlay scrollbar for dropdown option lists (Settings > Timezone,
+ * table selectors, etc.). In WebKit/Tauri, `scrollbar-width` opts back into
+ * the platform scrollbar: it overlays the list without reserving a gutter and
+ * auto-hides when scrolling stops. The pseudo rules remain as a fallback for
+ * engines that do not support `scrollbar-width`. */
 .dropdown-options-scrollbar {
   scrollbar-width: thin;
 
@@ -612,12 +747,12 @@ body.drag-over::after {
   }
 
   &::-webkit-scrollbar-thumb {
-    background: var(--color-fill-3);
+    background: var(--scrollbar-thumb-color);
     border-radius: 3px;
   }
 
   &::-webkit-scrollbar-thumb:hover {
-    background: var(--color-fill-4);
+    background: var(--scrollbar-thumb-hover-color);
   }
 }
 
@@ -742,19 +877,6 @@ body.drag-over::after {
 /* Sidebar-specific adaptive text */
 .sidebar-adaptive-text {
   @extend .adaptive-text;
-}
-
-/* Home page adaptive elements */
-.home-greeting-adaptive {
-  transition: color 0.2s ease;
-}
-
-.home-button-adaptive {
-  transition: color 0.2s ease;
-}
-
-.home-tab-toggle-adaptive {
-  transition: color 0.2s ease;
 }
 
 /* Dark mode icon invert - for monochrome black icons */

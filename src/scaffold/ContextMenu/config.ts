@@ -29,6 +29,8 @@ export type MenuItemId =
   | "terminal"
   | "sessions"
   | "session"
+  /** A teammate's cloud session; its value is a full `orgii://…` reference. */
+  | "cloudSession"
   | "projects"
   | "project"
   | "workitem"
@@ -85,8 +87,8 @@ export const SECOND_LAYER_CONFIG: Record<SecondLayerId, SecondLayerConfig> = {
     icon: ICON_CONFIG.files,
   },
   sessions: {
-    title: "Agent Session",
-    translationKey: "creator.contextMenu.agentSession",
+    title: "Session",
+    translationKey: "creator.contextMenu.session",
     icon: ICON_CONFIG.sessions,
   },
   projects: {
@@ -110,8 +112,8 @@ export const MENU_ITEMS: MenuItem[] = [
   },
   {
     id: "sessions",
-    label: "Agent Session",
-    translationKey: "creator.contextMenu.agentSession",
+    label: "Session",
+    translationKey: "creator.contextMenu.session",
     icon: ICON_CONFIG.sessions,
     hasSecondLayer: true,
   },

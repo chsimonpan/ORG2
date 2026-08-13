@@ -209,7 +209,9 @@
     "skipThisVersion": "Omitir esta versión",
     "later": "Más tarde",
     "link": "Vincular",
-    "copyName": "Copiar nombre"
+    "copyName": "Copiar nombre",
+    "toggle": "Alternar hilo",
+    "switchMethod": "Cambiar método"
   },
   "refreshToast": {
     "successName": "{{name}} actualizado",
@@ -572,7 +574,11 @@
     "imageUploadFailed": "Error al subir la imagen",
     "imageTooLarge": "La imagen es demasiado grande",
     "failedToLoad": "Error al cargar",
-    "unknownError": "Se produjo un error desconocido"
+    "unknownError": "Se produjo un error desconocido",
+    "codexLoginExpired": "La sesión de Codex ha caducado",
+    "codexLoginExpiredDescription": "Vuelve a conectar Codex para reparar esta cuenta. Regresarás a esta sesión cuando se guarde el nuevo inicio de sesión.",
+    "reconnectCodex": "Volver a conectar Codex",
+    "technicalDetails": "Detalles técnicos"
   },
   "confirmation": {
     "delete": "¿Estás seguro de que quieres eliminar esto?",
@@ -859,7 +865,7 @@
     "listDirParseSafetyHint": "Mostrando las primeras {{maxShown}} entradas. El listado completo se limitó por rendimiento.",
     "noTasks": "Sin tareas",
     "noTasksWithDates": "No hay tareas con fechas para mostrar",
-    "noTasksWithDatesSubtitle": "Agrega fechas de inicio y fin a tus tareas para verlas aquí",
+    "noTasksWithDatesSubtitle": "Agrega fechas de inicio y fin para mostrar las tareas aquí",
     "noItemsAvailable": "No hay elementos disponibles",
     "loadingMore": "Cargando más...",
     "scrollForMore": "Desplaza para ver más",
@@ -867,10 +873,10 @@
     "typeToSearch": "Escribe para buscar",
     "pleaseTryAgain": "Por favor, inténtalo de nuevo",
     "noFileOpen": "Abre un archivo para empezar a editar",
-    "selectFileToEdit": "Selecciona un archivo del explorador para editar",
+    "selectFileToEdit": "Elige un archivo en el explorador",
     "noTabs": "Abre una pestaña para comenzar",
     "noTabsOpen": "Abre un elemento para comenzar",
-    "selectItemToStart": "Selecciona un elemento de la barra lateral para comenzar",
+    "selectItemToStart": "Elige un elemento en la barra lateral",
     "noDatabaseConnected": "Sin base de datos conectada",
     "addConnectionToQuery": "Añade una conexión para comenzar a consultar",
     "noQueryResults": "Ejecuta una consulta para ver resultados",
@@ -879,7 +885,7 @@
     "chatHistoryEmpty": "Sin actividad aún",
     "chatHistoryReloadHint": "Los datos de la sesión pueden no haberse cargado",
     "chatHistoryAgentWorking": "El Agent está en ejecución",
-    "chatHistoryAgentWorkingHint": "Los mensajes aparecerán aquí cuando responda el asistente. La barra puede mostrar inactivo hasta el primer evento.",
+    "chatHistoryAgentWorkingHint": "Los mensajes aparecen con la primera respuesta; hasta entonces la barra puede parecer inactiva",
     "pleaseSelect": "Por favor selecciona",
     "noTerminalsAvailable": "Abre una terminal para comenzar",
     "noSessionsFound": "No se encontraron Session",
@@ -889,7 +895,7 @@
     "noQueryHistory": "Aún no se han ejecutado consultas",
     "executedQueriesSubtitle": "Las consultas ejecutadas aparecerán aquí",
     "noOperationHistory": "Sin operaciones registradas",
-    "noOperationHistorySubtitle": "Las operaciones de commit, push, pull y otras de Git aparecerán aquí",
+    "noOperationHistorySubtitle": "Las operaciones de Git aparecerán aquí",
     "selectFileToViewChanges": "Selecciona un archivo para ver los cambios",
     "failedToLoadHistory": "Error al cargar el historial",
     "noGitHistory": "No hay historial de Git disponible",
@@ -956,13 +962,12 @@
     "addCssVariables": "Agrega variables CSS a tu proyecto",
     "loadingAccountStatus": "Cargando estado de cuenta...",
     "noRepositorySelected": "Ningún repo seleccionado",
-    "selectRepositoryFromHome": "Selecciona un repo desde la página de inicio para abrirlo.",
     "noWorkspaceExplorerTitle": "No hay workspace abierto",
-    "noWorkspaceExplorerSubtitle": "Abrir workspace para ver archivos",
+    "noWorkspaceExplorerSubtitle": "Abre un espacio de trabajo para ver archivos",
     "cannotFindRepo": "No se encuentra {{repoName}}",
     "lastSeenAtPath": "Se vio por última vez en {{path}}",
     "unsupportedFileType": "Tipo de archivo no compatible",
-    "binaryUnsupportedEncoding": "Este archivo no se muestra porque es binario o usa una codificación de texto no compatible.",
+    "binaryUnsupportedEncoding": "Archivo binario o codificación de texto no compatible",
     "connectingDatabase": "Abriendo base de datos...",
     "invalidDatabase": "Archivo de base de datos no válido",
     "selectTable": "Seleccionar una tabla",
@@ -987,7 +992,8 @@
     "scanningFileExtensions": "Scanning file extensions...",
     "startBrowsingMarket": "Start browsing the marketplace",
     "previewUnavailable": "Vista previa no disponible",
-    "selectPrCommitToViewDiff": "Select a pull request commit from the header to view its diff."
+    "selectPrCommitToViewDiff": "Select a pull request commit from the header to view its diff.",
+    "selectRepositoryFromWorkspace": "Elige un repositorio del espacio de trabajo"
   },
   "inbox": {
     "searchPlaceholder": "Buscar mensajes...",
@@ -1146,8 +1152,6 @@
       "tryVerifyUrl": "Verificar que la URL sea correcta",
       "tryAgainLater": "Intentar de nuevo más tarde"
     },
-    "selectRepoFromHome": "Please select a repo from the home page",
-    "cloneRepoAgain": "Please clone the repo again from the home page",
     "unsavedChangesTitle": "Unsaved Changes",
     "prkPlaceholder": "PRJ",
     "gitSyncMenuTitle": "Acciones de sincronización Git"
@@ -1187,7 +1191,8 @@
       "takeAction": "Tomar acción",
       "sync": "Sincronizar",
       "createPR": "Crear PR",
-      "stash": "Reservar"
+      "stash": "Reservar",
+      "compareBranch": "Comparar rama"
     },
     "messages": {
       "pushSuccess": "Push exitoso",
@@ -1240,6 +1245,222 @@
         "closed": "Cerrado",
         "completed": "Completado",
         "notPlanned": "No planificado"
+      },
+      "activity": {
+        "opened": "abrió este issue",
+        "commented": "comentó",
+        "timelineItemCount_one": "{{count}} elemento en la cronología",
+        "timelineItemCount_other": "{{count}} elementos en la cronología",
+        "noDescription": "No se proporcionó ninguna descripción.",
+        "assigned": "asignó a",
+        "assignedIssue": "asignó este issue",
+        "unassigned": "desasignó a",
+        "removedAssignee": "eliminó una asignación",
+        "added": "añadió",
+        "removed": "eliminó",
+        "label": "una etiqueta",
+        "milestoned": "añadió este issue al hito {{milestone}}",
+        "demilestoned": "eliminó este issue del hito {{milestone}}",
+        "closedViaCommit": "cerró este issue mediante el commit {{commit}}",
+        "closed": "cerró este issue",
+        "reopened": "reabrió este issue",
+        "renamedTo": "cambió el nombre de este issue a",
+        "renamed": "cambió el nombre de este issue",
+        "locked": "bloqueó esta conversación",
+        "lockedAs": "bloqueó esta conversación por el motivo {{reason}}",
+        "unlocked": "desbloqueó esta conversación",
+        "crossReferencedFrom": "hizo referencia a este issue desde",
+        "crossReferenced": "creó una referencia cruzada a este issue",
+        "referencedInCommit": "hizo referencia a este issue en el commit {{commit}}",
+        "referencedInACommit": "hizo referencia a este issue en un commit",
+        "connected": "vinculó este issue",
+        "disconnected": "desvinculó este issue",
+        "markedAsDuplicate": "marcó este issue como duplicado",
+        "unmarkedAsDuplicate": "eliminó la marca de duplicado",
+        "pinned": "fijó este issue",
+        "unpinned": "dejó de fijar este issue",
+        "transferred": "transfirió este issue",
+        "convertedToDiscussion": "convirtió este issue en una discusión",
+        "mentioned": "mencionó este issue",
+        "commentDeleted": "eliminó un comentario",
+        "subscribed": "se suscribió a este issue",
+        "unsubscribed": "canceló la suscripción a este issue",
+        "addedToProject": "añadió este issue a un proyecto",
+        "movedInProject": "movió este issue en un proyecto",
+        "removedFromProject": "eliminó este issue de un proyecto",
+        "archived": "archivó este issue",
+        "unarchived": "desarchivó este issue",
+        "merged": "fusionó esta pull request",
+        "committed": "hizo un commit en esta pull request",
+        "headRefDeleted": "eliminó la rama de origen",
+        "headRefRestored": "restauró la rama de origen",
+        "headRefForcePushed": "forzó el envío de la rama de origen",
+        "baseRefChanged": "cambió la rama base",
+        "automaticBaseChangeFailed": "no pudo cambiar automáticamente la rama base",
+        "automaticBaseChangeSucceeded": "cambió automáticamente la rama base",
+        "deployed": "desplegó esta pull request",
+        "deploymentEnvironmentChanged": "cambió el entorno de despliegue",
+        "readyForReview": "marcó esta pull request como lista para revisión",
+        "reviewRequested": "solicitó una revisión",
+        "reviewRequestRemoved": "eliminó una solicitud de revisión",
+        "reviewed": "revisó estos cambios",
+        "reviewDismissed": "descartó una revisión",
+        "userBlocked": "bloqueó a este usuario"
+      },
+      "composer": {
+        "addComment": "Añadir un comentario",
+        "commentingAs": "Comentando como {{login}}",
+        "identityUnavailable": "Identidad de GitHub no disponible",
+        "commentPlaceholder": "Escribe un comentario…",
+        "submitComment": "Comentar",
+        "closeIssue": "Cerrar issue",
+        "closeAsCompleted": "Cerrar como completado",
+        "closeAsNotPlanned": "Cerrar como no planificado",
+        "closeAsDuplicate": "Cerrar como duplicado",
+        "duplicateSearchPlaceholder": "Buscar issues",
+        "duplicateEmpty": "No hay issues coincidentes",
+        "duplicateLoadFailed": "No se pudieron cargar los issues",
+        "reopenIssue": "Reabrir issue",
+        "commentFailed": "No se pudo añadir el comentario",
+        "bodyUpdateFailed": "No se pudo actualizar la descripción del issue",
+        "statusFailed": "No se pudo actualizar el estado del issue"
+      }
+    },
+    "rail": {
+      "openTabs": "Pestañas abiertas",
+      "closeItem": "Cerrar {{label}}",
+      "expand": "Expandir la información del espacio de trabajo",
+      "collapse": "Contraer la información del espacio de trabajo"
+    },
+    "pr": {
+      "title": "Pull request",
+      "linkedBranch": "Pull request #{{number}}",
+      "baseBranch": "Base",
+      "noDescription": "No se proporcionó una descripción.",
+      "loadingConversation": "Cargando…",
+      "reviewNoBody": "Dejó comentarios de revisión.",
+      "submitReview": "Enviar revisión",
+      "reviewHeadNotice": "La revisión se aplica solo si el commit principal mostrado sigue coincidiendo.",
+      "reviewDecision": "Decisión de revisión",
+      "reviewComment": "Comentario de revisión",
+      "reviewCommentPlaceholder": "Añadir un comentario…",
+      "commentPlaceholder": "Dejar un comentario…",
+      "comment": "Comentar",
+      "approve": "Aprobar",
+      "requestChanges": "Solicitar cambios",
+      "reply": "Responder",
+      "replyPlaceholder": "Responder…",
+      "reviewThreads": "Comentarios de revisión",
+      "details": "Detalles",
+      "unknownAuthor": "Desconocido",
+      "activity": {
+        "opened": "abrió esta pull request",
+        "commented": "comentó",
+        "approved": "aprobó estos cambios",
+        "changesRequested": "solicitó cambios",
+        "reviewDismissed": "descartó una revisión",
+        "reviewed": "revisó"
+      },
+      "summary": {
+        "label": "Resumen de la pull request",
+        "branch": "Rama",
+        "reviewers": "Revisores",
+        "noReviewers": "Sin revisores",
+        "comments": "Comentarios",
+        "commentCount_one": "{{count}} comentario",
+        "commentCount_other": "{{count}} comentarios",
+        "checks": "Comprobaciones",
+        "noChecks": "Sin comprobaciones de CI",
+        "checksFailed": "Las comprobaciones fallaron",
+        "status": "Estado"
+      },
+      "tabs": {
+        "conversation": "Conversación",
+        "commits": "Commits",
+        "checks": "Comprobaciones",
+        "changes": "Cambios"
+      },
+      "checks": {
+        "none": "No se informaron comprobaciones",
+        "noneHint": "No se ejecutaron comprobaciones de CI ni estados en el commit de cabecera de esta pull request.",
+        "allPassed": "Todas las comprobaciones pasaron",
+        "someFailed": "Algunas comprobaciones fallaron",
+        "pending": "Comprobaciones en curso",
+        "passedShort": "Superada",
+        "failedShort": "Fallida",
+        "runningShort": "En curso",
+        "checkingShort": "Comprobando",
+        "noneShort": "Sin CI",
+        "unavailableShort": "CI no disponible",
+        "branchStatus": "CI de la pull request #{{number}}: {{status}}"
+      },
+      "commits": {
+        "backToList": "Todos los commits",
+        "none": "Sin commits"
+      },
+      "changes": {
+        "title": "Archivos modificados",
+        "noFiles": "No hay cambios de archivos",
+        "tooLarge": "El archivo es demasiado grande para mostrar el diff",
+        "unavailable": "Cambios no disponibles",
+        "unavailableHint": "No se pudieron resolver los commits base y de cabecera de la pull request."
+      },
+      "status": {
+        "open": "Abierta",
+        "merged": "Fusionada",
+        "closed": "Cerrada",
+        "draft": "Borrador"
+      },
+      "actions": {
+        "label": "Acciones del pull request",
+        "confirmMergeTitle": "¿Fusionar el pull request?",
+        "confirmMergeMessage": "GitHub fusionará la rama de origen del pull request actual con la rama base.",
+        "merge": "Fusionar",
+        "squash": "Combinar commits y fusionar",
+        "rebase": "Rebase y fusionar",
+        "mergeSuccess": "Pull request fusionado",
+        "mergeRequested": "Fusión solicitada",
+        "removedFromQueue": "Eliminado de la cola de fusión",
+        "autoMergeEnabled": "Fusión automática activada",
+        "autoMergeDisabled": "Fusión automática desactivada",
+        "confirmCloseTitle": "¿Cerrar el pull request?",
+        "confirmCloseMessage": "El pull request seguirá disponible y podrá reabrirse más adelante.",
+        "closeSuccess": "Pull request cerrado",
+        "reopen": "Reabrir pull request",
+        "reopenSuccess": "Pull request reabierto",
+        "enableAutoMerge": "Activar fusión automática",
+        "mergeWhenReady": "Fusionar cuando esté listo",
+        "disableAutoMerge": "Desactivar fusión automática",
+        "removeFromMergeQueue": "Eliminar de la cola de fusión",
+        "merged": "Fusionado",
+        "closed": "Cerrado",
+        "draft": "Borrador",
+        "inMergeQueue": "En la cola de fusión",
+        "approvalRequired": "Se requiere aprobación",
+        "changesRequested": "Cambios solicitados",
+        "checksFailed": "Comprobaciones fallidas",
+        "checksPending": "Comprobaciones pendientes",
+        "mergeBlocked": "Fusión bloqueada",
+        "searchReviewers": "Buscar revisores",
+        "reviewersLoadFailed": "No se pudieron cargar los revisores",
+        "noReviewers": "No hay revisores disponibles",
+        "reviewersUpdated": "Revisores actualizados",
+        "reviewersCount_one": "{{count}} revisor",
+        "reviewersCount_other": "{{count}} revisores",
+        "reviewers": "Revisores",
+        "tooltips": {
+          "merge": "Fusionar este pull request en GitHub",
+          "alreadyMerged": "Este pull request ya está fusionado",
+          "reopenBeforeMerging": "Reabre este pull request antes de fusionarlo",
+          "markReady": "Marca este pull request como listo para revisión antes de fusionarlo",
+          "mergeQueue": "GitHub fusionará este pull request mediante la cola de fusión",
+          "approvalRequired": "GitHub requiere la aprobación de una revisión antes de fusionar",
+          "changesRequested": "Los cambios solicitados deben resolverse antes de fusionar",
+          "resolveConflicts": "Resuelve los conflictos antes de fusionar",
+          "checksFailed": "Las comprobaciones obligatorias deben superarse antes de fusionar",
+          "checksPending": "Espera las comprobaciones obligatorias o activa la fusión automática",
+          "mergeBlocked": "GitHub informa de requisitos de fusión pendientes"
+        }
       }
     }
   },
@@ -1693,7 +1914,6 @@
     "ramCurrentSession": "Sesión actual",
     "ramChatRenderedTree": "Árbol renderizado de Chat",
     "ramSessionStore": "Store de sesiones",
-    "ramStartSidebar": "Barra lateral Start",
     "ramSessionSidebar": "Barra lateral Session",
     "ramSecondLevelSidebars": "Barras laterales de segundo nivel",
     "ramSettingsSidebar": "Barra lateral Settings",
@@ -2128,20 +2348,7 @@
     }
   },
   "dragDrop": {
-    "dropFilesToUpload": "Drop files to upload",
-    "dropFileToChat": "Drop file to add to chat",
-    "dropFolderToAdd": "Drop folder to add repo",
-    "releaseToAddFiles": "Release to add files to your session",
-    "releaseToAddFileToChat": "Release to add file to chat (like ⌘L)",
-    "releaseToOpenFolder": "Release to open the folder",
-    "folderDetected": "Folder Detected",
-    "openSpotlightToAdd": "Open Spotlight to add this folder as a repo",
-    "openSpotlight": "Open Spotlight",
-    "addedToChat": "Added \"{{name}}\" to chat",
-    "couldNotExtractPath": "Could not extract file path from drop",
-    "couldNotExtractPathFromItem": "Could not extract file path from dropped item",
-    "dropFilesHere": "Drop files here",
-    "dragFilesFromIde": "Drag files or tabs from VS Code to add them to chat"
+    "couldNotExtractPathFromItem": "Could not extract file path from dropped item"
   },
   "contextList": {
     "task": "Task",
@@ -2257,8 +2464,8 @@
     "selectRepoToStart": "Selecciona un Repo para empezar"
   },
   "quitConfirmation": {
-    "title": "¿Salir de ORGII?",
-    "subtitle": "Las sesiones en ejecución conservarán su estado actual. Puedes volver a abrir ORGII más tarde.",
+    "title": "¿Salir de ORG-2?",
+    "subtitle": "Las sesiones en ejecución conservarán su estado actual. Puedes volver a abrir ORG-2 más tarde.",
     "cancel": "Cancelar",
     "confirm": "Salir"
   },
@@ -2289,5 +2496,224 @@
     "downloadedOfTotal": "{{downloaded}} de {{total}}",
     "preparingDownload": "Preparando descarga…",
     "downloadingAndInstalling": "Descargando e instalando actualización (v{{version}})…"
+  },
+  "teamInbox": {
+    "title": "Bandeja del equipo",
+    "listLabel": "Lista de la bandeja del equipo",
+    "itemsLabel": "Elementos de la bandeja del equipo",
+    "unreadCount": "{{count}} sin leer",
+    "allRead": "Todo al día",
+    "loadMore": "Cargar más",
+    "filters": {
+      "all": "Todos",
+      "mentions": "Menciones",
+      "assigned": "Asignados"
+    },
+    "sections": {
+      "reviewRequested": "Revisión solicitada",
+      "authoredByMe": "Creadas por mí",
+      "otherTodos": "Otras tareas"
+    },
+    "status": {
+      "read": "Leído",
+      "unread": "Sin leer"
+    },
+    "row": {
+      "assignedSummary": "{{status}} · {{priority}}",
+      "ariaLabel": "{{title}}, {{status}}"
+    },
+    "search": {
+      "placeholder": "Buscar en la bandeja",
+      "ariaLabel": "Buscar en la bandeja del equipo"
+    },
+    "groups": {
+      "today": "Hoy",
+      "yesterday": "Ayer",
+      "thisWeek": "Esta semana",
+      "earlier": "Anteriores"
+    },
+    "empty": {
+      "title": "Todavía no hay nada aquí",
+      "subtitle": "Las menciones y los elementos de trabajo asignados aparecerán aquí.",
+      "selectTitle": "Selecciona un elemento",
+      "selectSubtitle": "Consulta el contexto del comentario o los detalles del elemento de trabajo",
+      "mentions": {
+        "title": "Sin menciones",
+        "subtitle": "Cuando un compañero te mencione con @ en un comentario, aparecerá aquí"
+      },
+      "assigned": {
+        "title": "No tienes nada asignado",
+        "subtitle": "Los elementos de trabajo asignados a ti aparecerán aquí."
+      },
+      "noResults": {
+        "title": "Sin coincidencias",
+        "subtitle": "Ningún elemento coincide con «{{query}}»."
+      }
+    },
+    "loading": "Cargando la bandeja del equipo…",
+    "drop": {
+      "title": "Suelta aquí para crear un elemento de trabajo",
+      "subtitle": "Revisa la instantánea de la sesión y luego crea o transfiere el elemento de trabajo.",
+      "processing": "Creando un elemento de trabajo a partir de «{{title}}»…",
+      "processingHint": "Leyendo la sesión y resolviendo los miembros del proyecto.",
+      "success": "Elemento de trabajo creado",
+      "reused": "Elemento de trabajo existente actualizado",
+      "failed": "No se pudo crear el elemento de trabajo",
+      "error": "No se puede crear un elemento de trabajo a partir de esta sesión.",
+      "open": "Abrir",
+      "dismiss": "Descartar"
+    },
+    "handoff": {
+      "title": "Crear desde la sesión",
+      "createFromSession": "Crear elemento de trabajo del equipo…",
+      "project": "Proyecto de destino",
+      "chooseProject": "Elegir un proyecto",
+      "recipientSelf": "{{name}} (yo)",
+      "chooseRecipient": "Elegir un destinatario",
+      "todoCount_one": "{{count}} pendiente",
+      "todoCount_other": "{{count}} pendientes",
+      "workItemTitle": "Título del elemento de trabajo",
+      "assignTo": "Asignar a",
+      "note": "Nota de traspaso",
+      "notePlaceholder": "Indica qué está listo, qué queda pendiente y qué debería ocurrir a continuación.",
+      "selfHint": "Asignarte esto a ti mismo crea un elemento de trabajo normal, sin solicitud de traspaso.",
+      "submitHandoff": "Crear y traspasar",
+      "submitCreate": "Crear elemento de trabajo",
+      "preparing": "Preparando «{{title}}»…",
+      "preparationError": {
+        "session_unavailable": "Esta sesión ya no está disponible. Vuelve a abrirla e inténtalo de nuevo.",
+        "project_unavailable": "El proyecto de esta sesión ya no está disponible.",
+        "identity_unavailable": "Tu identidad no es miembro del proyecto de esta sesión.",
+        "no_project": "No hay ningún proyecto elegible disponible. Crea o únete a un proyecto e inténtalo de nuevo.",
+        "unknown": "No se puede preparar esta sesión. Actualiza la bandeja del equipo e inténtalo de nuevo."
+      },
+      "submitError": "No se pudo crear el elemento de trabajo. Revisa el destinatario e inténtalo de nuevo.",
+      "pendingTitle": "Traspaso de {{name}}",
+      "acceptedTitle": "Aceptado por {{name}}",
+      "returnedTitle": "Devuelto por {{name}}",
+      "noNote": "Sin nota de traspaso.",
+      "statusLabel": "Traspaso del elemento de trabajo",
+      "return": "Devolver",
+      "accept": "Aceptar",
+      "returnTitle": "¿Devolver este traspaso?",
+      "confirmReturn": "Devolver al remitente",
+      "returnHint": "Indica a {{name}} qué necesita aclaración o seguimiento. El elemento de trabajo se le reasignará.",
+      "returnPlaceholder": "¿Qué debe cambiar antes de poder traspasarlo?",
+      "responseError": "No se pudo guardar la respuesta del traspaso. Inténtalo de nuevo.",
+      "identityUnavailable": "No se pudo verificar tu identidad de equipo. Revisa tu perfil de proyecto antes de responder.",
+      "rowPending": "De {{name}} · Esperando respuesta",
+      "rowAccepted": "Traspaso aceptado · {{status}} · {{priority}}",
+      "rowReturned": "Devuelto por {{name}} · {{status}} · {{priority}}"
+    },
+    "errors": {
+      "loadTitle": "No se pudo cargar la bandeja del equipo",
+      "load": "No se pudo cargar la bandeja del equipo",
+      "loadMore": "No se pudieron cargar más elementos de la bandeja del equipo. Inténtalo de nuevo.",
+      "refresh": "No se pudo actualizar la bandeja del equipo",
+      "markRead": "No se pudo marcar este elemento como leído. Inténtalo de nuevo.",
+      "markUnread": "No se pudo marcar este elemento como no leído. Inténtalo de nuevo.",
+      "markAllRead": "No se pudieron marcar todos los elementos como leídos. Inténtalo de nuevo.",
+      "identity": "Tu cuenta no se pudo asociar a ningún miembro del proyecto. Revisa el correo electrónico de tu perfil de proyecto.",
+      "partialLoad": "Algunas fuentes de la bandeja del equipo no se pudieron actualizar. Los elementos disponibles se siguen mostrando",
+      "pullRequestsPartialLoad": "No se pudieron actualizar algunas pull requests",
+      "pullRequestsPartialLoadHelp": "Los elementos disponibles se siguen mostrando; actualiza para intentar cargar de nuevo las pull requests que faltan",
+      "workItemContext": "Parte del contexto del proyecto no está disponible. El elemento de trabajo sigue siendo utilizable.",
+      "workItemLoad": "No se pudo cargar este elemento de trabajo. Inténtalo de nuevo.",
+      "workItemUpdate": "No se pudo guardar el último cambio del elemento de trabajo. Inténtalo de nuevo."
+    },
+    "detail": {
+      "assignedSubtitle": "Elemento de trabajo asignado",
+      "standaloneProject": "Independiente",
+      "mentionSubtitle": "Mencionado en un comentario",
+      "mentionedYou": "te mencionó",
+      "threadComments_one": "{{count}} comentario en este hilo",
+      "threadComments_other": "{{count}} comentarios en este hilo"
+    },
+    "actions": {
+      "markRead": "Marcar como leído",
+      "markUnread": "Marcar como no leído",
+      "openWorkItem": "Abrir elemento de trabajo",
+      "openSession": "Abrir sesión"
+    },
+    "fields": {
+      "status": "Estado",
+      "priority": "Prioridad",
+      "assignee": "Responsable",
+      "workItemId": "ID del elemento de trabajo",
+      "session": "Sesión",
+      "comments": "Comentarios",
+      "threadId": "ID del hilo",
+      "commentId": "ID del comentario"
+    },
+    "workItemStatus": {
+      "backlog": "Pendiente",
+      "todo": "Por hacer",
+      "in_progress": "En curso",
+      "in_review": "En revisión",
+      "blocked": "Bloqueado",
+      "done": "Hecho",
+      "cancelled": "Cancelado"
+    },
+    "priority": {
+      "none": "Sin prioridad",
+      "low": "Baja",
+      "medium": "Media",
+      "high": "Alta",
+      "urgent": "Urgente"
+    }
+  },
+  "windowChrome": {
+    "menus": {
+      "file": "Archivo",
+      "edit": "Editar",
+      "view": "Ver",
+      "window": "Ventana",
+      "help": "Ayuda",
+      "aria": "Menú {{label}}"
+    },
+    "items": {
+      "quitOrg2": "Salir de ORG-2",
+      "newSession": "Nueva sesión",
+      "openFolder": "Abrir carpeta...",
+      "addFolderToWorkspace": "Añadir carpeta al espacio de trabajo...",
+      "saveWorkspaceAs": "Guardar espacio de trabajo como...",
+      "closeWindow": "Cerrar ventana",
+      "undo": "Deshacer",
+      "redo": "Rehacer",
+      "cut": "Cortar",
+      "copy": "Copiar",
+      "paste": "Pegar",
+      "selectAll": "Seleccionar todo",
+      "commandPalette": "Paleta de comandos",
+      "goToFile": "Ir al archivo...",
+      "selectModel": "Seleccionar modelo...",
+      "switchWorkspace": "Cambiar espacio de trabajo...",
+      "switchBranch": "Cambiar rama...",
+      "switchRunningLocation": "Cambiar ubicación de ejecución...",
+      "settings": "Configuración...",
+      "zoomIn": "Acercar",
+      "zoomOut": "Alejar",
+      "actualSize": "Tamaño real",
+      "minimize": "Minimizar",
+      "maximizeRestore": "Maximizar / Restaurar",
+      "maximizeWorkstation": "Maximizar estación de trabajo",
+      "documentation": "Documentación",
+      "reportIssue": "Informar de un problema"
+    },
+    "controls": {
+      "minimizeWindow": "Minimizar ventana",
+      "maximizeRestoreWindow": "Maximizar o restaurar ventana",
+      "closeWindow": "Cerrar ventana"
+    }
+  },
+  "workManagementTable": {
+    "columns": {
+      "id": "ID",
+      "titleContext": "Título / contexto",
+      "status": "Estado",
+      "assignee": "Responsable",
+      "updated": "Actualizado"
+    },
+    "selectRow": "Seleccionar {{id}}"
   }
 }

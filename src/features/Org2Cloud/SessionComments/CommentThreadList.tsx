@@ -1,7 +1,7 @@
 /**
  * CommentThreadList — presentational thread list + composer shared by the
  * turn-anchored inline panels and the session-level notes dialog (design
- * session-comments-design-0707 §4).
+ * managed-cloud collaboration design).
  *
  * PR-review semantics: flat threads (top-level + one reply level), a
  * three-state status on thread heads (Active / Resolved / Won't fix), edit
@@ -16,25 +16,26 @@
  * cancel-restore pattern (no cross-component atom needed: the composer
  * state never left this component).
  *
- * Agent surface (2026-07-11 rework): follow-ups run IN PLACE on the owning
- * session, so the per-thread task chrome is gone. What remains: the literal
- * `@agent ` prefix on the TOP-LEVEL composer creates the pickup task
- * silently (comment-first — post verbatim through the untouched add path,
- * then create; create is idempotent per comment), `kind='agent_report'`
- * replies render as ordinary replies with a tiny agent affix, and a thread
- * whose task/run is live shows one minimal "Agent is addressing…" line.
+ * Agent surface: follow-ups run IN PLACE on the owning session. The literal
+ * `@agent ` prefix on the TOP-LEVEL composer runs a personal scoped round
+ * (comment-first — the comment posts verbatim through the untouched add
+ * path, then the round fires), `kind='agent_report'` replies render as
+ * ordinary replies with a tiny agent affix, and a thread whose round is live
+ * shows one minimal "Agent is addressing…" line.
  */
-import { Bot, Check, Loader2, Pencil, Trash2 } from "lucide-react";
-import React, { useCallback, useState } from "react";
+import { AtSign, Bot, Check, Loader2, Pencil, Trash2 } from "lucide-react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import Button from "@src/components/Button";
+import Dropdown from "@src/components/Dropdown";
 import Message from "@src/components/Message";
 import TextButton from "@src/components/TextButton";
 import Textarea from "@src/components/Textarea";
 import Tooltip from "@src/components/Tooltip";
 import { formatRelativeTime } from "@src/util/time/formatRelativeTime";
 
+import type { CloudOrgMember } from "../org2CloudClient";
 import {
   CLOUD_COMMENT_MAX_BODY_LENGTH,
   type CloudCommentResolution,
@@ -47,11 +48,45 @@ import {
 } from "../org2CloudSessionCommentsAtom";
 import { useSessionCommentsContext } from "./SessionCommentsContext";
 import {
+  AGENT_COMPOSER_PREFIX,
   detectAgentPrefix,
+  shouldShowAgentSuggestion,
   splitAgentMentionBody,
 } from "./commentAgentAffordances";
 
 export type CommentThreadStatus = "active" | CloudCommentResolution;
+
+interface ResolvedMention {
+  id: string;
+  name: string;
+}
+
+function resolveMentions(
+  mentionedUserIds: readonly string[],
+  members: readonly CloudOrgMember[]
+): ResolvedMention[] {
+  const nameById = new Map(
+    members.map((member) => [
+      member.userId,
+      member.displayName ?? member.userId,
+    ])
+  );
+  return mentionedUserIds.map((id) => ({
+    id,
+    name: nameById.get(id) ?? id,
+  }));
+}
+
+const MemberMentionChip: React.FC<
+  ResolvedMention & { dataTestId?: string }
+> = ({ name, dataTestId }) => (
+  <span
+    className="max-w-[160px] truncate rounded-full border border-primary-3 bg-primary-1 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary-7"
+    data-testid={dataTestId}
+  >
+    @{name}
+  </span>
+);
 
 const THREAD_STATUS_OPTIONS: readonly CommentThreadStatus[] = [
   "active",
@@ -76,7 +111,11 @@ export interface CommentThreadListProps {
   composerDisabled?: boolean;
   composerDisabledReason?: string;
   composerPlaceholder?: string;
+  /** Optional top-level composer cancel action (inline panels use it to close). */
+  onComposerCancel?: () => void;
   emptyLabel?: string;
+  /** Explicit override for header dialogs mounted outside the provider tree. */
+  mentionableMembers?: readonly CloudOrgMember[];
   /**
    * Resolves with the created row when the caller's add path returns it
    * (context surfaces do) — the `@agent ` prefix needs the new comment's
@@ -85,7 +124,8 @@ export interface CommentThreadListProps {
    */
   onAdd: (
     body: string,
-    parentId?: string
+    parentId?: string,
+    mentionedUserIds?: string[]
   ) => Promise<CloudSessionComment | undefined>;
   onEdit: (commentId: string, body: string) => Promise<void>;
   onDelete: (commentId: string) => Promise<void>;
@@ -101,7 +141,9 @@ interface ComposerProps {
   submitLabel: string;
   autoFocus?: boolean;
   disabled?: boolean;
-  onSubmit: (body: string) => Promise<void>;
+  allowAgentMention?: boolean;
+  mentionableMembers?: readonly CloudOrgMember[];
+  onSubmit: (body: string, mentionedUserIds: string[]) => Promise<void>;
   onCancel?: () => void;
   testId?: string;
 }
@@ -112,32 +154,53 @@ const CommentComposer: React.FC<ComposerProps> = ({
   submitLabel,
   autoFocus = false,
   disabled = false,
+  allowAgentMention = false,
+  mentionableMembers = [],
   onSubmit,
   onCancel,
   testId,
 }) => {
   const { t } = useTranslation("navigation");
   const [body, setBody] = useState("");
+  const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const trimmed = body.trim();
+  const showAgentSuggestion =
+    allowAgentMention && shouldShowAgentSuggestion(body);
+  const mentionOptions = useMemo(
+    () =>
+      mentionableMembers.map((member) => ({
+        value: member.userId,
+        label: member.displayName ?? member.userId,
+        dataTestId: `session-comment-mention-${member.userId}`,
+      })),
+    [mentionableMembers]
+  );
+  const mentionedNames = useMemo(
+    () => resolveMentions(mentionedUserIds, mentionableMembers),
+    [mentionableMembers, mentionedUserIds]
+  );
 
   const submit = useCallback(async () => {
     if (!trimmed || busy || disabled) return;
     setBusy(true);
     try {
-      await onSubmit(trimmed);
+      await onSubmit(trimmed, mentionedUserIds);
       setBody("");
+      setMentionedUserIds([]);
     } catch {
       // Draft restore: the text stays in the composer.
       Message.error(t("cloud.comments.addError"));
     } finally {
       setBusy(false);
     }
-  }, [trimmed, busy, disabled, onSubmit, t]);
+  }, [trimmed, busy, disabled, mentionedUserIds, onSubmit, t]);
 
   return (
     <div className="flex flex-col gap-1.5" data-testid={testId}>
       <Textarea
+        ref={textareaRef}
         value={body}
         onChange={(value) => setBody(value)}
         placeholder={placeholder}
@@ -154,6 +217,57 @@ const CommentComposer: React.FC<ComposerProps> = ({
           }
         }}
       />
+      {showAgentSuggestion ? (
+        <button
+          type="button"
+          className="flex items-center gap-1.5 rounded-md border border-border-2 bg-bg-1 px-2 py-1.5 text-left text-[11px] text-text-2 transition-colors hover:bg-fill-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-6/30"
+          data-testid="session-comment-agent-suggestion"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            setBody(AGENT_COMPOSER_PREFIX);
+            requestAnimationFrame(() => textareaRef.current?.focus());
+          }}
+        >
+          <Bot size={12} strokeWidth={2} className="text-primary-6" />
+          <span className="font-medium">@agent</span>
+          <span className="text-text-3">
+            {t("cloud.comments.task.mentionSuggestion")}
+          </span>
+        </button>
+      ) : null}
+      {mentionOptions.length > 0 ? (
+        <div className="flex min-w-0 flex-wrap items-center gap-1">
+          <Dropdown
+            options={mentionOptions}
+            value={mentionedUserIds}
+            mode="multiple"
+            showSearch
+            searchPlaceholder={t(
+              "cloud.comments.searchMembers",
+              "Search members"
+            )}
+            position="top-start"
+            avoidViewportOverflow
+            onSelect={(value) =>
+              setMentionedUserIds(Array.isArray(value) ? value.map(String) : [])
+            }
+          >
+            <Button
+              htmlType="button"
+              variant="tertiary"
+              size="mini"
+              icon={<AtSign size={12} strokeWidth={2} />}
+              disabled={disabled || busy}
+              data-testid={testId ? `${testId}-mention-members` : undefined}
+            >
+              {t("cloud.comments.mentionMembers", "Mention")}
+            </Button>
+          </Dropdown>
+          {mentionedNames.map((member) => (
+            <MemberMentionChip key={member.id} {...member} />
+          ))}
+        </div>
+      ) : null}
       <div className="flex items-center justify-end gap-1.5">
         {onCancel && (
           <Button
@@ -184,6 +298,7 @@ const CommentComposer: React.FC<ComposerProps> = ({
 
 interface CommentRowProps {
   comment: CloudSessionComment;
+  mentionableMembers: readonly CloudOrgMember[];
   isReply: boolean;
   /** Thread-head verdict; null = active (and always null on replies). */
   resolution: CloudCommentResolution | null;
@@ -197,6 +312,7 @@ interface CommentRowProps {
 
 const CommentRow: React.FC<CommentRowProps> = ({
   comment,
+  mentionableMembers,
   isReply,
   resolution,
   viewerUserId,
@@ -220,6 +336,10 @@ const CommentRow: React.FC<CommentRowProps> = ({
   const anyBusy = busy || rowBusy;
   const currentStatus: CommentThreadStatus = resolution ?? "active";
   const agentMention = isReply ? null : splitAgentMentionBody(comment.body);
+  const mentionedMembers = useMemo(
+    () => resolveMentions(comment.mentionedUserIds ?? [], mentionableMembers),
+    [comment.mentionedUserIds, mentionableMembers]
+  );
 
   const run = useCallback(
     async (operation: () => Promise<void>, errorKey: string) => {
@@ -408,23 +528,36 @@ const CommentRow: React.FC<CommentRowProps> = ({
           {t("cloud.comments.deletedComment")}
         </div>
       ) : (
-        <div className="whitespace-pre-wrap break-words text-[12px] text-text-1">
-          {agentMention ? (
-            <>
-              <span
-                className="mr-1 inline-flex items-center gap-1 rounded-full border border-primary-3 bg-primary-1 px-1.5 py-0.5 align-middle text-[10px] font-medium leading-none text-primary-7"
-                data-testid="comment-agent-mention-pill"
-                aria-label={agentMention.mention}
-              >
-                <Bot size={10} strokeWidth={2.25} aria-hidden="true" />
-                {agentMention.mention}
-              </span>
-              {agentMention.brief}
-            </>
-          ) : (
-            comment.body
-          )}
-        </div>
+        <>
+          {mentionedMembers.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {mentionedMembers.map((member) => (
+                <MemberMentionChip
+                  key={member.id}
+                  {...member}
+                  dataTestId="comment-member-mention-pill"
+                />
+              ))}
+            </div>
+          ) : null}
+          <div className="whitespace-pre-wrap break-words text-[12px] text-text-1">
+            {agentMention ? (
+              <>
+                <span
+                  className="mr-1 inline-flex items-center gap-1 rounded-full border border-primary-3 bg-primary-1 px-1.5 py-0.5 align-middle text-[10px] font-medium leading-none text-primary-7"
+                  data-testid="comment-agent-mention-pill"
+                  aria-label={agentMention.mention}
+                >
+                  <Bot size={10} strokeWidth={2.25} aria-hidden="true" />
+                  {agentMention.mention}
+                </span>
+                {agentMention.brief}
+              </>
+            ) : (
+              comment.body
+            )}
+          </div>
+        </>
       )}
     </div>
   );
@@ -434,6 +567,7 @@ interface ThreadBlockProps {
   thread: CommentThread;
   viewerUserId: string | null;
   viewerIsAdmin: boolean;
+  mentionableMembers: readonly CloudOrgMember[];
   onAdd: CommentThreadListProps["onAdd"];
   onEdit: CommentThreadListProps["onEdit"];
   onDelete: CommentThreadListProps["onDelete"];
@@ -444,6 +578,7 @@ const ThreadBlock: React.FC<ThreadBlockProps> = ({
   thread,
   viewerUserId,
   viewerIsAdmin,
+  mentionableMembers,
   onAdd,
   onEdit,
   onDelete,
@@ -454,13 +589,11 @@ const ThreadBlock: React.FC<ThreadBlockProps> = ({
   const [replying, setReplying] = useState(false);
   const resolution = getThreadResolution(thread);
 
-  const task = context?.taskForThread(thread.top.id);
-  const agentBusy = Boolean(
-    (task &&
-      (context?.activeTaskRuns[task.id] !== undefined ||
-        ((task.state === "claimed" || task.state === "running") &&
-          !task.leaseExpired))) ||
-    (context?.addressRunActive && resolution === null)
+  const addressing = Boolean(
+    context?.addressRunActive &&
+    resolution === null &&
+    (context.addressRunSelectedHeadIds === null ||
+      context.addressRunSelectedHeadIds.has(thread.top.id))
   );
 
   const setStatus = useCallback(
@@ -475,6 +608,7 @@ const ThreadBlock: React.FC<ThreadBlockProps> = ({
     <div className="flex flex-col gap-2 rounded-md border border-border-1 bg-bg-2 px-2.5 py-2">
       <CommentRow
         comment={thread.top}
+        mentionableMembers={mentionableMembers}
         isReply={false}
         resolution={resolution}
         viewerUserId={viewerUserId}
@@ -484,10 +618,11 @@ const ThreadBlock: React.FC<ThreadBlockProps> = ({
         onDelete={onDelete}
         onSetStatus={setStatus}
       />
-      {agentBusy && (
+      {addressing && (
         <div
           className="flex items-center gap-1.5 text-[11px] text-text-3"
-          data-testid="comment-thread-agent-busy"
+          data-testid="comment-thread-agent-status"
+          data-run-state="active"
         >
           <Loader2 size={12} strokeWidth={2} className="animate-spin" />
           {t("cloud.comments.agentAddressing")}
@@ -497,6 +632,7 @@ const ThreadBlock: React.FC<ThreadBlockProps> = ({
         <CommentRow
           key={reply.id}
           comment={reply}
+          mentionableMembers={mentionableMembers}
           isReply
           resolution={null}
           viewerUserId={viewerUserId}
@@ -512,8 +648,9 @@ const ThreadBlock: React.FC<ThreadBlockProps> = ({
             placeholder={t("cloud.comments.replyPlaceholder")}
             submitLabel={t("cloud.comments.reply")}
             autoFocus
-            onSubmit={async (body) => {
-              await onAdd(body, thread.top.id);
+            mentionableMembers={mentionableMembers}
+            onSubmit={async (body, mentionedUserIds) => {
+              await onAdd(body, thread.top.id, mentionedUserIds);
               setReplying(false);
             }}
             onCancel={() => setReplying(false)}
@@ -541,7 +678,9 @@ const CommentThreadList: React.FC<CommentThreadListProps> = ({
   composerDisabled = false,
   composerDisabledReason,
   composerPlaceholder,
+  onComposerCancel,
   emptyLabel,
+  mentionableMembers: mentionableMembersOverride,
   onAdd,
   onEdit,
   onDelete,
@@ -549,38 +688,39 @@ const CommentThreadList: React.FC<CommentThreadListProps> = ({
 }) => {
   const { t } = useTranslation("navigation");
   const context = useSessionCommentsContext();
+  const mentionableMembers = (
+    mentionableMembersOverride ??
+    context?.mentionableMembers ??
+    []
+  ).filter((member) => member.userId !== viewerUserId);
   const [showResolved, setShowResolved] = useState(false);
 
   const openThreads = threads.filter((thread) => !isThreadResolved(thread));
   const resolvedThreads = threads.filter(isThreadResolved);
 
-  const createTask = context?.createTask;
+  const requestAgent = context?.requestAgent;
   const submitTopLevel = useCallback(
-    async (body: string): Promise<void> => {
-      const comment = await onAdd(body);
+    async (body: string, mentionedUserIds: string[]): Promise<void> => {
+      const comment = await onAdd(body, undefined, mentionedUserIds);
       // Beyond here the comment IS posted — never throw (a throw would
       // trigger the composer's draft restore for a send that succeeded).
       if (!comment || comment.parentId) return;
       if (!detectAgentPrefix(body)) return;
-      if (!createTask || !context?.canRunTasks) {
-        // No task surface here (header notes dialog mounts outside the
-        // provider; or no cloud sign-in): the advertised `@agent ` sugar
-        // must not be SILENTLY inert — the comment posted verbatim, say
-        // that no agent was assigned instead of letting the user believe
-        // one was.
-        Message.info(t("cloud.comments.task.assignUnavailableHere"));
+      if (!requestAgent || !context?.canRunAgent) {
+        // Read-only/imported surfaces treat a manually typed @agent prefix as
+        // ordinary comment text. There is no assignment, toast or side effect.
         return;
       }
       // Comment-first (design §4 item 2): the body landed VERBATIM above,
       // so a failed create degrades to a normal thread — and create is
       // idempotent per comment (retry-safe by re-sending `@agent `).
       try {
-        await createTask(comment.id);
+        await requestAgent(comment.id);
       } catch {
         Message.warning(t("cloud.comments.task.assignFailed"));
       }
     },
-    [onAdd, createTask, context?.canRunTasks, t]
+    [onAdd, requestAgent, context?.canRunAgent, t]
   );
 
   const composer = showComposer ? (
@@ -588,7 +728,10 @@ const CommentThreadList: React.FC<CommentThreadListProps> = ({
       placeholder={composerPlaceholder ?? t("cloud.comments.addPlaceholder")}
       submitLabel={t("cloud.comments.send")}
       disabled={composerDisabled}
+      allowAgentMention={Boolean(requestAgent && context?.canRunAgent)}
+      mentionableMembers={mentionableMembers}
       onSubmit={submitTopLevel}
+      onCancel={onComposerCancel}
       testId="session-comment-composer"
     />
   ) : null;
@@ -604,6 +747,7 @@ const CommentThreadList: React.FC<CommentThreadListProps> = ({
           thread={thread}
           viewerUserId={viewerUserId}
           viewerIsAdmin={viewerIsAdmin}
+          mentionableMembers={mentionableMembers}
           onAdd={onAdd}
           onEdit={onEdit}
           onDelete={onDelete}
@@ -628,6 +772,7 @@ const CommentThreadList: React.FC<CommentThreadListProps> = ({
             thread={thread}
             viewerUserId={viewerUserId}
             viewerIsAdmin={viewerIsAdmin}
+            mentionableMembers={mentionableMembers}
             onAdd={onAdd}
             onEdit={onEdit}
             onDelete={onDelete}

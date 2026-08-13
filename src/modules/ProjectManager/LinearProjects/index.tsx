@@ -32,9 +32,6 @@ import LinearProjectSettings from "./components/LinearProjectSettings/index";
 import { useLinearIndexData } from "./useLinearIndexData";
 import { useLinearProjectsData } from "./useLinearProjectsData";
 
-const LINEAR_PROJECTS_VISIBLE_TABS = ["Overview", "List", "Settings"] as const;
-const LINEAR_WORK_ITEMS_VISIBLE_TABS = ["List"] as const;
-
 interface LinearProjectsPageProps {
   surface?: "projects" | "work-items";
   connectionId?: string;
@@ -87,6 +84,7 @@ const LinearProjectsPage: React.FC<LinearProjectsPageProps> = ({
     projectId,
     surface,
     teamId,
+    isActive,
   });
   const {
     effectiveConnectionId,
@@ -114,6 +112,7 @@ const LinearProjectsPage: React.FC<LinearProjectsPageProps> = ({
   const data = useLinearProjectsData({
     connectionId: effectiveConnectionId,
     projectId,
+    isActive,
   });
   const {
     project,
@@ -146,7 +145,6 @@ const LinearProjectsPage: React.FC<LinearProjectsPageProps> = ({
     setProjectDraft,
     setCreatingProject,
     handleRefresh,
-    handleTabChange,
     handleNavigate,
     loadWorkflowStates,
     handleCreateProject,
@@ -226,11 +224,6 @@ const LinearProjectsPage: React.FC<LinearProjectsPageProps> = ({
       ? t("workspace.workItems")
       : t("workspace.projects");
 
-  const visibleTabs =
-    surface === "work-items"
-      ? LINEAR_WORK_ITEMS_VISIBLE_TABS
-      : LINEAR_PROJECTS_VISIBLE_TABS;
-
   const linearProjectsGroupModeSelect = useMemo(
     () => (
       <Select
@@ -238,7 +231,7 @@ const LinearProjectsPage: React.FC<LinearProjectsPageProps> = ({
         onChange={handleLinearProjectsGroupModeChange}
         options={linearProjectsGroupModeOptions}
         size="small"
-        variant="ghost"
+        appearance="ghost"
         radius="lg"
         dropdownWidthMode="auto"
         dropdownAlign="right"
@@ -439,14 +432,12 @@ const LinearProjectsPage: React.FC<LinearProjectsPageProps> = ({
           projectName={project?.name ?? projectName ?? surfaceTitle}
           breadcrumbSegments={breadcrumbSegments}
           activeTab={activeTab}
-          onTabChange={handleTabChange}
           statusFilter={statusFilter}
           onStatusFilterChange={(value) =>
             setStatusFilter(value as Parameters<typeof setStatusFilter>[0])
           }
           statusCounts={statusCounts}
           onCollapseAll={handleCollapseAll}
-          visibleTabs={visibleTabs}
           leadingControls={headerLeadingControls}
           onRefresh={headerRefresh}
           refreshLoading={headerRefreshLoading}

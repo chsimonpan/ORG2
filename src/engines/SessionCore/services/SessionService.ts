@@ -11,7 +11,11 @@
  *
  * Usage:
  *   import { SessionService } from "@src/engines/SessionCore/services/SessionService";
- *   await SessionService.sendMessage({ sessionId, content: "fix the bug" });
+ *   await SessionService.sendMessage({
+ *     sessionId,
+ *     content: "fix the bug",
+ *     turnIntentSource: "user_submit",
+ *   });
  */
 import {
   CANCEL_REASON,
@@ -20,6 +24,7 @@ import {
   respondQuestion,
   sessionLaunch,
 } from "@src/api/tauri/agent";
+import { rpc } from "@src/api/tauri/rpc";
 import { ROUTES } from "@src/config/routes";
 import { getAdapterForSession } from "@src/engines/SessionCore/sync/types";
 import {
@@ -140,7 +145,8 @@ export const SessionService = {
     // creator picks from the same atom), so prefer the explicit param
     // when supplied and skip the gate when not — at create time there's
     // no persisted row to compare against yet.
-    const expectedRepoPath = params.projectRepoPath || params.repoPath || null;
+    const expectedRepoPath =
+      params.worktreePath || params.repoPath || params.projectRepoPath || null;
     const adeContext = collectAdeContext({ expectedRepoPath });
 
     const isCli = Boolean(params.cliAgentType);
@@ -153,13 +159,13 @@ export const SessionService = {
         ? { images: params.imageDataUrls }
         : {}),
       workspacePath: params.projectRepoPath || params.repoPath || undefined,
+      worktreePath: params.worktreePath || undefined,
       accountId: params.accountId || undefined,
       name: params.name || params.task.slice(0, 60),
       mode: params.mode || undefined,
       agentDefinitionId: params.agentDefinitionId || undefined,
       workItemId: params.workItemId || undefined,
       agentRole: params.agentRole || undefined,
-      worktreePath: params.repoPath || undefined,
       keySource: params.keySource || undefined,
       parentSessionId: params.parentSessionId || undefined,
       ideContext: adeContext,
@@ -251,10 +257,7 @@ export const SessionService = {
         };
       }
 
-      const session = await invokeTauri<{
-        sessionId: string;
-        status: string;
-      } | null>("cli_agent_status", { sessionId });
+      const session = await rpc.cli.status({ sessionId });
 
       if (!session) {
         throw new Error(`CLI session not found: ${sessionId}`);
@@ -296,6 +299,8 @@ export const SessionService = {
       isResume,
       clientMessageId,
       turnIntentId,
+      turnIntentSource,
+      directUserIntent,
     } = params;
     // Gate ADE context on the session row's persisted repo so a session
     // on repo A doesn't ship repo B's editor / git / LSP state when the
@@ -304,6 +309,7 @@ export const SessionService = {
     const sessionRow = getInstrumentedStore().get(sessionByIdAtom(sessionId));
     const adeContext = collectAdeContext({
       expectedRepoPath: sessionRow?.repoPath ?? null,
+      sessionId,
     });
     const adapter = getAdapterForSession(sessionId);
     if (!adapter) {
@@ -352,6 +358,8 @@ export const SessionService = {
         isResume,
         clientMessageId,
         turnIntentId,
+        turnIntentSource,
+        directUserIntent,
         adeContext,
         sessionRepoPath: sessionRow?.repoPath ?? null,
       });

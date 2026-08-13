@@ -20,7 +20,7 @@ import {
   transferCloudOwnership,
   updateCloudMemberRole,
 } from "./org2CloudManagementClient";
-import { sha256Hex } from "./org2CloudOrgManagement";
+import { CLOUD_INVITE_WEB_BASE_URL, sha256Hex } from "./org2CloudOrgManagement";
 
 const fetchMock = vi.fn();
 
@@ -124,7 +124,7 @@ describe("invites", () => {
     );
     expect(created.inviteId).toBe("inv-1");
     expect(created.inviteLink).toBe(
-      `orgii://cloud/join?invite=${created.inviteCode}`
+      `${CLOUD_INVITE_WEB_BASE_URL}#invite=${created.inviteCode}`
     );
   });
 
@@ -252,5 +252,32 @@ describe("error surface", () => {
       "cloud_leave_org failed with 500"
     );
     expect((error as Org2CloudManagementError).code).toBeNull();
+  });
+});
+
+describe("transport retry (WebKit stale keep-alive socket)", () => {
+  it("recovers when the first POST dies with 'Load failed'", async () => {
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("Load failed"))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    await expect(
+      updateCloudMemberRole("jwt-1", "org-1", "user-2", "admin")
+    ).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(lastBody()).toEqual({
+      p_org_id: "org-1",
+      p_user_id: "user-2",
+      p_role: "admin",
+    });
+  });
+
+  it("propagates the raw TypeError when the retry also fails", async () => {
+    fetchMock
+      .mockRejectedValueOnce(new TypeError("Load failed"))
+      .mockRejectedValueOnce(new TypeError("Load failed"));
+    await expect(leaveCloudOrg("jwt-1", "org-1")).rejects.toThrow(
+      "Load failed"
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

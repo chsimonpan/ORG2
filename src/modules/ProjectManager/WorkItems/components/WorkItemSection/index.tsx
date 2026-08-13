@@ -13,12 +13,18 @@ interface WorkItemSectionProps {
   status?: string;
   statusConfig: DropdownOption;
   count: number;
-  children: React.ReactNode;
+  children?: React.ReactNode;
   defaultExpanded?: boolean;
+  expanded?: boolean;
   label?: React.ReactNode;
   addButtonTitle?: string;
   onAddItem?: () => void;
   compact?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+  /** The virtualizer owns stickiness and row spacing in this mode. */
+  virtualizedHeader?: boolean;
+  /** Render as a full-width table section instead of an inset card group. */
+  variant?: "card" | "table";
 }
 
 const WorkItemSection: React.FC<WorkItemSectionProps> = ({
@@ -26,13 +32,18 @@ const WorkItemSection: React.FC<WorkItemSectionProps> = ({
   count,
   children,
   defaultExpanded = true,
+  expanded,
   label,
   addButtonTitle,
   onAddItem,
   compact = false,
+  onExpandedChange,
+  virtualizedHeader = false,
+  variant = "card",
 }) => {
   const { t } = useTranslation(["projects", "common"]);
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+  const [internalExpanded, setInternalExpanded] = useState(defaultExpanded);
+  const isExpanded = expanded ?? internalExpanded;
   const sectionLabel =
     label ?? t(`workItems.statusLabels.${statusConfig.value}`);
   const addTitle =
@@ -40,36 +51,57 @@ const WorkItemSection: React.FC<WorkItemSectionProps> = ({
     t("workItems.addStatusItem", {
       status: sectionLabel,
     });
+  const toggleExpanded = () => {
+    const nextExpanded = !isExpanded;
+    if (expanded === undefined) {
+      setInternalExpanded(nextExpanded);
+    }
+    onExpandedChange?.(nextExpanded);
+  };
+  const isTable = variant === "table";
   return (
     <div
-      className={`${compact ? "mb-2 px-0" : "mb-3 px-2 first:pt-2"} flex flex-col gap-1`}
+      className={`${
+        isTable
+          ? "p-0"
+          : virtualizedHeader
+            ? compact
+              ? "px-0"
+              : "px-2 pt-2"
+            : compact
+              ? "mb-2 px-0"
+              : "mb-3 px-2 first:pt-2"
+      } flex flex-col ${isTable ? "gap-0" : "gap-1"}`}
     >
       <div
         role="button"
         tabIndex={0}
-        className={`group sticky top-0 z-10 flex w-full cursor-pointer items-center gap-1 rounded-lg border-[0.5px] border-border-1 text-left transition-colors ${compact ? "h-8 bg-fill-2 px-1.5 hover:bg-fill-3" : "h-9 bg-workstation-bg px-2 hover:bg-surface-hover"}`}
-        onClick={() => setIsExpanded(!isExpanded)}
+        aria-expanded={isExpanded}
+        className={`group ${virtualizedHeader ? "" : "sticky top-0 z-10"} flex w-full cursor-pointer items-center gap-1 text-left transition-colors ${
+          isTable
+            ? "h-9 rounded-none border-0 border-b border-border-1 bg-workstation-bg px-2 hover:bg-fill-1"
+            : `rounded-lg border-[0.5px] border-border-1 ${
+                compact
+                  ? "h-8 bg-fill-2 px-1.5 hover:bg-fill-3"
+                  : "h-9 bg-workstation-bg px-2 hover:bg-surface-hover"
+              }`
+        }`}
+        onClick={toggleExpanded}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            setIsExpanded(!isExpanded);
+            toggleExpanded();
           }
         }}
       >
         {/* Chevron — actionCompactTreeRow inside 28×28 container to align with checkbox column */}
-        <Tooltip
-          content={t(isExpanded ? "common:collapse" : "common:expand")}
-          position="top"
-          mouseEnterDelay={300}
-        >
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center">
-            <div
-              className={`${HEADER_BUTTON.actionMdTreeRow} [&>svg]:transition-transform [&>svg]:duration-150 ${isExpanded ? "[&>svg]:rotate-90" : ""}`}
-            >
-              <ChevronRight size={HEADER_ICON_SIZE.sm} />
-            </div>
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center">
+          <div
+            className={`${HEADER_BUTTON.actionMdTreeRow} [&>svg]:transition-transform [&>svg]:duration-150 ${isExpanded ? "[&>svg]:rotate-90" : ""}`}
+          >
+            <ChevronRight size={HEADER_ICON_SIZE.sm} />
           </div>
-        </Tooltip>
+        </div>
 
         {/* Status icon - aligned with priority column */}
         <Tooltip content={sectionLabel} position="top" mouseEnterDelay={300}>
@@ -113,7 +145,11 @@ const WorkItemSection: React.FC<WorkItemSectionProps> = ({
           </Tooltip>
         )}
       </div>
-      {isExpanded && <div className="flex flex-col gap-1">{children}</div>}
+      {!virtualizedHeader && isExpanded && (
+        <div className={`flex flex-col ${isTable ? "gap-0" : "gap-1"}`}>
+          {children}
+        </div>
+      )}
     </div>
   );
 };

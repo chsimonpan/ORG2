@@ -20,6 +20,7 @@ import Button from "@src/components/Button";
 import Select from "@src/components/Select";
 import type { SelectOption } from "@src/components/Select/types";
 import Switch from "@src/components/Switch";
+import { loadSharedLocalKeys } from "@src/hooks/keyVault/sharedLocalKeyStore";
 import { createLogger } from "@src/hooks/logger";
 import {
   SECTION_ACTION_GAP_CLASSES,
@@ -72,7 +73,7 @@ const GatewayAgentCard: React.FC = () => {
     void (async () => {
       try {
         const [listed, binding] = await Promise.all([
-          rpc.validation.listKeys(),
+          loadSharedLocalKeys(),
           loadBinding(),
         ]);
         if (cancelled) return;

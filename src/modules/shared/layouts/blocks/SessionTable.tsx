@@ -13,6 +13,7 @@ export interface SessionTableItem {
   description?: React.ReactNode;
   statusLabel: React.ReactNode;
   statusColor?: string;
+  ownerLabel?: React.ReactNode;
   agentIcon?: React.ReactNode;
   agentLabel?: React.ReactNode;
   modelIcon?: React.ReactNode;
@@ -43,6 +44,7 @@ export interface SessionTableItem {
 export type SessionTableColumnKey =
   | "name"
   | "status"
+  | "owner"
   | "agent"
   | "model"
   | "workspace"
@@ -55,6 +57,13 @@ export type SessionTableColumnKey =
   | "lastUpdated"
   | "actions";
 
+export type SessionTableColumnOverrides = Partial<
+  Record<
+    SessionTableColumnKey,
+    Partial<Pick<SettingsTableColumn<SessionTableItem>, "label" | "width">>
+  >
+>;
+
 /**
  * Preserve established table layouts while allowing the Kanban list to opt
  * into its token-usage column. Row actions remain visible whenever supplied.
@@ -62,6 +71,7 @@ export type SessionTableColumnKey =
 const DEFAULT_COLUMN_VISIBILITY: Record<SessionTableColumnKey, boolean> = {
   name: true,
   status: true,
+  owner: false,
   agent: true,
   model: true,
   workspace: true,
@@ -88,9 +98,24 @@ export interface SessionTableProps {
   pageSizeOptions?: number[];
   /** Per-column overrides merged over the shared visibility defaults. */
   columnVisibility?: Partial<Record<SessionTableColumnKey, boolean>>;
+  /** Optional presentation overrides for consumers with a denser column. */
+  columnOverrides?: SessionTableColumnOverrides;
+  /** Override the shared Member label when owner means a more precise role. */
+  ownerColumnLabel?: React.ReactNode;
 }
 
 const EMPTY_CELL = "—";
+const OWNER_NAME_MAX_CHARACTERS = 12;
+
+export function truncateSessionOwnerLabel(
+  value: React.ReactNode | undefined
+): React.ReactNode | undefined {
+  if (typeof value !== "string") return value;
+  const characters = Array.from(value);
+  return characters.length > OWNER_NAME_MAX_CHARACTERS
+    ? `${characters.slice(0, OWNER_NAME_MAX_CHARACTERS).join("")}…`
+    : value;
+}
 
 function toSearchText(value: React.ReactNode | undefined): string {
   if (value == null) return "";
@@ -121,6 +146,7 @@ function matchesSessionSearch(
     toSearchText(item.title),
     toSearchText(item.description),
     toSearchText(item.statusLabel),
+    toSearchText(item.ownerLabel),
     toSearchText(item.agentLabel),
     toSearchText(item.modelLabel),
     toSearchText(item.workspaceLabel),
@@ -150,6 +176,8 @@ export const SessionTable: React.FC<SessionTableProps> = ({
   pageSize,
   pageSizeOptions,
   columnVisibility,
+  columnOverrides,
+  ownerColumnLabel,
 }) => {
   const { t } = useTranslation(["sessions", "common"]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -186,6 +214,23 @@ export const SessionTable: React.FC<SessionTableProps> = ({
               }}
             />
             <span className="truncate">{item.statusLabel}</span>
+          </div>
+        ),
+      },
+      {
+        key: "owner",
+        label: ownerColumnLabel ?? t("common:filters.member"),
+        width: "140px",
+        sorter: (left, right) =>
+          compareSessionText(left.ownerLabel, right.ownerLabel),
+        renderCell: (item) => (
+          <div
+            className="min-w-0 truncate text-text-2"
+            title={
+              typeof item.ownerLabel === "string" ? item.ownerLabel : undefined
+            }
+          >
+            {truncateSessionOwnerLabel(item.ownerLabel) ?? EMPTY_CELL}
           </div>
         ),
       },
@@ -316,7 +361,7 @@ export const SessionTable: React.FC<SessionTableProps> = ({
             {
               key: "actions" as const,
               label: "",
-              width: "60px",
+              width: "140px",
               renderCell: (item: SessionTableItem) =>
                 item.rowAction != null ? (
                   // Stop propagation so the action does not double as a row
@@ -333,11 +378,17 @@ export const SessionTable: React.FC<SessionTableProps> = ({
         : []),
     ];
 
-    return availableColumns.filter(
-      (column) =>
-        columnVisibility?.[column.key] ?? DEFAULT_COLUMN_VISIBILITY[column.key]
-    );
-  }, [t, hasRowActions, columnVisibility]);
+    return availableColumns
+      .filter(
+        (column) =>
+          columnVisibility?.[column.key] ??
+          DEFAULT_COLUMN_VISIBILITY[column.key]
+      )
+      .map((column) => ({
+        ...column,
+        ...columnOverrides?.[column.key],
+      }));
+  }, [t, hasRowActions, columnVisibility, columnOverrides, ownerColumnLabel]);
 
   const filteredItems = useMemo(() => {
     if (!shouldShowSearch) return items;

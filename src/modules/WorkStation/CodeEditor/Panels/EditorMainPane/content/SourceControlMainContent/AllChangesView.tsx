@@ -7,11 +7,21 @@
  * MessageViewer's chat-side preview.
  */
 import { useAtomValue } from "jotai";
-import React, { memo, useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import { DiffSectionList } from "@src/modules/WorkStation/shared";
-import { sourceControlFocusTargetAtom } from "@src/store/workstation/codeEditor";
+import {
+  diffViewModeAtom,
+  sourceControlFocusTargetAtom,
+} from "@src/store/workstation/codeEditor";
 import type { GitFile } from "@src/types/git/types";
 
 import { useAllChangesFiles } from "./allChanges/useAllChangesFiles";
@@ -33,8 +43,6 @@ export interface AllChangesViewProps {
   collapseAllSignal?: number;
 }
 
-const AUTO_COLLAPSE_THRESHOLD = 10;
-
 const AllChangesView: React.FC<AllChangesViewProps> = ({
   files,
   loading,
@@ -46,15 +54,27 @@ const AllChangesView: React.FC<AllChangesViewProps> = ({
 }) => {
   const { t } = useTranslation();
   const focusTarget = useAtomValue(sourceControlFocusTargetAtom);
+  const viewMode = useAtomValue(diffViewModeAtom);
 
-  const { sortedFiles, loadContentForFile, getSectionRef } = useAllChangesFiles(
-    { files, repoId, repoPath }
-  );
+  const {
+    sortedFiles,
+    loadContentForFile,
+    releaseContentForFile,
+    getSectionRef,
+  } = useAllChangesFiles({ files, repoId, repoPath });
 
   const previousCollapseAllSignalRef = useRef(collapseAllSignal);
   const lastScrolledFocusNonceRef = useRef<number | null>(null);
   const filesKey = files
-    .map((file) => file.path)
+    .map((file) =>
+      JSON.stringify([
+        file.path,
+        file.original_path ?? "",
+        file.status,
+        file.staged,
+        file.repoRoot ?? "",
+      ])
+    )
     .sort()
     .join("|");
 
@@ -87,13 +107,15 @@ const AllChangesView: React.FC<AllChangesViewProps> = ({
     if (lastScrolledFocusNonceRef.current === focusTarget.nonce) return;
     lastScrolledFocusNonceRef.current = focusTarget.nonce;
 
-    window.requestAnimationFrame(() => {
+    const frame = window.requestAnimationFrame(() => {
       const targetRef = getSectionRef(focusedFile.path);
       targetRef?.current?.scrollIntoView({
         block: "start",
         behavior: "auto",
       });
     });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [focusedFile, focusTarget, getSectionRef, loadContentForFile]);
 
   const handleRequestContent = useCallback(
@@ -103,22 +125,37 @@ const AllChangesView: React.FC<AllChangesViewProps> = ({
     [loadContentForFile]
   );
 
+  const handleExpansionChange = useCallback(
+    (file: GitFile, expanded: boolean) => {
+      if (!expanded) releaseContentForFile(file.path);
+    },
+    [releaseContentForFile]
+  );
+
+  const sections = useMemo(
+    () => sortedFiles.map((file) => ({ key: file.id, file })),
+    [sortedFiles]
+  );
+
   return (
     <DiffSectionList
-      sections={sortedFiles.map((file) => ({ key: file.id, file }))}
+      sections={sections}
+      viewMode={viewMode}
       loading={loading}
       emptyTitle={
         staged ? t("placeholders.noStagedChanges") : t("placeholders.noChanges")
       }
       repoPath={repoPath}
-      collapseThreshold={AUTO_COLLAPSE_THRESHOLD}
+      defaultCollapsed
       collapseSignal={collapseTrigger}
       getSectionRef={getSectionRef}
       focusedPath={focusedFile?.path ?? null}
       focusedNonce={focusTarget?.nonce ?? 0}
       onFileSelect={onFileSelect}
       onRequestContent={handleRequestContent}
+      onExpansionChange={handleExpansionChange}
       showRenamePath
+      compactHeaderGutter
       hideBottomPadding
     />
   );

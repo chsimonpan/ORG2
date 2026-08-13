@@ -12,6 +12,8 @@ import {
 import {
   COLLAB_ADD_ORG_MENU_ITEM_ID,
   KANBAN_MENU_ITEM_ID,
+  RUNTIME_MENU_ITEM_ID,
+  TEAM_INBOX_MENU_ITEM_ID,
 } from "../sidebarConnectorUtils";
 import {
   getSelectedDraftMenuItemId,
@@ -54,7 +56,13 @@ export function resolveSelectedMenuItemIds({
     sessionCreatorDrafts
   );
   const selectedPinnedMenuItemId =
-    activeChatPanelTabType === "work-management" ? KANBAN_MENU_ITEM_ID : "";
+    activeChatPanelTabType === "work-management"
+      ? KANBAN_MENU_ITEM_ID
+      : activeChatPanelTabType === "runtime"
+        ? RUNTIME_MENU_ITEM_ID
+        : activeChatPanelTabType === "team-inbox"
+          ? TEAM_INBOX_MENU_ITEM_ID
+          : "";
   const isChatPanelProjectsContentSelected =
     chatPanelContentMode === CHAT_PANEL_CONTENT_MODE.NON_SESSION ||
     Boolean(chatPanelSelectedWorkItem) ||
@@ -80,9 +88,11 @@ export function resolveSelectedMenuItemIds({
         ? projectsSelectedMenuItemId
         : "";
   const selectedMenuItemId =
-    activeSidebarKey === "projects"
-      ? resolvedProjectsSelectedMenuItemId || projectsSelectedMenuItemId
-      : sessionSelectedMenuItemId;
+    activeChatPanelTabType === "team-inbox"
+      ? TEAM_INBOX_MENU_ITEM_ID
+      : activeSidebarKey === "projects"
+        ? resolvedProjectsSelectedMenuItemId || projectsSelectedMenuItemId
+        : sessionSelectedMenuItemId;
 
   return { selectedMenuItemId, sessionSelectedMenuItemId };
 }

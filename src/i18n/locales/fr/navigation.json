@@ -46,7 +46,8 @@
     "projectManager": "Project Manager",
     "diff": "Diff",
     "colleagues": "Collègues",
-    "terminals": "Terminaux"
+    "terminals": "Terminaux",
+    "environment": "Environnement"
   },
   "trajectoryPanel": {
     "title": "Trajectoire",
@@ -60,15 +61,9 @@
     "startSession": "Nouvelle session",
     "sessions": "Sessions",
     "selectProject": "Choisir une project",
-    "startPage": "Page d'accueil",
     "inbox": "Boîte de réception",
     "login": "Connexion",
     "setup": "Configuration",
-    "devJourney": "Dev Journey",
-    "devRecord": "Journal de développement",
-    "gitDashboard": "Tableau de bord Git",
-    "devActivity": "Activité Dev",
-    "usageHistory": "Historique d'utilisation",
     "tokenMarket": "Marché Token",
     "taskMarket": "Marché des tâches",
     "channels": "Canaux",
@@ -84,20 +79,8 @@
     "ideaArea": "Espace Idées",
     "changelog": "Changelog"
   },
-  "appGrid": {
-    "customizeGrid": "Personnaliser la grille",
-    "horizontalGap": "Espacement horizontal",
-    "verticalGap": "Espacement vertical",
-    "resetToDefault": "Réinitialiser par défaut"
-  },
-  "greetings": {
-    "morning": "Bonjour",
-    "afternoon": "Bon après-midi",
-    "evening": "Bonsoir"
-  },
   "sidebar": {
     "tabs": {
-      "build": "Accueil",
       "workstation": "Workstation",
       "manage": "Gérer",
       "core": "Cœur",
@@ -133,9 +116,7 @@
     "actions": {
       "addNew": "Ajouter nouveau",
       "collapseAll": "Tout réduire",
-      "markAllRead": "Tout marquer comme lu",
-      "openHome": "Ouvrir l’accueil",
-      "openWorkstation": "Ouvrir le Workstation"
+      "markAllRead": "Tout marquer comme lu"
     },
     "search": {
       "folders": "Rechercher dans l’espace de travail...",
@@ -160,7 +141,8 @@
       "workstation": "Poste de travail",
       "viewRam": "Voir la RAM",
       "tutorials": "Tutoriels",
-      "openSettings": "Ouvrir les paramètres"
+      "openSettings": "Ouvrir les paramètres",
+      "setupChecklist": "Configuration rapide"
     },
     "empty": {
       "noItems": "Aucun élément",
@@ -183,6 +165,37 @@
       "duration1h": "1 heure",
       "duration2h": "2 heures",
       "durationTomorrow": "Demain"
+    },
+    "guide": {
+      "trigger": "Ouvrir le guide",
+      "title": "Bien démarrer avec ORGII",
+      "startSession": "Démarrer une session",
+      "quickSetup": "Langue et apparence",
+      "close": "Fermer le guide",
+      "progressLabel": "{{completed}} étapes sur {{total}} terminées",
+      "localWorkspace": "Espace de travail local",
+      "connectOrganization": "Connecter ou créer une organisation",
+      "createOrganizationHint": "Saisissez un nom d’organisation, puis sélectionnez Créer. Le guide continuera après la création de l’organisation cloud.",
+      "inviteTeammate": "Inviter un membre de l’équipe",
+      "inviteTeammateHint": "Créez ici un lien d’invitation, puis envoyez-le à votre coéquipier.",
+      "invitePermissionHint": "Vous pouvez consulter la liste des membres ici. Un administrateur ou propriétaire de l’organisation doit créer l’invitation.",
+      "devPanelTitle": "États de test de l’onboarding",
+      "devPanelHint": "Aperçu temporaire du parcours d’invitation. Les données de l’organisation ne sont jamais modifiées.",
+      "devScenarioLive": "Données réelles",
+      "devScenarioNoOrganization": "Aucune organisation",
+      "devScenarioMember": "Membre · aucun accès aux invitations",
+      "devScenarioAdmin": "Administrateur · accès aux invitations",
+      "devScenarioOwner": "Propriétaire · accès aux invitations",
+      "devScenarioRequiresOrganization": "Les aperçus de rôle nécessitent au moins une organisation cloud réelle.",
+      "devSimulationActive": "Simulation de développement active",
+      "devSimulationReadOnly": "Cet aperçu de la page Membres est en lecture seule. Les actions de gestion sont désactivées.",
+      "viewTeamActivity": "Voir l’utilisation de l’équipe",
+      "viewTeamActivityHint": "Runtime est ouvert sur Membres. Choisissez un membre pour voir son utilisation de Codex, Claude et Cursor ; si aucune donnée n’apparaît, activez d’abord la synchronisation Runtime de l’équipe.",
+      "exploreProduct": "Découvrir les pages principales",
+      "nextStep": "Étape suivante"
+    },
+    "developerTestPanel": {
+      "title": "Panneau de test de développement"
     }
   },
   "myRole": {
@@ -359,15 +372,6 @@
       "projects": "Projets"
     }
   },
-  "changelog": {
-    "title": "Changelog",
-    "subtitle": "Mises à jour produit",
-    "commitCount": "{{count}} commits",
-    "commitCount_one": "{{count}} commit",
-    "details": "Détails",
-    "frontend": "Frontend",
-    "backend": "Backend"
-  },
   "collaboration": {
     "switchOrg": "Changer d’ORG",
     "addOrg": "Ajouter une ORG",
@@ -399,7 +403,11 @@
       "forkSetupNoWorkspace": "Continue without a workspace",
       "forkSetupAccount": "Account",
       "forkSetupModel": "Model",
-      "forkSetupContinue": "Fork & continue"
+      "forkSetupContinue": "Fork & continue",
+      "forkSnapshotIncomplete": "The cloud snapshot is incomplete. Ask the owner to finish syncing, then retry.",
+      "forkAgentUnavailable": "Choose a local agent before forking.",
+      "forkBackendRegistrationFailed": "The session history was copied, but the runnable fork could not be registered. Retry.",
+      "forkReplayUnavailable": "Full replay is not available for this session. Ask the owner to share the replay, then retry."
     },
     "repoPicker": {
       "loading": "Loading repos…",
@@ -420,7 +428,22 @@
       "sendFailed": "Fork réussi, mais l'envoi du message a échoué — il a été restauré dans le champ de saisie",
       "forkedChipTooltip": "Forkée depuis {{name}}",
       "sourceChipTooltip": "Shared by {{name}}",
-      "continuePlaceholder": "Message to fork and continue in ORGII…"
+      "continuePlaceholder": "Message to fork and continue in ORGII…",
+      "snapshotError": "The cloud snapshot is incomplete. Ask the owner to finish syncing, then retry.",
+      "agentError": "Choose a local agent before forking.",
+      "backendError": "The session history was copied, but the runnable fork could not be registered. Retry.",
+      "parentOpenUnavailable": "The source session could not be opened from this fork.",
+      "replayError": "Full replay is not available for this session. Ask the owner to share the replay, then retry.",
+      "openParentButton": "Ouvrir la session source de {{name}}"
+    },
+    "continueCli": {
+      "headerButton": "Continuer dans {{agent}}",
+      "headerTooltip": "Rouvrir cette session dans {{agent}} dans un onglet de terminal ({{command}})",
+      "notInstalled": "{{agent}} n'est pas installé sur cette machine",
+      "missingWorkspace": "Le dossier d'origine de la session n'existe plus — {{agent}} ne peut la reprendre que depuis ce dossier",
+      "sourceMissing": "Les données d'origine de la session ne sont plus sur le disque",
+      "launchFailed": "Échec de l'ouverture du terminal {{agent}}",
+      "composerPlaceholder": "Écrivez pour continuer dans une nouvelle session ORGII — ou reprenez dans {{agent}} depuis l'en-tête…"
     }
   },
   "cloud": {
@@ -467,7 +490,61 @@
       "retentionUpgrade": "Cette session est hors de la fenêtre de replay de votre forfait — mettez à niveau pour la voir",
       "importError": "Impossible d'importer la session",
       "manageBilling": "Manage billing",
-      "manageBillingNote": "Cancel or change your plan in the billing portal"
+      "manageBillingNote": "Cancel or change your plan in the billing portal",
+      "aboutMeTitle": "À propos de moi",
+      "sync": {
+        "tabTitle": "Synchronisation",
+        "connectionTitle": "Connexion",
+        "endpointLabel": "Point de terminaison backend",
+        "endpointOfficial": "ORG2 Cloud géré",
+        "endpointCustom": "Déploiement personnalisé",
+        "endpointUnknown": "Inconnu",
+        "signedInLabel": "Connecté en tant que",
+        "signedOut": "Déconnecté",
+        "signedOutHint": "Connectez-vous à ORG2 Cloud pour voir les détails du compte et des fonctionnalités",
+        "tokenExpiresLabel": "Expiration du jeton d'accès",
+        "tokenExpired": "Expiré — reconnectez-vous",
+        "schemaLabel": "Schéma du backend",
+        "schemaChecking": "Vérification…",
+        "schemaMatched": "Correspondance (v{{version}})",
+        "schemaMismatch": "Incompatibilité — backend v{{backend}}, l'app attend v{{expected}}",
+        "schemaUnknown": "Impossible de lire la version du schéma du backend",
+        "capabilitiesLabel": "Fonctionnalités du backend",
+        "capabilitiesChecking": "Vérification…",
+        "capabilitiesUnavailable": "Indisponible",
+        "capabilityEnabled": "activé",
+        "capabilityDisabled": "désactivé",
+        "capability": {
+          "broadcastSignals": "Signaux en temps réel",
+          "storageSegments": "Segments de stockage de relecture",
+          "homeEndpoints": "Points de terminaison régionaux",
+          "teamInboxMentions": "Mentions dans la boîte de l'équipe",
+          "memberRuntime": "Partage du runtime d'équipe"
+        },
+        "lastSyncTitle": "Dernière synchronisation",
+        "lastSyncLabel": "Dernière synchronisation réussie",
+        "lastSyncNever": "Jamais synchronisé",
+        "lastAttemptLabel": "Dernière tentative",
+        "manualLabel": "Lancer une passe de synchronisation",
+        "manualAction": "Synchroniser",
+        "manualRunning": "Synchronisation…",
+        "manualSuccess": "Synchronisation terminée",
+        "manualError": "Échec de la synchronisation : {{message}}",
+        "coverageTitle": "Couverture des sessions",
+        "coverageSummary": "{{synced}}/{{syncable}} synchronisées ({{percent}} %)",
+        "coveragePercentLabel": "Couverture",
+        "coverageEmpty": "Aucune session dans les portées de dépôt de cette organisation",
+        "logsTitle": "Journal de synchronisation",
+        "logsHelp": "Événements de synchronisation récents enregistrés sur cet appareil. Effacés au redémarrage et jamais envoyés",
+        "logsEmpty": "Aucun événement de synchronisation enregistré",
+        "logsClear": "Effacer",
+        "logsCopy": "Copier",
+        "logsCopied": "Copié",
+        "logsOrg": "org {{orgId}}",
+        "levelInfo": "Info",
+        "levelWarn": "Avertissement",
+        "levelError": "Erreur"
+      }
     },
     "sidebar": {
       "teamSessions": "Sessions d'équipe",
@@ -483,7 +560,12 @@
       "viewerOverflow": "et {{count}} autres spectateurs",
       "memberViewing": "regarde : {{title}}",
       "viewerOverflow_one": "and 1 more viewer",
-      "viewerOverflow_other": "and {{count}} more viewers"
+      "viewerOverflow_other": "and {{count}} more viewers",
+      "mySessions": "Mes sessions",
+      "copyId": "Copier l’ID",
+      "loadingSession": "Chargement de la session…",
+      "downloadProgress": "Téléchargement… {{percent}}%",
+      "downloadProgressEta": "Téléchargement… {{percent}}% · ~{{eta}} restant"
     },
     "sync": {
       "quotaExceededToast": "Synchro ORG2 Cloud en pause : le quota du forfait de cette organisation est dépassé",
@@ -534,7 +616,9 @@
         "stateExhausted": "Épuisée",
         "linkOneTimeNote": "Copiez-le maintenant — ce lien ne s'affiche qu'une seule fois sur cet appareil.",
         "copyLink": "Copier le lien",
-        "copied": "Copié"
+        "copied": "Copié",
+        "createTitle": "Nouvelle invitation",
+        "historyTitle": "Invitations précédentes"
       },
       "members": {
         "roleChangeTitle": "Changer le rôle",
@@ -546,7 +630,8 @@
         "youTag": "Vous",
         "ownerTag": "Propriétaire",
         "floorOff": "Aucun minimum",
-        "floorTooltip": "Niveau de partage minimal pour ce membre. Le plus strict entre celui-ci et le plancher de l'organisation s'applique."
+        "floorTooltip": "Niveau de partage minimal pour ce membre. Le plus strict entre celui-ci et le plancher de l'organisation s'applique.",
+        "floorOrgMinimum": "Minimum de l'organisation ({{mode}})"
       },
       "leave": {
         "action": "Quitter l'organisation",
@@ -587,7 +672,7 @@
         "joinedFallbackToast": "Organisation cloud rejointe"
       },
       "create": {
-        "sourceCloud": "ORG2 Cloud (géré)",
+        "sourceCloud": "Cloud",
         "signInFirst": "Connectez-vous à ORG2 Cloud pour créer ou rejoindre une organisation gérée.",
         "openSettings": "Ouvrir les paramètres de connexion",
         "createdToast": "Organisation cloud créée"
@@ -604,7 +689,9 @@
         "inviteInvalid": "Ce code d'invitation n'est pas valide.",
         "inviteRevoked": "Cette invitation a été révoquée.",
         "inviteExpired": "Cette invitation a expiré.",
-        "inviteExhausted": "Cette invitation n'a plus d'utilisations."
+        "inviteExhausted": "Cette invitation n'a plus d'utilisations.",
+        "alreadyMember": "Vous êtes déjà membre de cette organisation.",
+        "network": "Connexion au service cloud impossible. Vérifiez le réseau et réessayez."
       }
     },
     "defaultAccess": {
@@ -622,7 +709,8 @@
       "visibilityOrg": "Toute l'organisation",
       "visibilityRestricted": "Moi uniquement",
       "taggedNote": "Cette session a été déplacée dans cette organisation : tant qu'elle y est rattachée, elle partage au moins ses métadonnées.",
-      "floorNote": "L'administrateur de votre organisation exige un partage d'au moins {{mode}}."
+      "floorNote": "L'administrateur de votre organisation exige un partage d'au moins {{mode}}.",
+      "orgMinimumOption": "Minimum de l’organisation ({{mode}})"
     },
     "share": {
       "menuItem": "Partage cloud…",
@@ -653,7 +741,14 @@
       "importPasteClipboard": "Coller depuis le presse-papiers",
       "importSubmit": "Importer",
       "importInvalidInput": "Ceci ne ressemble pas à un lien de partage ou à un jeton valide.",
-      "selectAll": "Tout le monde ({{count}})"
+      "selectAll": "Tout le monde ({{count}})",
+      "incomingEndpointMismatch": "Ce partage appartient à un autre cloud personnalisé. Configurez ce point de terminaison avant l'import.",
+      "incomingConnectionError": "Connexion au service cloud impossible. Vérifiez le réseau et réessayez.",
+      "incomingIncompatibleError": "Ce cloud a renvoyé une réponse de partage incompatible. Mettez ORGII à jour ou vérifiez le déploiement.",
+      "incomingServerError": "Le service cloud n'a pas pu résoudre ce partage. Réessayez.",
+      "incomingAlreadyOnDevice": "Cette session est déjà sur cet appareil. Ouvrez l'original au lieu d'importer un doublon.",
+      "incomingOpenExisting": "Ouvrir la session",
+      "incomingRetry": "Réessayer"
     },
     "agentRunner": {
       "title": "Exécuteur de tâches d'agent",
@@ -679,7 +774,8 @@
         "openBadge_one": "{{count}} tâche d'agent en attente de prise en charge",
         "openBadge": "{{count}} tâches d'agent en attente de prise en charge",
         "activeBadge_one": "{{count}} agent travaille sur cette session",
-        "activeBadge": "{{count}} agents travaillent sur cette session"
+        "activeBadge": "{{count}} agents travaillent sur cette session",
+        "mentionSuggestion": "Attribuer ce commentaire à un agent"
       },
       "toggleLabel": "Commentaires",
       "notesButton": "Notes de session",
@@ -717,7 +813,9 @@
       "addressConfirm_other": "Traiter {{count}} commentaires",
       "agentAuthor": "Agent @{{name}}",
       "addressSessionScope": "Session notes",
-      "addressRoundScope": "Round comments"
+      "addressRoundScope": "Round comments",
+      "mentionMembers": "Mentionner",
+      "searchMembers": "Rechercher des membres"
     },
     "sharingFloor": {
       "label": "Niveau de partage minimal",
@@ -727,6 +825,165 @@
     },
     "billing": {
       "openFailed": "Couldn't open billing. Please try again."
+    },
+    "signedInAs": "Connecté en tant que {{name}}",
+    "sessionExpired": "Votre session ORG2 Cloud a expiré. Reconnectez-vous pour continuer.",
+    "sessionRef": {
+      "chipLabel": "Session d'équipe",
+      "notMember": "Vous n'êtes pas membre de l'organisation propriétaire de cette session.",
+      "signInRequired": "Connectez-vous à ORG2 Cloud pour ouvrir cette session.",
+      "sessionNotFound": "Cette session n'appartient pas à cette organisation.",
+      "notPublished": "Partagez cette session avec une organisation avant de copier une référence.",
+      "chooseOrg": "Cette session appartient à plusieurs organisations. Passez à l'organisation que vous voulez référencer, puis copiez de nouveau.",
+      "opening": "Ouverture de la session d'équipe…"
+    },
+    "renameDisplayName": "Modifier le nom d'affichage",
+    "renameSaved": "Nom d'affichage mis à jour",
+    "renameFailed": "Impossible de mettre à jour le nom d'affichage",
+    "download": {
+      "title": "Téléchargement de la session d'équipe…",
+      "events": "{{loaded}} / {{total}} événements",
+      "eta": "Environ {{eta}} restant",
+      "finalizing": "Finalisation…",
+      "complete": "Téléchargement terminé",
+      "estimate": "Cette session compte {{count}} événements à télécharger (environ {{eta}})",
+      "start": "Télécharger",
+      "pause": "Suspendre",
+      "paused": "En pause",
+      "resume": "Reprendre"
+    },
+    "channels": {
+      "title": "Canaux",
+      "createAction": "Créer un canal",
+      "createFirst": "Créer un canal",
+      "manageMembers": "Gérer les membres",
+      "archiveAction": "Archiver le canal",
+      "unarchive": "Désarchiver",
+      "unarchiveFailed": "Impossible de désarchiver le canal",
+      "deleteAction": "Supprimer le canal",
+      "leave": "Quitter le canal",
+      "archivedGroup": "Archivés",
+      "loadError": "Impossible de charger les canaux",
+      "settings": {
+        "action": "Paramètres du canal",
+        "title": "Paramètres de #{{name}}",
+        "submit": "Enregistrer",
+        "managerRequired": "Seuls les gestionnaires du canal peuvent le modifier",
+        "error": "Impossible de mettre à jour le canal. Veuillez réessayer."
+      },
+      "local": {
+        "quotaExceeded": "Vous avez atteint la limite de canaux sur cet appareil",
+        "archiveBody": "L'archivage masque le canal de la barre latérale. Son historique est conservé et il pourra être désarchivé plus tard",
+        "deleteWarning": "Le canal sera définitivement supprimé de cet appareil. Cette action est irréversible"
+      },
+      "cancel": "Annuler",
+      "create": {
+        "title": "Créer un canal",
+        "nameLabel": "Nom",
+        "namePlaceholder": "ex. code-review",
+        "topicLabel": "Sujet",
+        "topicOptional": "(facultatif)",
+        "topicPlaceholder": "De quoi s'agit-il ?",
+        "visibilityLabel": "Visibilité",
+        "publicTitle": "Public",
+        "publicDesc": "Tous les membres de l'organisation peuvent voir la conversation et la rejoindre",
+        "privateTitle": "Privé",
+        "privateDesc": "Seules les personnes invitées peuvent voir ce canal",
+        "membersLabel": "Ajouter des membres",
+        "membersHint": "Vous serez automatiquement ajouté comme gestionnaire du canal",
+        "membersLoading": "Chargement des membres…",
+        "membersEmpty": "Pas encore d'autres membres dans cette organisation",
+        "postPolicyLabel": "Qui peut publier",
+        "postPolicyEveryone": "Tout le monde",
+        "postPolicyManagers": "Uniquement les gestionnaires du canal",
+        "submit": "Créer",
+        "nameTaken": "Ce nom est déjà utilisé",
+        "quotaExceeded": "Cette organisation a atteint sa limite de canaux",
+        "error": "Impossible de créer le canal. Veuillez réessayer."
+      },
+      "archive": {
+        "title": "Archiver #{{name}} ?",
+        "body": "L'archivage masque le canal de la barre latérale pour tout le monde. Son historique est conservé et il pourra être désarchivé plus tard",
+        "confirm": "Archiver",
+        "managerRequired": "Seuls les gestionnaires du canal peuvent l'archiver",
+        "error": "Impossible d'archiver le canal. Veuillez réessayer."
+      },
+      "delete": {
+        "title": "Supprimer #{{name}} ?",
+        "warning": "Le canal sera définitivement supprimé pour tout le monde. Cette action est irréversible",
+        "acknowledge": "Oui, supprimer définitivement le canal",
+        "confirm": "Supprimer",
+        "adminRequired": "Seuls les administrateurs de l'organisation peuvent supprimer des canaux",
+        "error": "Impossible de supprimer le canal. Veuillez réessayer."
+      },
+      "members": {
+        "title": "Membres de #{{name}}",
+        "loading": "Chargement des membres…",
+        "empty": "Pas encore de membres dans ce canal",
+        "loadError": "Impossible de charger les membres du canal. Veuillez réessayer.",
+        "managerBadge": "Gestionnaire",
+        "you": "Vous",
+        "addLabel": "Ajouter des membres",
+        "addEmpty": "Tous les membres de l'organisation sont déjà dans ce canal",
+        "addSubmit": "Ajouter",
+        "actions": "Actions sur le membre",
+        "remove": "Retirer du canal",
+        "makeManager": "Nommer gestionnaire du canal",
+        "removeManager": "Retirer le rôle de gestionnaire",
+        "leave": "Quitter le canal",
+        "lastManager": "Désignez d'abord un autre gestionnaire",
+        "error": "Une erreur est survenue. Veuillez réessayer."
+      },
+      "feed": {
+        "composerPlaceholder": "Envoyer un message à #{{name}}",
+        "save": "Enregistrer",
+        "edit": "Modifier le message",
+        "delete": "Supprimer le message",
+        "edited": "(modifié)",
+        "deletedMessage": "message supprimé",
+        "today": "Aujourd'hui",
+        "yesterday": "Hier",
+        "you": "Vous",
+        "memberCount": "{{memberCount}} membres",
+        "emptyTitle": "C'est le début de #{{name}}",
+        "emptySubtitle": "Envoyez le premier message pour lancer la conversation",
+        "missingTitle": "Canal indisponible",
+        "missingSubtitle": "Ce canal a été supprimé de cet appareil",
+        "cloudPendingTitle": "Aucun message pour l'instant",
+        "cloudPendingSubtitle": "L'historique des canaux cloud arrivera avec la prochaine mise à niveau du backend",
+        "cloudComposerDisabled": "L'envoi de messages n'est pas encore disponible pour les canaux cloud — cette version ne comprend que la création de canaux et la gestion des membres. L'envoi arrivera avec la prochaine mise à niveau du backend",
+        "errorEmpty": "Saisissez d'abord un message",
+        "errorTooLong": "Ce message est trop long (4000 caractères maximum)",
+        "errorQuota": "Ce canal a atteint sa limite de messages sur cet appareil",
+        "errorGeneric": "Impossible d'envoyer le message. Veuillez réessayer.",
+        "dropSessionHint": "Déposez pour ajouter cette session en référence",
+        "messageBodyLabel": "Message du canal",
+        "sessionCardMissing": "Indisponible sur cet appareil",
+        "sessionCardOpen": "Ouvrir la session {{name}}",
+        "workItemCardMissing": "Indisponible sur cet appareil",
+        "workItemCardLoading": "Chargement…",
+        "workItemCardOpen": "Ouvrir l’élément de travail {{name}}",
+        "githubCardOpen": "Ouvrir {{name}} sur GitHub",
+        "githubIssue": "Ticket",
+        "githubPullRequest": "Pull request",
+        "archivedComposerDisabled": "Ce canal est archivé. Désarchivez-le pour publier.",
+        "errorPostForbidden": "Seuls les gestionnaires du canal peuvent y publier",
+        "errorArchived": "Ce canal est archivé, la publication est désactivée",
+        "errorChannelFull": "Ce canal a atteint sa limite de messages, la publication est désactivée",
+        "errorChannelMissing": "Ce canal n'est plus disponible",
+        "errorMessageMissing": "Ce message n'est plus disponible",
+        "loadError": "Impossible de charger les messages",
+        "loadingMessages": "Chargement des messages…",
+        "loadOlder": "Charger les messages précédents",
+        "unknownAuthor": "Coéquipier"
+      }
+    },
+    "backgroundUpload": {
+      "label": "Envoi en arrière-plan",
+      "help": "Envoie les sessions de membres éligibles selon le niveau de partage minimal de l'organisation et les réglages de chaque session, même lorsque cette organisation n'est pas active.",
+      "on": "Activé",
+      "off": "Désactivé",
+      "memberNote": "Activé par un administrateur — les sessions éligibles sont envoyées en arrière-plan sans devoir ouvrir cette organisation."
     }
   }
 }

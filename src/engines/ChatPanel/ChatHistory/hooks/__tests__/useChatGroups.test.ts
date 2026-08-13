@@ -17,7 +17,12 @@ import type { SessionEvent } from "@src/engines/SessionCore/core/types";
 
 import type { OptimizedChatItem } from "../../chatItemPipeline/types";
 import { useChatGroups } from "../useChatGroups";
-import { projectChatGroups } from "../useChatGroupsProjection";
+import {
+  type ChatGroupMeta,
+  isTurnCollapseEligible,
+  isTurnPreviewItem,
+  projectChatGroups,
+} from "../useChatGroupsProjection";
 
 vi.mock("react", () => ({
   useMemo: <Value>(factory: () => Value) => factory(),
@@ -112,6 +117,20 @@ function errorItem(message: string): OptimizedChatItem {
   );
 }
 
+/** Shape emitted by normalized Codex CLI and native-transcript error chunks. */
+function cliErrorItem(message: string): OptimizedChatItem {
+  return item(
+    makeEvent({
+      functionName: "error",
+      actionType: "error",
+      displayText: message,
+      displayStatus: "failed",
+      displayVariant: "error",
+      result: { error: message, success: false },
+    })
+  );
+}
+
 /** Shape stamped by persistedMessageToSessionEvent for a compact-boundary row. */
 function boundaryItem(summary: string): OptimizedChatItem {
   return item(
@@ -152,6 +171,26 @@ function unloadedTurnItem(
 function turnPreviewItem(text: string): OptimizedChatItem {
   const preview = canonicalAgentMessageItem(text);
   preview.event!.args = { turnPreviewOnly: true };
+  return preview;
+}
+
+function unloadedTurnPreviewItem(
+  turnId: string,
+  bodyEventCount: number,
+  text: string
+): OptimizedChatItem {
+  const preview = unloadedTurnItem(turnId, bodyEventCount);
+  preview.event!.functionName = "assistant";
+  preview.event!.actionType = "assistant";
+  preview.event!.source = "assistant";
+  preview.event!.displayText = text;
+  preview.event!.displayVariant = "message";
+  preview.event!.args = { turnPreviewOnly: true };
+  preview.event!.result = {
+    ...preview.event!.result,
+    observation: text,
+    content: text,
+  };
   return preview;
 }
 
@@ -248,6 +287,27 @@ describe("useChatGroups collapse — terminal error survival", () => {
     expect(flatTexts(result.flatItems)).not.toContain("Turn is not loaded yet");
   });
 
+  it("shows a final-reply preview carried by the unloaded-turn placeholder", () => {
+    const firstTurn = userItem("first turn");
+    const preview = unloadedTurnPreviewItem(
+      firstTurn.event!.id,
+      12,
+      "bounded final reply"
+    );
+    const history = [
+      firstTurn,
+      preview,
+      userItem("current turn"),
+      assistantItem("current reply"),
+    ];
+
+    const result = useChatGroups(history);
+
+    expect(isTurnPreviewItem(preview)).toBe(true);
+    expect(result.groupMeta[0].unloadedTurn?.turnId).toBe(firstTurn.event!.id);
+    expect(flatTexts(result.flatItems)).toContain("bounded final reply");
+  });
+
   it("keeps the error card when a collapsed turn has no completed assistant reply", () => {
     const history = [
       userItem("first turn"),
@@ -270,6 +330,22 @@ describe("useChatGroups collapse — terminal error survival", () => {
     expect(result.flatItems.some((entry) => entry.structuralOnly)).toBe(false);
   });
 
+  it("keeps a normalized CLI error when its historical turn is collapsed", () => {
+    const history = [
+      userItem("first turn"),
+      toolItem(),
+      cliErrorItem("unexpected status 402 Payment Required"),
+      userItem("second turn"),
+      assistantItem("second reply"),
+    ];
+
+    const result = useChatGroups(history, { allTurnsCollapsed: true });
+
+    expect(flatTexts(result.flatItems)).toContain(
+      "unexpected status 402 Payment Required"
+    );
+  });
+
   it("keeps both the final reply and the trailing error in a collapsed turn", () => {
     const history = [
       userItem("first turn"),
@@ -288,7 +364,7 @@ describe("useChatGroups collapse — terminal error survival", () => {
     expect(result.groupCounts[0]).toBe(2);
   });
 
-  it("does not resurrect errors that precede the final reply", () => {
+  it("keeps errors that precede the final reply", () => {
     const history = [
       userItem("first turn"),
       errorItem("transient blip"),
@@ -300,10 +376,9 @@ describe("useChatGroups collapse — terminal error survival", () => {
     const result = useChatGroups(history, { allTurnsCollapsed: true });
 
     const texts = flatTexts(result.flatItems);
-    // The turn recovered: the pre-reply error stays collapsed away.
-    expect(texts).not.toContain("Error: transient blip");
+    expect(texts).toContain("Error: transient blip");
     expect(texts).toContain("recovered and finished");
-    expect(result.groupCounts[0]).toBe(1);
+    expect(result.groupCounts[0]).toBe(2);
   });
 
   it("collapses to the last reply only when the turn has no errors", () => {
@@ -398,5 +473,43 @@ describe("useChatGroups collapse — terminal error survival", () => {
     const texts = flatTexts(result.flatItems);
     expect(texts).toContain("Error: rate limit exceeded");
     expect(texts.filter((text) => text === "run_shell")).toHaveLength(1);
+  });
+});
+
+describe("isTurnCollapseEligible — unloaded placeholder affordance", () => {
+  function meta(overrides: Partial<ChatGroupMeta>): ChatGroupMeta {
+    return {
+      turnId: "turn-1",
+      durationMs: 0,
+      itemCount: 0,
+      previewText: "",
+      startMs: null,
+      endMs: null,
+      unloadedTurn: null,
+      ...overrides,
+    };
+  }
+
+  it("keeps trivial loaded turns non-collapsible", () => {
+    expect(isTurnCollapseEligible(meta({ itemCount: 1 }), 0, 3, {})).toBe(
+      false
+    );
+    expect(isTurnCollapseEligible(meta({ itemCount: 2 }), 0, 3, {})).toBe(true);
+  });
+
+  it("shows the bar for any unloaded turn with a nonzero body surrogate", () => {
+    // With turn pagination off, the collapse bar is the ONLY affordance that
+    // can fetch an unloaded body — a 1-line body must still render it.
+    const unloaded = meta({
+      unloadedTurn: { turnId: "turn-1", bodyEventCount: 1 },
+    });
+    expect(isTurnCollapseEligible(unloaded, 0, 3, {})).toBe(true);
+  });
+
+  it("hides the bar only for measured-empty unloaded turns", () => {
+    const empty = meta({
+      unloadedTurn: { turnId: "turn-1", bodyEventCount: 0 },
+    });
+    expect(isTurnCollapseEligible(empty, 0, 3, {})).toBe(false);
   });
 });

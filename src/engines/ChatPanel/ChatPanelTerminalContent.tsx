@@ -145,9 +145,14 @@ export function ChatPanelTerminalContent({
 
     // Small delay so the shell prompt has time to render before we send input
     const timerId = window.setTimeout(() => {
+      // Terminate with CR, not LF: terminals send `\r` for Enter, and
+      // Windows PowerShell + PSReadLine leaves an LF-terminated command
+      // sitting unexecuted at a continuation prompt. POSIX shells accept
+      // CR as line-accept too (ICRNL / readline), so CR is correct on
+      // every platform.
       invokeTauri("write_pty", {
         sessionId: ptySessionId,
-        data: `${cliCommand}\n`,
+        data: `${cliCommand}\r`,
       }).catch((err: unknown) => {
         logger.warn("Failed to inject CLI command into PTY", err);
       });
@@ -260,7 +265,7 @@ export function ChatPanelTerminalContent({
       <TerminalCore
         terminalState={terminalState}
         className="terminal-core chat-panel-terminal-core min-h-0 flex-1 bg-chat-pane"
-        backgroundColor={resolvedBg ?? "var(--color-chat-pane-base)"}
+        backgroundColor={resolvedBg ?? "var(--color-primary-pane-bg)"}
         visible={visible}
       />
     </div>

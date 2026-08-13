@@ -7,6 +7,7 @@ use crate::coordination::agent_org_runs::COORDINATOR_MEMBER_ID;
 use crate::definitions::builtin::SDE_AGENT_ID;
 use crate::definitions::orgs::{
     HierarchyMode, OrgDefinition, OrgMember, OrgMemberLaunchOverride, OrgMemberRuntimeConfig,
+    PlanApprovalPolicy,
 };
 use core_types::key_source::KeySource;
 use key_vault::ModelType;
@@ -14,6 +15,26 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use super::launch_org::global_additional_dirs_for_cli_member;
+
+#[test]
+fn session_marker_writes_explicit_build_for_legacy_null_product_mode() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    super::write_agent_session_marker(
+        workspace.path().to_str().expect("workspace path"),
+        "build-session",
+        Some("builtin:sde"),
+        None,
+        Some("scoped-project"),
+        Some("personal-org"),
+    );
+    let marker =
+        std::fs::read_to_string(workspace.path().join(".orgii/agent_session_context.json"))
+            .expect("read marker");
+    let marker: serde_json::Value = serde_json::from_str(&marker).expect("parse marker");
+    assert_eq!(marker["productMode"], "build");
+    assert_eq!(marker["scope"], "scoped-project");
+    assert_eq!(marker["capabilities"], serde_json::json!(["work.read"]));
+}
 
 #[test]
 fn launch_validation_rejects_missing_agent_definition_before_session_create() {
@@ -52,6 +73,7 @@ fn valid_org_with_children(children: Vec<OrgMember>) -> OrgDefinition {
         agent_id: SDE_AGENT_ID.to_string(),
         description: None,
         hierarchy_mode: HierarchyMode::Soft,
+        plan_approval_policy: PlanApprovalPolicy::Coordinator,
         children,
     }
 }
@@ -171,6 +193,7 @@ fn launch_validation_rejects_agent_org_with_missing_member_definition() {
         agent_id: SDE_AGENT_ID.to_string(),
         description: None,
         hierarchy_mode: HierarchyMode::Soft,
+        plan_approval_policy: PlanApprovalPolicy::Coordinator,
         children: vec![OrgMember {
             id: "worker".to_string(),
             name: "Worker".to_string(),
@@ -189,7 +212,7 @@ fn launch_validation_rejects_agent_org_with_missing_member_definition() {
 }
 
 #[test]
-fn launch_validation_accepts_cli_member_reference_without_agent_definition() {
+fn launch_validation_rejects_cli_member_before_run_materialization() {
     let _sandbox = test_helpers::test_env::sandbox();
     let org = valid_org_with_children(vec![OrgMember {
         id: "cli-worker".to_string(),
@@ -200,8 +223,11 @@ fn launch_validation_accepts_cli_member_reference_without_agent_definition() {
         children: Vec::new(),
     }]);
 
-    validate_launch_agent_definitions(Some(SDE_AGENT_ID), Some(&org))
-        .expect("CLI member reference must not require an AgentDefinition row");
+    let error = validate_launch_agent_definitions(Some(SDE_AGENT_ID), Some(&org))
+        .expect_err("CLI Agent Org members are not production-capable yet");
+    assert!(error.contains("cli-worker"), "{error}");
+    assert!(error.contains("cli:claude_code"), "{error}");
+    assert!(error.contains("inbox"), "{error}");
 }
 
 #[test]

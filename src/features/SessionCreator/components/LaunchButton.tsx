@@ -27,8 +27,10 @@ export interface LaunchButtonProps {
   loading: boolean;
   /** Click handler */
   onClick: () => void;
-  /** Optional visible label for non-icon launch actions */
-  label?: string;
+  /** Accessible action name when the icon-only button performs a custom submit. */
+  ariaLabel?: string;
+  /** Optional stable selector for host-specific submit actions. */
+  dataTestId?: string;
 }
 
 // ============================================
@@ -41,8 +43,6 @@ export interface LaunchButtonProps {
 // that the previous `opacity-80` version triggered. `transition-colors`
 // limits the 200ms animation to the bg swap; nothing else animates.
 const ICON_BASE_CLASS = `flex ${INPUT_AREA_BUTTONS.iconButtonSizeClass} shrink-0 items-center justify-center rounded-full transition-colors duration-200 focus:outline-none`;
-const LABEL_BASE_CLASS =
-  "flex h-8 shrink-0 items-center justify-center rounded-full px-3 text-[13px] font-medium transition-colors duration-200 focus:outline-none";
 
 // ============================================
 // Component
@@ -52,7 +52,8 @@ const LaunchButton: React.FC<LaunchButtonProps> = ({
   disabled,
   loading,
   onClick,
-  label,
+  ariaLabel: customAriaLabel,
+  dataTestId = "chat-send-button",
 }) => {
   const { t } = useTranslation();
   const { sendOnEnter } = useAtomValue(chatAppearanceAtom);
@@ -60,8 +61,7 @@ const LaunchButton: React.FC<LaunchButtonProps> = ({
   const stateClass = isActive
     ? INPUT_AREA_BUTTONS.iconButtonActive
     : INPUT_AREA_BUTTONS.iconButtonInactive;
-  const baseClass = label ? LABEL_BASE_CLASS : ICON_BASE_CLASS;
-  const ariaLabel = label ?? t("common:actions.send");
+  const ariaLabel = customAriaLabel ?? t("common:actions.send");
 
   // `leading-none` + explicit `block` on the SVG kill the baseline gap
   // that `lucide-react` icons inherit from their default inline-block
@@ -73,12 +73,12 @@ const LaunchButton: React.FC<LaunchButtonProps> = ({
   const button = (
     <button
       type="button"
-      className={`${baseClass} ${stateClass} leading-none`}
+      className={`${ICON_BASE_CLASS} ${stateClass} leading-none`}
       style={{ lineHeight: 0 }}
       onClick={disabled ? undefined : onClick}
       disabled={disabled && !loading}
       aria-label={ariaLabel}
-      data-testid="chat-send-button"
+      data-testid={dataTestId}
       data-state={loading ? "working" : "submit"}
     >
       {loading ? (
@@ -87,8 +87,6 @@ const LaunchButton: React.FC<LaunchButtonProps> = ({
           strokeWidth={2}
           className="block animate-spin text-[#fff]"
         />
-      ) : label ? (
-        <span className="text-[#fff]">{label}</span>
       ) : (
         <ArrowUp
           size={INPUT_AREA_BUTTONS.iconSize}
@@ -107,7 +105,7 @@ const LaunchButton: React.FC<LaunchButtonProps> = ({
     <Tooltip
       content={
         <KeyboardShortcutTooltipContent
-          label={label ?? t("common:actions.send")}
+          label={ariaLabel}
           shortcut={getShortcutKeys("chat_send", {
             chatSendOnEnter: sendOnEnter,
           })}

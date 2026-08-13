@@ -1,7 +1,7 @@
 # Architecture Audit — Canvas session state
 
-**Scope:** `canvasPreviewAtom`, `useCanvasForTurn`, and Canvas consumers in Chat, SessionCore, and WorkStation
-**Date:** 2026-07-14
+**Scope:** `canvasPreviewAtom`, `useCanvasForTurn`, and Canvas consumers in Chat, SessionCore, and WorkStation  
+**Date:** 2026-07-14  
 **Auditor:** Codex
 
 ## Acceptance criteria

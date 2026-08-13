@@ -13,11 +13,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { rpc } from "@src/api/tauri/rpc";
-import {
-  // CLI_AGENT,
-  type CliAgentType,
-  CliAgentTypeSchema,
-} from "@src/api/tauri/rpc/schemas/validation";
+import { CliAgentTypeSchema } from "@src/api/tauri/rpc/schemas/validation";
 import type { DispatchCategory } from "@src/api/tauri/session";
 import { isApiKeyProvider } from "@src/assets/providers";
 import ModelIcon from "@src/components/ModelIcon";
@@ -46,75 +42,19 @@ import {
   recordRecentAgentSelectionAtom,
 } from "@src/store/session";
 import { agentRegistryAtom } from "@src/store/session/agentRegistryAtom";
-import {
-  SESSION_TARGET_KIND,
-  type SessionTargetKind,
-} from "@src/store/session/creatorStateAtom";
+import { SESSION_TARGET_KIND } from "@src/store/session/creatorStateAtom";
 import { invokeTauri } from "@src/util/platform/tauri/init";
 
 import { ManageAgentsFooterAction } from "../../components";
 import { useAccountFooterForHovered } from "../../hooks";
-import type { BasePaletteProps } from "../../shared";
 import { PaletteBody, ShellFooterAction, SpotlightShell } from "../../shell";
 import type { PathSegment, SpotlightItem } from "../../types";
 import { useSelectorKernel } from "../core";
 import { CliAgentListFilterSwitch } from "./CliAgentListFilterSwitch";
+import { createHumanSessionOption } from "./humanSessionOption";
+import type { AgentOption, DispatchCategoryPaletteProps } from "./types";
 
-// ============ TYPES ============
-
-interface AgentOption {
-  id: string;
-  name: string;
-  desc: string;
-  iconId?: string;
-  category: DispatchCategory;
-  targetKind: SessionTargetKind;
-  agentDefinitionId?: string;
-  agentOrgId?: string;
-  cliAgentType?: CliAgentType;
-  isBuiltIn: boolean;
-  isCli: boolean;
-  isOrg: boolean;
-  rightContent?: React.ReactNode;
-}
-
-export interface AgentSelection {
-  category: DispatchCategory;
-  targetKind: SessionTargetKind;
-  agentDefinitionId?: string;
-  agentOrgId?: string;
-  cliAgentType?: CliAgentType;
-  cliLaunchMode?: CliLaunchMode;
-  agentName: string;
-  agentIconId?: string;
-}
-
-export interface DispatchCategoryPaletteProps extends BasePaletteProps {
-  onSelect: (selection: AgentSelection) => void;
-  currentCategory?: DispatchCategory;
-  currentAgentDefinitionId?: string;
-  currentAgentOrgId?: string;
-  currentCliAgentType?: CliAgentType;
-  /**
-   * When true the Agent Teams group is omitted entirely. Used by member-row
-   * pickers inside a team panel where selecting another team makes no sense.
-   */
-  hideOrgs?: boolean;
-  /**
-   * When true only CLI agent entries are shown. Used by CLI-only picker surfaces.
-   */
-  cliOnly?: boolean;
-  /**
-   * Optional context pill rendered above the input — used by callers that
-   * pre-select a target (e.g. an org member row clicking its agent pill)
-   * so the palette title reflects what is being chosen for.
-   */
-  titleLabel?: string;
-  /** Icon paired with `titleLabel`. Defaults to no icon when omitted. */
-  titleIcon?: React.ComponentType<Record<string, unknown>>;
-  /** Optional placeholder override for contextual picker copy. */
-  placeholderLabel?: string;
-}
+export type { AgentSelection, DispatchCategoryPaletteProps } from "./types";
 
 // ============ HELPERS ============
 
@@ -177,7 +117,9 @@ export const DispatchCategoryPalette: React.FC<
   currentAgentOrgId,
   currentCliAgentType,
   hideOrgs = false,
+  hideCliAgents = false,
   cliOnly = false,
+  includeHumanSession = false,
   titleLabel,
   titleIcon,
   placeholderLabel,
@@ -294,6 +236,14 @@ export const DispatchCategoryPalette: React.FC<
       }));
   }, [allAgents, rustCompatibleAccounts]);
 
+  const humanOptions = useMemo(
+    (): AgentOption[] =>
+      includeHumanSession
+        ? [createHumanSessionOption(t("creator.humanSession.name"))]
+        : [],
+    [includeHumanSession, t]
+  );
+
   const cliOptions = useMemo((): AgentOption[] => {
     return installedCliAgents.flatMap((agent) => {
       if (shouldFilterCliToGuiSupport && agent.supportsGui !== true) return [];
@@ -399,20 +349,23 @@ export const DispatchCategoryPalette: React.FC<
       shouldShowCliOnly
         ? [...cliOptions]
         : [
+            ...humanOptions,
             ...builtInRustOptions,
-            ...cliOptions,
+            ...(hideCliAgents ? [] : cliOptions),
             ...externalIdeOptions,
             ...customAgentOptions,
             ...(hideOrgs ? [] : orgOptions),
           ],
     [
       shouldShowCliOnly,
+      humanOptions,
       builtInRustOptions,
       cliOptions,
       externalIdeOptions,
       customAgentOptions,
       orgOptions,
       hideOrgs,
+      hideCliAgents,
     ]
   );
 
@@ -427,6 +380,9 @@ export const DispatchCategoryPalette: React.FC<
         }
         if (selection.category === "cursor_ide") {
           return candidate.category === "cursor_ide";
+        }
+        if (selection.category === "human_session") {
+          return candidate.category === "human_session";
         }
         return candidate.agentDefinitionId === selection.agentDefinitionId;
       });
@@ -452,8 +408,9 @@ export const DispatchCategoryPalette: React.FC<
         : option.isCli
           ? currentCategory === "cli_agent" &&
             option.cliAgentType === currentCliAgentType
-          : option.category === "cursor_ide"
-            ? currentCategory === "cursor_ide"
+          : option.category === "cursor_ide" ||
+              option.category === "human_session"
+            ? currentCategory === option.category
             : currentCategory === "rust_agent" &&
               option.agentDefinitionId === currentAgentDefinitionId;
 
@@ -490,11 +447,13 @@ export const DispatchCategoryPalette: React.FC<
           rightContent: option.rightContent,
           testId: option.isOrg
             ? `session-creator-agent-option-org-${option.agentOrgId}`
-            : option.agentDefinitionId
-              ? `session-creator-agent-option-def-${option.agentDefinitionId}`
-              : option.cliAgentType
-                ? `session-creator-agent-option-cli-${option.cliAgentType}`
-                : undefined,
+            : option.category === "human_session"
+              ? "session-creator-option-human-session"
+              : option.agentDefinitionId
+                ? `session-creator-agent-option-def-${option.agentDefinitionId}`
+                : option.cliAgentType
+                  ? `session-creator-agent-option-cli-${option.cliAgentType}`
+                  : undefined,
         },
         action: () => {
           recordRecentAgentSelection({
@@ -563,13 +522,14 @@ export const DispatchCategoryPalette: React.FC<
       recentOptions
     );
     if (!shouldShowCliOnly) {
-      pushGroup(
-        "__header_builtin__",
-        t("creator.builtInAgents"),
-        builtInRustOptions
-      );
+      pushGroup("__header_builtin__", t("creator.builtIns"), [
+        ...humanOptions,
+        ...builtInRustOptions,
+      ]);
     }
-    pushGroup("__header_cli__", t("creator.cliAgents"), cliOptions);
+    if (!hideCliAgents) {
+      pushGroup("__header_cli__", t("creator.cliAgents"), cliOptions);
+    }
     if (!shouldShowCliOnly) {
       pushGroup(
         "__header_external_ide__",
@@ -592,8 +552,10 @@ export const DispatchCategoryPalette: React.FC<
     shouldShowCliOnly,
     filteredOptions,
     recentOptions,
+    humanOptions,
     builtInRustOptions,
     cliOptions,
+    hideCliAgents,
     externalIdeOptions,
     customAgentOptions,
     orgOptions,
@@ -654,7 +616,11 @@ export const DispatchCategoryPalette: React.FC<
         if (!option) return null;
         // Cursor IDE manages its own auth — no ORGII-side accounts
         // are relevant. Returning null keeps the footer empty.
-        if (option.category === "cursor_ide") return null;
+        if (
+          option.category === "cursor_ide" ||
+          option.category === "human_session"
+        )
+          return null;
         if (option.isCli && option.cliAgentType) {
           return {
             mode: "cli",

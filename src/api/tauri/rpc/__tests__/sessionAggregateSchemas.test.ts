@@ -3,7 +3,63 @@ import { describe, expect, it } from "vitest";
 import {
   ExternalHistorySidebarBatchResponseSchema,
   ExternalHistorySidebarListInput,
+  NativeSidebarSessionPageInput,
+  NativeSidebarSessionPageResponseSchema,
+  SessionAggregateRecordSchema,
 } from "../schemas/sessionAggregate";
+
+describe("session aggregate category schemas", () => {
+  it("maps Human wire rows to the Human dispatch category", () => {
+    const parsed = SessionAggregateRecordSchema.parse({
+      sessionId: "humansession-1",
+      name: "Release verification",
+      status: "completed",
+      createdAt: "2026-07-22T01:00:00Z",
+      updatedAt: "2026-07-22T02:00:00Z",
+      category: "human",
+      keySource: "own_key",
+      totalTokens: 0,
+      background: false,
+      isActive: false,
+    });
+
+    expect(parsed.category).toBe("human_session");
+  });
+});
+
+describe("native sidebar pagination schemas", () => {
+  it("accepts the camelCase stream and keyset cursor contract", () => {
+    const parsed = NativeSidebarSessionPageInput.parse({
+      stream: "standaloneAgent",
+      cursor: {
+        updatedAt: "2026-07-30T12:00:00Z",
+        sessionId: "sdeagent-10",
+      },
+      limit: 10,
+    });
+    expect(parsed.cursor?.sessionId).toBe("sdeagent-10");
+
+    const response = NativeSidebarSessionPageResponseSchema.parse({
+      sessions: [],
+      nextCursor: {
+        updatedAt: "2026-07-30T11:00:00Z",
+        sessionId: "sdeagent-20",
+      },
+      hasMore: true,
+    });
+    expect(response.nextCursor?.updatedAt).toBe("2026-07-30T11:00:00Z");
+  });
+
+  it("rejects unknown streams instead of falling back to a default", () => {
+    expect(() =>
+      NativeSidebarSessionPageInput.parse({
+        stream: "someFutureDefault",
+        cursor: null,
+        limit: 10,
+      })
+    ).toThrow();
+  });
+});
 
 describe("external history sidebar schemas", () => {
   it("accepts bounded non-overlapping bucket requests", () => {

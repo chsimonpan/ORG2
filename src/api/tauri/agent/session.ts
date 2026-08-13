@@ -12,8 +12,8 @@ import type { WorkspaceSnapshot } from "@src/services/context/workspaceSnapshot"
 import type { SessionStatus } from "@src/types/session/session";
 
 import type {
-  AgentExecModeConfig,
   AgentStatusInfo,
+  DeleteSessionReceipt,
   FileResolution,
   FileResolutionValue,
   HousekeeperContextCompactionState,
@@ -119,7 +119,9 @@ export async function listAllSessions(): Promise<SessionMeta[]> {
   return rpc.agentSession.listAllSessions();
 }
 
-export async function deleteSession(sessionId: string): Promise<void> {
+export async function deleteSession(
+  sessionId: string
+): Promise<DeleteSessionReceipt> {
   return rpc.agentSession.deleteSession({ sessionId });
 }
 
@@ -185,11 +187,16 @@ export async function linkSessionToWorkItem(input: {
   return rpc.agentSession.linkSessionToWorkItem(input);
 }
 
-export async function linkSessionToProject(input: {
-  sessionId: string;
-  projectSlug: string;
-}): Promise<SessionMeta> {
-  return rpc.agentSession.linkSessionToProject(input);
+/** Track this / Convert to Project (orgtrack/v1 §7.2): switch the
+ *  session to the Project product mode, invalidate any pending Plan
+ *  snapshot, and create-or-replay the root WorkItem from the recorded
+ *  first user input. */
+export async function trackSessionAsProject(sessionId: string): Promise<{
+  productMode: string;
+  agentExecMode: string;
+  workItemId?: string | null;
+}> {
+  return rpc.agentSession.trackSessionAsProject({ sessionId });
 }
 
 export async function respondQuestion(
@@ -404,10 +411,6 @@ export async function getTodos(sessionId: string): Promise<TodoItem[]> {
   return rpc.agentSession.getTodos({ sessionId });
 }
 
-export async function listModes(): Promise<AgentExecModeConfig[]> {
-  return rpc.agentSession.listModes();
-}
-
 export async function resolveReview(sessionId: string): Promise<number> {
   return rpc.agentSession.resolveReview({ sessionId });
 }
@@ -441,7 +444,7 @@ export async function getAgentStatus(): Promise<AgentStatusInfo> {
 // ============================================
 
 export interface SessionLaunchParams {
-  category: string;
+  category: "rust_agent" | "cli_agent";
   content: string;
   workspacePath?: string;
   keySource?: string;
@@ -450,6 +453,8 @@ export interface SessionLaunchParams {
   nativeHarnessType?: NativeHarnessType;
   platform?: CliAgentType;
   branch?: string;
+  /** Git base ref used only when creating a fresh isolated worktree. */
+  worktreeBaseRef?: string;
   hostedToken?: string;
   tier?: string;
   name?: string;
@@ -470,10 +475,6 @@ export interface SessionLaunchParams {
   worktreePath?: string;
   projectSlug?: string;
   parentSessionId?: string;
-  /** Explicit canonical Journey workspace identity for rust_agent launches. Never derived from workspacePath. */
-  journeyWorkspaceId?: string;
-  /** Explicit canonical Journey tags for rust_agent launches. Omit to preserve historical Unknown. */
-  journeyTopicTags?: string[];
 
   /**
    * Extra workspace folders granted at launch time (multi-root IDE
@@ -508,14 +509,19 @@ export interface SessionLaunchResult {
   projectSlug?: string | null;
   workItemId?: string | null;
   agentRole?: string | null;
+  productMode?: string | null;
   worktreePath?: string | null;
+  /** Actual branch checked out in the worktree (for example `agent/<id>`). */
+  worktreeBranch?: string | null;
+  /** Base ref used to create the isolated worktree. */
+  baseRef?: string | null;
 }
 
 export async function sessionLaunch(
   params: SessionLaunchParams
 ): Promise<SessionLaunchResult> {
   return rpc.agentSession.sessionLaunch({
-    params: params as unknown as Record<string, unknown>,
+    params,
   }) as Promise<SessionLaunchResult>;
 }
 

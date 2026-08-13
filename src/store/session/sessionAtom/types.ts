@@ -26,6 +26,19 @@ import type {
 export type { SessionStatus, PendingQuestion };
 
 /**
+ * Source-owned identity retained for display after a teammate session is
+ * imported as a read-only replay. This is intentionally separate from the
+ * imported Session's runnable configuration: `Session.model` remains unset so
+ * the fork composer asks the viewer which local model/account to use.
+ */
+export interface SessionSourceDisplayMetadata {
+  cliAgentType?: string;
+  agentDisplayName?: string;
+  agentDefinitionId?: string;
+  model?: string;
+}
+
+/**
  * Provenance + consumer-side sync cursor for sessions imported from a
  * collaboration org (design §7.4 / §16.7). Lives on the Session record as a
  * first-class field — it replaces the legacy collab idiom of JSON-encoding
@@ -38,6 +51,11 @@ export type { SessionStatus, PendingQuestion };
 export interface SessionImportedFrom {
   orgId: string;
   sourceSessionId: string;
+  /**
+   * Normalized cloud deployment that owns the source row. Import identity is
+   * `(endpoint, orgId, sourceSessionId)`, never just the latter two.
+   */
+  sourceEndpointUrl?: string;
   ownerMemberId: string;
   /** Segments epoch last applied locally. 0 = legacy snapshot import. */
   epoch: number;
@@ -55,11 +73,21 @@ export interface SessionImportedFrom {
   tailHash?: string;
   /** Display convenience carried over from the remote metadata. */
   ownerDisplayName?: string;
+  /** Optional profile image carried over from the remote metadata. */
+  ownerAvatarUrl?: string;
   /** Original read-only adapter when the shared source came from another app. */
   externalHistorySource?: ImportedHistorySourceId;
+  /** Display-only source identity; never used as fork execution authority. */
+  sourceDisplay?: SessionSourceDisplayMetadata;
   importedAt?: string;
   /** Share-link capability used for a later guest fork; absent for member imports. */
   shareToken?: string;
+  /**
+   * Non-secret Supabase origin that issued `shareToken`. A later guest fork
+   * resolves and fetches against this same deployment instead of whichever
+   * cloud happens to be active then. No anon key or user credential is stored.
+   */
+  shareEndpointUrl?: string;
 }
 
 /**
@@ -130,8 +158,17 @@ export interface Session {
    * the `repo_path` column on `agent_sessions` / `code_sessions`.
    */
   repoPath?: string;
+  /**
+   * Canonical Git worktree root discovered for imported history. `repoPath`
+   * remains the original working folder captured by the source application.
+   */
+  repoRootPath?: string;
+  /** Raw cached Git remotes for imported history; normalized at scope use. */
+  repoRemoteUrls?: string[];
   /** Path to the file or directory where this session's persisted data lives. */
   storagePath?: string;
+  /** Imported-history continuation family used to suppress duplicate sidebar siblings. */
+  continuationLineageId?: string;
   /** Worktree path for isolated parallel sessions */
   worktreePath?: string;
   /** Branch name inside the worktree (e.g. `agent/abc123`) */
@@ -173,16 +210,24 @@ export interface Session {
   /**
    * Per-session execution mode (Rust-agent sessions only).
    *
-   * `undefined` means the user has never patched this session — UI
-   * components fall back to `creatorDefaultExecModeAtom` until the
-   * first ModePill click, which calls `rpc.sessionAggregate.patch`
-   * and writes the value here. CLI sessions always have `undefined`.
+   * `undefined` is tolerated only for historical rows; existing-session UI
+   * resolves it to the canonical `build` default and never consults the
+   * mutable creator default. Both Rust and CLI sessions persist this field.
    *
    * Source of truth lives in the Rust `agent_sessions.agent_exec_mode`
    * column; this field is the camelCase mirror exposed via
    * `SessionAggregateRecord`.
    */
   agentExecMode?: string;
+  /**
+   * Persistent product mode (`orgtrack/v1` §5.2):
+   * `build | plan | ask | project`. The single source of truth for
+   * whether this session exposes the WorkItem/Routine mutation surface.
+   * `undefined` = build. Distinct from `agentExecMode` (the runtime
+   * tool-policy axis); resolved server-side (launch-from-work/routine →
+   * project) or set explicitly via `rpc.sessionAggregate.patch`.
+   */
+  productMode?: string;
   /**
    * Per-session unsent draft text (P3). The text the user has typed
    * into the chat composer for this session but not yet sent. `undefined`
@@ -222,8 +267,6 @@ export interface Session {
   linesRemoved?: number;
   /** Source-cache touched file list for external and Rust-native sessions. */
   touchedFiles?: string[];
-  /** Channel origin for OS Agent sessions (e.g. "feishu", "telegram", "discord"). */
-  channel?: string;
   /** Total token usage (input + output) reported by the source, when known. */
   totalTokens?: number;
 }

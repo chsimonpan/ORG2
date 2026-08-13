@@ -41,6 +41,7 @@ import {
 import React, { createContext, memo, useContext } from "react";
 
 import Button from "@src/components/Button";
+import { EDITOR_TAB_CANVAS_BG_CLASS } from "@src/config/workstation/tokens";
 import { useRefreshSpin } from "@src/hooks/ui";
 
 /**
@@ -229,6 +230,9 @@ export interface PanelHeaderProps {
   /** Additional className */
   className?: string;
 
+  /** Stable selector for focused layout and interaction tests. */
+  dataTestId?: string;
+
   /** When true, draws a bottom border under the header row (separator against content below). */
   borderBottom?: boolean;
 
@@ -269,6 +273,7 @@ const PanelHeader: React.FC<PanelHeaderProps> = memo(
     searchQuery,
     children,
     className = "",
+    dataTestId,
     borderBottom = false,
     background,
     variant = "default",
@@ -290,7 +295,7 @@ const PanelHeader: React.FC<PanelHeaderProps> = memo(
       resolvedBackground === "transparent"
         ? ""
         : resolvedBackground === "editorCanvas"
-          ? "bg-[var(--cm-editor-background)]"
+          ? EDITOR_TAB_CANVAS_BG_CLASS
           : "bg-bg-2";
 
     // Render custom content or default title/breadcrumb
@@ -375,6 +380,7 @@ const PanelHeader: React.FC<PanelHeaderProps> = memo(
     const headerRow = (
       <div
         className={`${baseClasses} ${borderClasses} ${bgClasses} ${className}`}
+        data-testid={dataTestId}
       >
         {/* Back button */}
         {onBack && (

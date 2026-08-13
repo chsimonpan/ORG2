@@ -46,7 +46,8 @@
     "projectManager": "Project Manager",
     "diff": "Diff",
     "terminals": "Terminals",
-    "openSourceRepo": "Open Source Repo"
+    "openSourceRepo": "Open Source Repo",
+    "environment": "Environment"
   },
   "workstation": {
     "agentComputer": {
@@ -89,15 +90,9 @@
     "startSession": "Start session",
     "sessions": "Sessions",
     "selectProject": "Select Project",
-    "startPage": "Start Page",
     "inbox": "Inbox",
     "login": "Login",
     "setup": "Setup",
-    "devJourney": "Dev Journey",
-    "devRecord": "Dev Record",
-    "gitDashboard": "Git Dashboard",
-    "devActivity": "Dev Activity",
-    "usageHistory": "Usage History",
     "tokenMarket": "Token Market",
     "taskMarket": "Task Market",
     "channels": "Channels",
@@ -114,20 +109,8 @@
     "changelog": "Changelog",
     "journey": "Journey"
   },
-  "appGrid": {
-    "customizeGrid": "Customize Grid",
-    "horizontalGap": "Horizontal Gap",
-    "verticalGap": "Vertical Gap",
-    "resetToDefault": "Reset to Default"
-  },
-  "greetings": {
-    "morning": "Good morning",
-    "afternoon": "Good afternoon",
-    "evening": "Good evening"
-  },
   "sidebar": {
     "tabs": {
-      "build": "Home",
       "workstation": "Workstation",
       "manage": "Manage",
       "core": "Core",
@@ -163,9 +146,7 @@
     "actions": {
       "addNew": "Add New",
       "collapseAll": "Collapse All",
-      "markAllRead": "Mark All Read",
-      "openHome": "Open Home",
-      "openWorkstation": "Open Workstation"
+      "markAllRead": "Mark All Read"
     },
     "search": {
       "folders": "Search Workspace...",
@@ -190,7 +171,8 @@
       "workstation": "Workstation",
       "viewRam": "View RAM",
       "tutorials": "Tutorials",
-      "openSettings": "Open Settings"
+      "openSettings": "Open Settings",
+      "setupChecklist": "Quick setup"
     },
     "empty": {
       "noItems": "No items",
@@ -213,6 +195,37 @@
       "duration1h": "1 hour",
       "duration2h": "2 hours",
       "durationTomorrow": "Tomorrow"
+    },
+    "guide": {
+      "trigger": "Open guide",
+      "title": "Get started with ORGII",
+      "startSession": "Start a session",
+      "quickSetup": "Language and appearance",
+      "close": "Close guide",
+      "progressLabel": "{{completed}} of {{total}} setup milestones complete",
+      "localWorkspace": "Local workspace",
+      "connectOrganization": "Connect or create an organization",
+      "createOrganizationHint": "Enter an organization name, then select Create. The guide continues after the cloud organization is created.",
+      "inviteTeammate": "Invite a teammate",
+      "inviteTeammateHint": "Create an invite link here, then send it to your teammate.",
+      "invitePermissionHint": "You can view the member list here. An organization admin or owner must create the invite.",
+      "devPanelTitle": "Onboarding test states",
+      "devPanelHint": "Runtime-only preview for the invite journey. Backend organization data is never changed.",
+      "devScenarioLive": "Live data",
+      "devScenarioNoOrganization": "No organization",
+      "devScenarioMember": "Member · no invite access",
+      "devScenarioAdmin": "Admin · invite access",
+      "devScenarioOwner": "Owner · invite access",
+      "devScenarioRequiresOrganization": "Role previews require at least one real cloud organization.",
+      "devSimulationActive": "Development simulation active",
+      "devSimulationReadOnly": "This member-page preview is read-only. Organization management actions are disabled.",
+      "viewTeamActivity": "View team usage",
+      "viewTeamActivityHint": "Runtime is open on Members. Choose a teammate to view their Codex, Claude, and Cursor usage; if no data appears, enable team runtime sync first.",
+      "exploreProduct": "Take the product tour",
+      "nextStep": "Next step"
+    },
+    "developerTestPanel": {
+      "title": "Developer test panel"
     }
   },
   "collaboration": {
@@ -246,7 +259,11 @@
       "forkSetupNoWorkspace": "Continue without a workspace",
       "forkSetupAccount": "Account",
       "forkSetupModel": "Model",
-      "forkSetupContinue": "Fork & continue"
+      "forkSetupContinue": "Fork & continue",
+      "forkSnapshotIncomplete": "The cloud snapshot is incomplete. Ask the owner to finish syncing, then retry.",
+      "forkAgentUnavailable": "Choose a local agent before forking.",
+      "forkBackendRegistrationFailed": "The session history was copied, but the runnable fork could not be registered. Retry.",
+      "forkReplayUnavailable": "Full replay is not available for this session. Ask the owner to share the replay, then retry."
     },
     "repoPicker": {
       "loading": "Loading repos…",
@@ -267,7 +284,22 @@
       "sendFailed": "Forked, but the message failed to send — it was restored to the composer",
       "forkedChipTooltip": "Forked from {{name}}",
       "sourceChipTooltip": "Shared by {{name}}",
-      "continuePlaceholder": "Message to fork and continue in ORGII…"
+      "continuePlaceholder": "Message to fork and continue in ORGII…",
+      "snapshotError": "The cloud snapshot is incomplete. Ask the owner to finish syncing, then retry.",
+      "agentError": "Choose a local agent before forking.",
+      "backendError": "The session history was copied, but the runnable fork could not be registered. Retry.",
+      "parentOpenUnavailable": "The source session could not be opened from this fork.",
+      "replayError": "Full replay is not available for this session. Ask the owner to share the replay, then retry.",
+      "openParentButton": "Open source session from {{name}}"
+    },
+    "continueCli": {
+      "headerButton": "Continue in {{agent}}",
+      "headerTooltip": "Reopen this session in {{agent}} in a terminal tab ({{command}})",
+      "notInstalled": "{{agent}} is not installed on this machine",
+      "missingWorkspace": "The session's original folder is gone — {{agent}} can only resume it from there",
+      "sourceMissing": "The original session data is no longer on disk",
+      "launchFailed": "Failed to open the {{agent}} terminal",
+      "composerPlaceholder": "Message to continue in a new ORGII session — or resume in {{agent}} from the header…"
     }
   },
   "myRole": {
@@ -442,15 +474,6 @@
       "forks": "Forks"
     }
   },
-  "changelog": {
-    "title": "Changelog",
-    "subtitle": "Product updates",
-    "commitCount": "{{count}} commits",
-    "commitCount_one": "{{count}} commit",
-    "details": "Details",
-    "frontend": "Frontend",
-    "backend": "Backend"
-  },
   "journeyStation": {
     "projectJourney": "Project Journey",
     "sessionJourney": "Session Journey",
@@ -503,7 +526,61 @@
       "retentionUpgrade": "This session is outside your plan's replay window — upgrade to view it",
       "importError": "Couldn't import the session",
       "manageBilling": "Manage billing",
-      "manageBillingNote": "Cancel or change your plan in the billing portal"
+      "manageBillingNote": "Cancel or change your plan in the billing portal",
+      "aboutMeTitle": "About me",
+      "sync": {
+        "tabTitle": "Sync",
+        "connectionTitle": "Connection",
+        "endpointLabel": "Backend endpoint",
+        "endpointOfficial": "Managed ORG2 Cloud",
+        "endpointCustom": "Custom deployment",
+        "endpointUnknown": "Unknown",
+        "signedInLabel": "Signed in as",
+        "signedOut": "Signed out",
+        "signedOutHint": "Sign in to ORG2 Cloud to see account and feature details",
+        "tokenExpiresLabel": "Access token expires",
+        "tokenExpired": "Expired — sign in again",
+        "schemaLabel": "Backend schema",
+        "schemaChecking": "Checking…",
+        "schemaMatched": "Matched (v{{version}})",
+        "schemaMismatch": "Mismatch — backend v{{backend}}, app expects v{{expected}}",
+        "schemaUnknown": "Couldn't read the backend schema version",
+        "capabilitiesLabel": "Backend features",
+        "capabilitiesChecking": "Checking…",
+        "capabilitiesUnavailable": "Unavailable",
+        "capabilityEnabled": "on",
+        "capabilityDisabled": "off",
+        "capability": {
+          "broadcastSignals": "Realtime signals",
+          "storageSegments": "Replay storage segments",
+          "homeEndpoints": "Regional endpoints",
+          "teamInboxMentions": "Team inbox mentions",
+          "memberRuntime": "Team runtime sharing"
+        },
+        "lastSyncTitle": "Last sync",
+        "lastSyncLabel": "Last successful sync",
+        "lastSyncNever": "Never synced",
+        "lastAttemptLabel": "Last attempt",
+        "manualLabel": "Run a sync pass now",
+        "manualAction": "Sync now",
+        "manualRunning": "Syncing…",
+        "manualSuccess": "Sync finished",
+        "manualError": "Sync failed: {{message}}",
+        "coverageTitle": "Session coverage",
+        "coverageSummary": "{{synced}}/{{syncable}} synced ({{percent}}%)",
+        "coveragePercentLabel": "Coverage",
+        "coverageEmpty": "No sessions in this org's repo scopes yet",
+        "logsTitle": "Sync log",
+        "logsHelp": "Recent sync events recorded on this device. Cleared on restart and never uploaded",
+        "logsEmpty": "No sync events recorded yet",
+        "logsClear": "Clear",
+        "logsCopy": "Copy",
+        "logsCopied": "Copied",
+        "logsOrg": "org {{orgId}}",
+        "levelInfo": "Info",
+        "levelWarn": "Warning",
+        "levelError": "Error"
+      }
     },
     "sidebar": {
       "teamSessions": "Team sessions",
@@ -519,7 +596,12 @@
       "viewerOverflow": "and {{count}} more viewers",
       "memberViewing": "viewing: {{title}}",
       "viewerOverflow_one": "and 1 more viewer",
-      "viewerOverflow_other": "and {{count}} more viewers"
+      "viewerOverflow_other": "and {{count}} more viewers",
+      "mySessions": "My sessions",
+      "copyId": "Copy ID",
+      "loadingSession": "Loading session…",
+      "downloadProgress": "Downloading… {{percent}}%",
+      "downloadProgressEta": "Downloading… {{percent}}% · ~{{eta}} left"
     },
     "sync": {
       "quotaExceededToast": "ORG2 Cloud sync paused: this org's plan quota is exceeded",
@@ -570,7 +652,9 @@
         "stateExhausted": "Used up",
         "linkOneTimeNote": "Copy it now — the link is shown only once on this device.",
         "copyLink": "Copy link",
-        "copied": "Copied"
+        "copied": "Copied",
+        "createTitle": "New invite",
+        "historyTitle": "Previous invites"
       },
       "members": {
         "roleChangeTitle": "Change role",
@@ -582,7 +666,8 @@
         "youTag": "You",
         "ownerTag": "Owner",
         "floorOff": "No minimum",
-        "floorTooltip": "Minimum sharing level for this member. The stricter of this and the org-wide floor applies."
+        "floorTooltip": "Minimum sharing level for this member. The stricter of this and the org-wide floor applies.",
+        "floorOrgMinimum": "Org minimum ({{mode}})"
       },
       "leave": {
         "action": "Leave org",
@@ -623,7 +708,7 @@
         "joinedFallbackToast": "Joined the cloud org"
       },
       "create": {
-        "sourceCloud": "ORG2 Cloud (managed)",
+        "sourceCloud": "Cloud",
         "signInFirst": "Sign in to ORG2 Cloud to create or join a managed org.",
         "openSettings": "Open sign-in settings",
         "createdToast": "Cloud org created"
@@ -640,7 +725,9 @@
         "inviteInvalid": "This invite code isn't valid.",
         "inviteRevoked": "This invite has been revoked.",
         "inviteExpired": "This invite has expired.",
-        "inviteExhausted": "This invite has no uses left."
+        "inviteExhausted": "This invite has no uses left.",
+        "alreadyMember": "You're already a member of this organization.",
+        "network": "Couldn't connect to the cloud service. Check your network and try again."
       }
     },
     "defaultAccess": {
@@ -658,7 +745,8 @@
       "visibilityOrg": "Everyone in org",
       "visibilityRestricted": "Only me",
       "taggedNote": "This session was moved into this org, so it always shares at least metadata while tagged.",
-      "floorNote": "Your org admin requires sharing at least {{mode}}."
+      "floorNote": "Your org admin requires sharing at least {{mode}}.",
+      "orgMinimumOption": "Org minimum ({{mode}})"
     },
     "share": {
       "menuItem": "Cloud share…",
@@ -689,7 +777,14 @@
       "importPasteClipboard": "Paste from clipboard",
       "importSubmit": "Import",
       "importInvalidInput": "This doesn't look like a valid share link or token.",
-      "selectAll": "Everyone ({{count}})"
+      "selectAll": "Everyone ({{count}})",
+      "incomingEndpointMismatch": "This share belongs to a different custom cloud. Configure that cloud endpoint before importing.",
+      "incomingConnectionError": "Couldn't connect to the cloud service. Check your network and try again.",
+      "incomingIncompatibleError": "This cloud returned an incompatible share response. Update ORGII or verify the cloud deployment.",
+      "incomingServerError": "The cloud service couldn't resolve this share. Try again.",
+      "incomingAlreadyOnDevice": "This session is already on this device. Open the original instead of importing a duplicate.",
+      "incomingOpenExisting": "Open session",
+      "incomingRetry": "Try again"
     },
     "agentRunner": {
       "title": "Agent task runner",
@@ -715,7 +810,8 @@
         "openBadge_one": "{{count}} agent task awaiting pickup",
         "openBadge": "{{count}} agent tasks awaiting pickup",
         "activeBadge_one": "an agent is working on this session",
-        "activeBadge": "{{count}} agents are working on this session"
+        "activeBadge": "{{count}} agents are working on this session",
+        "mentionSuggestion": "Assign this comment to an agent"
       },
       "toggleLabel": "Comments",
       "notesButton": "Session notes",
@@ -753,7 +849,9 @@
       "addressRoundScope": "Round comments",
       "addressConfirm_one": "Address {{count}} comment",
       "addressConfirm_other": "Address {{count}} comments",
-      "agentAuthor": "Agent @{{name}}"
+      "agentAuthor": "Agent @{{name}}",
+      "mentionMembers": "Mention",
+      "searchMembers": "Search members"
     },
     "billing": {
       "openFailed": "Couldn't open billing. Please try again."
@@ -763,6 +861,165 @@
       "help": "Set the least a member may share for sessions in this org's repos. Members can't set sessions below it. \"No minimum\" keeps the current behavior",
       "optionNone": "No minimum",
       "memberNote": "Your org admin requires sharing at least {{mode}}, so you can't set sessions below that"
+    },
+    "sessionExpired": "Your ORG2 Cloud session expired. Sign in again to continue.",
+    "sessionRef": {
+      "chipLabel": "Team session",
+      "notMember": "You are not a member of the organization that owns this session.",
+      "signInRequired": "Sign in to ORG2 Cloud to open this session.",
+      "sessionNotFound": "That session is not in this organization.",
+      "notPublished": "Share this session to an organization before copying a reference.",
+      "chooseOrg": "This session is in several organizations. Switch to the one you want to reference, then copy again.",
+      "opening": "Opening team session…"
+    },
+    "signedInAs": "Signed in as {{name}}",
+    "renameDisplayName": "Edit display name",
+    "renameSaved": "Display name updated",
+    "renameFailed": "Failed to update display name",
+    "download": {
+      "title": "Downloading team session…",
+      "events": "{{loaded}} / {{total}} events",
+      "eta": "About {{eta}} remaining",
+      "finalizing": "Finalizing…",
+      "complete": "Download complete",
+      "estimate": "This session has {{count}} events to download (about {{eta}})",
+      "start": "Download",
+      "pause": "Pause",
+      "paused": "Paused",
+      "resume": "Resume"
+    },
+    "channels": {
+      "title": "Channels",
+      "createAction": "Create channel",
+      "createFirst": "Create a channel",
+      "manageMembers": "Manage members",
+      "archiveAction": "Archive channel",
+      "unarchive": "Unarchive",
+      "unarchiveFailed": "Couldn't unarchive the channel",
+      "deleteAction": "Delete channel",
+      "leave": "Leave channel",
+      "archivedGroup": "Archived",
+      "loadError": "Couldn't load channels",
+      "settings": {
+        "action": "Channel settings",
+        "title": "Settings for #{{name}}",
+        "submit": "Save",
+        "managerRequired": "Only channel managers can edit this channel",
+        "error": "Couldn't update the channel. Please try again."
+      },
+      "local": {
+        "quotaExceeded": "You've reached the channel limit on this device",
+        "archiveBody": "Archiving hides the channel from your sidebar. Its history is kept, and it can be unarchived later",
+        "deleteWarning": "This will permanently delete the channel from this device. This cannot be undone"
+      },
+      "cancel": "Cancel",
+      "create": {
+        "title": "Create a channel",
+        "nameLabel": "Name",
+        "namePlaceholder": "e.g. code-review",
+        "topicLabel": "Topic",
+        "topicOptional": "(optional)",
+        "topicPlaceholder": "What's this about?",
+        "visibilityLabel": "Visibility",
+        "publicTitle": "Public",
+        "publicDesc": "Anyone in the org can view and join the conversation",
+        "privateTitle": "Private",
+        "privateDesc": "Only invited people can view this channel",
+        "membersLabel": "Add members",
+        "membersHint": "You'll be added as a channel manager automatically",
+        "membersLoading": "Loading members…",
+        "membersEmpty": "No other members in this org yet",
+        "postPolicyLabel": "Who can post",
+        "postPolicyEveryone": "Everyone",
+        "postPolicyManagers": "Only channel managers",
+        "submit": "Create",
+        "nameTaken": "That name is already taken",
+        "quotaExceeded": "This org has reached its channel limit",
+        "error": "Couldn't create the channel. Please try again."
+      },
+      "archive": {
+        "title": "Archive #{{name}}?",
+        "body": "Archiving hides the channel from the sidebar for everyone. Its history is kept, and it can be unarchived later",
+        "confirm": "Archive",
+        "managerRequired": "Only channel managers can archive this channel",
+        "error": "Couldn't archive the channel. Please try again."
+      },
+      "delete": {
+        "title": "Delete #{{name}}?",
+        "warning": "This will permanently delete the channel for everyone. This cannot be undone",
+        "acknowledge": "Yes, permanently delete the channel",
+        "confirm": "Delete",
+        "adminRequired": "Only org admins can delete channels",
+        "error": "Couldn't delete the channel. Please try again."
+      },
+      "members": {
+        "title": "Members of #{{name}}",
+        "loading": "Loading members…",
+        "empty": "No members in this channel yet",
+        "loadError": "Couldn't load channel members. Please try again.",
+        "managerBadge": "Manager",
+        "you": "You",
+        "addLabel": "Add members",
+        "addEmpty": "Everyone in the org is already in this channel",
+        "addSubmit": "Add",
+        "actions": "Member actions",
+        "remove": "Remove from channel",
+        "makeManager": "Make channel manager",
+        "removeManager": "Remove as channel manager",
+        "leave": "Leave channel",
+        "lastManager": "Assign another manager first",
+        "error": "Something went wrong. Please try again."
+      },
+      "feed": {
+        "composerPlaceholder": "Message #{{name}}",
+        "save": "Save",
+        "edit": "Edit message",
+        "delete": "Delete message",
+        "edited": "(edited)",
+        "deletedMessage": "message deleted",
+        "today": "Today",
+        "yesterday": "Yesterday",
+        "you": "You",
+        "memberCount": "{{memberCount}} members",
+        "emptyTitle": "This is the start of #{{name}}",
+        "emptySubtitle": "Send the first message to start the conversation",
+        "missingTitle": "Channel no longer available",
+        "missingSubtitle": "This channel was deleted from this device",
+        "cloudPendingTitle": "No messages yet",
+        "cloudPendingSubtitle": "Cloud channel history arrives with the next backend upgrade",
+        "cloudComposerDisabled": "Messaging isn't available for cloud channels yet — this release ships channel setup and membership only. Posting arrives with the next backend upgrade",
+        "errorEmpty": "Type a message first",
+        "errorTooLong": "That message is too long (4000 characters max)",
+        "errorQuota": "This channel has reached its message limit on this device",
+        "errorGeneric": "Couldn't post the message. Please try again.",
+        "dropSessionHint": "Drop to add this session as a reference",
+        "messageBodyLabel": "Channel message",
+        "sessionCardMissing": "Not available on this device",
+        "sessionCardOpen": "Open session {{name}}",
+        "workItemCardMissing": "Not available on this device",
+        "workItemCardLoading": "Loading…",
+        "workItemCardOpen": "Open work item {{name}}",
+        "githubCardOpen": "Open {{name}} on GitHub",
+        "githubIssue": "Issue",
+        "githubPullRequest": "Pull request",
+        "archivedComposerDisabled": "This channel is archived. Unarchive it to post again.",
+        "errorPostForbidden": "Only channel managers can post in this channel",
+        "errorArchived": "This channel is archived, so posting is turned off",
+        "errorChannelFull": "This channel has reached its message limit, so posting is turned off",
+        "errorChannelMissing": "This channel is no longer available",
+        "errorMessageMissing": "That message is no longer available",
+        "loadError": "Couldn't load messages",
+        "loadingMessages": "Loading messages…",
+        "loadOlder": "Load earlier messages",
+        "unknownAuthor": "Teammate"
+      }
+    },
+    "backgroundUpload": {
+      "label": "Background upload",
+      "help": "Upload eligible member sessions according to the organization's minimum sharing level and each session's settings, even when this organization is not active.",
+      "on": "On",
+      "off": "Off",
+      "memberNote": "Enabled by an admin — eligible sessions upload in the background without requiring you to open this organization."
     }
   }
 }

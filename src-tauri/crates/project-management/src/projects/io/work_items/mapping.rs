@@ -76,9 +76,11 @@ pub(super) fn assemble_work_item(
         labels,
         milestone: core.milestone,
         parent: core.parent,
+        stage: extras.stage,
         start_date: core.start_date,
         target_date: core.target_date,
         created_by: extras.created_by,
+        origin_session: extras.origin_session,
         created_at: to_iso8601(core.created_at_ms),
         updated_at: to_iso8601(core.updated_at_ms),
         deleted_at: core.deleted_at_ms.map(to_iso8601),
@@ -87,6 +89,7 @@ pub(super) fn assemble_work_item(
         comments: extras.comments,
         history: extras.history,
         delegations: extras.delegations,
+        handoff: extras.handoff,
         linked_sessions: extras.linked_sessions,
         proof_of_work: extras.proof_of_work,
         orchestrator_config: extras.orchestrator_config,
@@ -127,13 +130,17 @@ where
         params![work_item_id],
         |row| row.get::<_, String>(0),
     )?;
+    Ok(parse_extras_json(work_item_id, raw.as_deref()))
+}
+
+pub(super) fn parse_extras_json(work_item_id: &str, raw: Option<&str>) -> ExtrasPayload {
     // Silent fallback to `ExtrasPayload::default()` on a corrupt row
     // is a data-loss path: the orchestrator/atomic mutators read this
     // payload, mutate it, then write it back — overwriting the corrupt
     // row with a default that has no `field_revisions` / `external_refs`
     // / `orchestrator_state`. Warn so DB corruption / schema drift is
     // visible before the next mutator overwrites the recoverable row.
-    let extras = match raw.as_deref() {
+    match raw {
         Some(json) => match serde_json::from_str::<ExtrasPayload>(json) {
             Ok(v) => v,
             Err(err) => {
@@ -147,8 +154,7 @@ where
             }
         },
         None => ExtrasPayload::default(),
-    };
-    Ok(extras)
+    }
 }
 
 /// Minimal abstraction over `Connection` and `Transaction` so read

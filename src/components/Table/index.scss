@@ -50,7 +50,7 @@
   transition: background 0.2s ease;
 
   &.table-th-sortable {
-    cursor: pointer;
+    cursor: var(--interactive-cursor, default);
     user-select: none;
 
     &:hover {
@@ -165,7 +165,12 @@
 // ==========================================
 
 .table-settings {
-  --settings-table-surface: var(--color-surface-container);
+  // Only the toolbar and footer retain the raised table surface. The title row,
+  // scrolling rows, frozen columns, and their covering shades merge into the
+  // surrounding page/chat pane while remaining opaque over scrolling data.
+  --settings-table-surface: var(--color-primary-container);
+  --settings-table-body-surface: var(--color-chat-pane);
+  --settings-table-cover-fade-size: 56px;
 
   .table-container {
     position: relative;
@@ -181,7 +186,7 @@
     top: 0;
     bottom: 0;
     z-index: 2;
-    width: 28px;
+    width: var(--settings-table-cover-fade-size);
     pointer-events: none;
     opacity: 0;
     transition: opacity 120ms ease;
@@ -192,7 +197,9 @@
     left: 0;
     background: linear-gradient(
       90deg,
-      var(--settings-table-surface) 0%,
+      var(--settings-table-body-surface) 0%,
+      color-mix(in srgb, var(--settings-table-body-surface) 90%, transparent)
+        50%,
       transparent 100%
     );
   }
@@ -201,7 +208,9 @@
     right: 0;
     background: linear-gradient(
       270deg,
-      var(--settings-table-surface) 0%,
+      var(--settings-table-body-surface) 0%,
+      color-mix(in srgb, var(--settings-table-body-surface) 90%, transparent)
+        50%,
       transparent 100%
     );
   }
@@ -217,16 +226,19 @@
     z-index: 20;
     min-width: 0;
     overflow: hidden;
-    background: var(--settings-table-surface);
-    box-shadow: 0 -1px 0 0 var(--settings-table-surface);
+    background: var(--settings-table-body-surface);
+    box-shadow: 0 -1px 0 0 var(--settings-table-body-surface);
   }
 
   .table-scroll {
     position: relative;
-    z-index: 0;
+    // Do not create a nested stacking context: pinned cells must be able to
+    // rise above the container-level z-2 covering shade.
+    z-index: auto;
     min-width: 0;
     overflow-x: auto;
     overflow-y: visible;
+    background: var(--settings-table-body-surface);
   }
 
   .table {
@@ -259,33 +271,34 @@
      */
     z-index: 20;
     padding: 8px 0;
-    background: var(--settings-table-surface);
+    background: var(--settings-table-body-surface);
     font-size: 12px;
     font-weight: 500;
     color: var(--color-text-2);
     vertical-align: middle;
+    border-bottom-color: var(--color-border-1);
     /*
      * Paint a 1px upward extension over the search bar so subpixel
      * rounding between `--search-bar-h` and the actual search bar
      * height never leaves a sliver where scrolling rows can bleed
      * through above the sticky header.
      */
-    box-shadow: 0 -1px 0 0 var(--settings-table-surface);
+    box-shadow: 0 -1px 0 0 var(--settings-table-body-surface);
   }
 
   .table,
   .table-tbody {
-    background: var(--settings-table-surface);
+    background: var(--settings-table-body-surface);
   }
 
   .table-tbody {
     position: relative;
-    z-index: 0;
+    z-index: auto;
   }
 
   .table-td {
     padding: 0;
-    border-bottom: 1px solid var(--border-2);
+    border-bottom: none;
     font-size: 13px;
     vertical-align: middle;
     height: 40px;
@@ -312,10 +325,6 @@
 
   .table-td-align-center .table-td-inner {
     justify-content: center;
-  }
-
-  .table-row:last-child .table-td {
-    border-bottom: none;
   }
 
   .table-th,
@@ -347,11 +356,11 @@
   &.table-settings-tall .table-th {
     padding-top: 12px;
     padding-bottom: 12px;
-    background: var(--settings-table-surface);
+    background: var(--settings-table-body-surface);
   }
 
   &.table-settings-header-border .table-th {
-    border-bottom: 1px solid var(--color-border-2);
+    border-bottom: 1px solid var(--color-border-1);
   }
 
   &.table-settings-no-sticky .table-fixed-header,
@@ -371,7 +380,7 @@
     .table-scroll .table-row > .table-td:first-child {
       position: sticky;
       left: 0;
-      background: var(--settings-table-surface);
+      background: var(--settings-table-body-surface);
     }
 
     .table-fixed-header .table-th:first-child {
@@ -379,7 +388,9 @@
     }
 
     .table-scroll .table-row > .table-td:first-child {
-      z-index: 2;
+      // Sit above the z-2 horizontal cover shade so the pinned cell itself
+      // stays fully opaque while the scrolling content fades underneath it.
+      z-index: 3;
     }
 
     /* Keep the pinned cell in sync with the row hover highlight. */
@@ -430,23 +441,27 @@
   &.table-settings-pin-last-column {
     .table-thead tr > .table-th:last-child,
     .table-row > .table-td:last-child {
-      // Avoid position:sticky;right + CSS zoom: WebKit miscalculates sticky
-      // positions inside overflow-x:auto when the root has style.zoom set.
       position: relative;
-      background: var(--settings-table-surface);
+      background: var(--settings-table-body-surface);
 
       &::before {
         position: absolute;
         top: 0;
         bottom: 0;
-        left: -28px;
-        width: 28px;
+        left: calc(-1 * var(--settings-table-cover-fade-size));
+        width: var(--settings-table-cover-fade-size);
         pointer-events: none;
         opacity: 0;
         background: linear-gradient(
           90deg,
           transparent 0%,
-          var(--settings-table-surface) 100%
+          color-mix(
+              in srgb,
+              var(--settings-table-body-surface) 90%,
+              transparent
+            )
+            50%,
+          var(--settings-table-body-surface) 100%
         );
         transition: opacity 120ms ease;
         content: "";
@@ -463,7 +478,9 @@
     }
 
     .table-row > .table-td:last-child {
-      z-index: 1;
+      // The container edge shade is z-2; pinned content must remain fully
+      // opaque above it while this cell's own ::before fades content to its left.
+      z-index: 3;
     }
 
     .table-thead tr > .table-th:last-child {
@@ -472,13 +489,19 @@
 
     &.table-hover .table-row:hover > .table-td:last-child,
     &.table-clickable .table-row:hover > .table-td:last-child {
-      background: var(--settings-table-surface);
+      background: var(--settings-table-body-surface);
 
       &::before {
         background: linear-gradient(
           90deg,
           transparent 0%,
-          var(--settings-table-surface) 100%
+          color-mix(
+              in srgb,
+              var(--settings-table-body-surface) 90%,
+              transparent
+            )
+            50%,
+          var(--settings-table-body-surface) 100%
         );
       }
     }
@@ -500,7 +523,7 @@
   .table-empty,
   .table-row > .table-td,
   .table-expanded-row > .table-td {
-    background: var(--settings-table-surface);
+    background: var(--settings-table-body-surface);
   }
 
   &.table-hover .table-row,
@@ -509,7 +532,7 @@
   &.table-clickable .table-expanded-row {
     &:hover,
     &:hover > .table-td {
-      background: var(--settings-table-surface);
+      background: var(--settings-table-body-surface);
     }
   }
 
@@ -517,19 +540,11 @@
   &.table-expanded-no-hover .table-expanded-row:hover > .table-td,
   .table-row-hover-suppressed:hover,
   .table-row-hover-suppressed:hover > .table-td {
-    background: var(--settings-table-surface) !important;
+    background: var(--settings-table-body-surface) !important;
   }
 
   .table-expanded-row .bg-chat-input {
-    background: var(--settings-table-surface);
-  }
-
-  .settings-table-root-chat-panel &,
-  .settings-table-root-chat-panel .table-wrapper,
-  .settings-table-root-chat-panel .table-container,
-  .settings-table-root-chat-panel .table-scroll,
-  .settings-table-root-chat-panel .table-pagination-wrapper {
-    background: var(--settings-table-surface);
+    background: var(--settings-table-body-surface);
   }
 
   &.table-policy-fixed-layout .table {
@@ -596,13 +611,40 @@
   container-type: inline-size;
 }
 
+// Keep compact tables' final action/status column reachable while the wider
+// title/context columns scroll underneath it. The app now uses native WebView
+// zoom rather than CSS root zoom, so right-sticky table cells are stable here.
+@media (max-width: 1300px) {
+  .table-settings.table-settings-pin-last-column {
+    .table-thead tr > .table-th:last-child,
+    .table-row > .table-td:last-child {
+      position: sticky;
+      right: 0;
+    }
+  }
+}
+
+// Keep the search/filter toolbar pinned above the table's fixed column header.
+// This lives in the component stylesheet so decorative classes cannot silently
+// override the positioning contract through stylesheet load order.
+.settings-table-sticky-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 21;
+}
+
+// Compact one-line search/filter bars to the 42px settings-table rhythm.
+// The toolbar's default search input is 32px tall, leaving 5px above and below.
+.settings-table-toolbar-compact > div {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
 // A page-scrolled SettingsTable keeps its body side borders on the root while
 // the rounded toolbar sticks independently. Mask the first 12px of those
 // straight root borders, then paint the rounded toolbar above the mask so the
 // parent border cannot protrude past the corner arc during scroll.
 .settings-table-sticky-mask {
-  position: relative;
-
   &::before,
   &::after {
     position: absolute;
@@ -630,12 +672,14 @@
 }
 
 .settings-table-root-default .table-settings {
-  --settings-table-surface: var(--color-surface-container);
+  --settings-table-surface: var(--color-primary-container);
+  --settings-table-body-surface: var(--color-chat-pane);
 }
 
 .settings-table-root-transparent,
 .settings-table-root-transparent .table-settings {
   --settings-table-surface: transparent;
+  --settings-table-body-surface: transparent;
 }
 
 .settings-table-root-transparent {
@@ -709,19 +753,6 @@
   background: transparent;
 }
 
-.settings-table-root-chat-panel,
-.settings-table-root-chat-panel .table-settings {
-  --settings-table-surface: var(--color-chat-panel-info-container);
-}
-
-.settings-table-root-chat-panel .table-settings .table-row,
-.settings-table-root-chat-panel .table-settings .table-expanded-row,
-.settings-table-root-chat-panel .table-settings .table-row > .table-td,
-.settings-table-root-chat-panel .table-settings .table-expanded-row > .table-td,
-.settings-table-root-chat-panel .table-settings .table-td-inner {
-  background: var(--settings-table-surface);
-}
-
 .table-settings.table-settings-fill-height {
   display: flex;
   flex: 1;
@@ -750,6 +781,16 @@
     min-height: 0;
     overflow-y: auto;
     overflow-x: auto;
+  }
+
+  &.table-has-empty-state {
+    .table,
+    .table-tbody,
+    .table-tbody > tr,
+    .table-tbody > tr > td,
+    .table-empty {
+      height: 100%;
+    }
   }
 }
 
@@ -806,7 +847,7 @@
 .table-checkbox {
   width: 16px;
   height: 16px;
-  cursor: pointer;
+  cursor: var(--interactive-cursor, default);
   accent-color: var(--color-primary-6);
 }
 
@@ -858,7 +899,7 @@
   background: var(--color-bg-1);
   color: var(--text-1);
   font-size: 13px;
-  cursor: pointer;
+  cursor: var(--interactive-cursor, default);
   transition: all 0.2s ease;
 
   &:hover {

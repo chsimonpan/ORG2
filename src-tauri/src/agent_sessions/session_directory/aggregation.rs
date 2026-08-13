@@ -10,52 +10,79 @@ use std::collections::HashSet;
 use crate::agent_sessions::cli::persistence as cli_session_persistence;
 use agent_core::coordination::agent_org_runs::{AgentOrgRunRecord, AgentOrgRunStore};
 use agent_core::definitions::orgs::OrgDefinition;
-use agent_core::session::persistence::{self as session_persistence, session_type};
+use agent_core::session::persistence::{
+    self as session_persistence, list_agent_org_root_sessions_page,
+    list_standalone_coding_sessions_page, list_unpinned_sessions_by_type_page, session_type,
+};
+use agent_core::session::SessionStatus;
 use chrono::DateTime;
 use core_types::key_source::KeySource;
 use database::db::get_connection;
 use orgtrack_core::sources::claude_code::history as claude_code_history;
 use orgtrack_core::sources::cline::history as cline_history;
 use orgtrack_core::sources::codex::app as codex_app_history;
+use orgtrack_core::sources::copilot::history as copilot_history;
 use orgtrack_core::sources::cursor_cli::history as cursor_cli_history;
 use orgtrack_core::sources::cursor_ide::history as cursor_ide_history;
 use orgtrack_core::sources::cursor_ide::history::CursorIdeSessionPage;
 use orgtrack_core::sources::imported_history::cache as imported_history_cache;
 use orgtrack_core::sources::imported_history::metadata::{
-    SOURCE_CLAUDE_CODE, SOURCE_CLINE, SOURCE_CODEX_APP, SOURCE_CURSOR_CLI, SOURCE_CURSOR_IDE,
-    SOURCE_OPENCODE, SOURCE_QODER, SOURCE_TRAE, SOURCE_WARP, SOURCE_WINDSURF, SOURCE_WORKBUDDY,
-    SOURCE_ZCODE,
+    SOURCE_CLAUDE_CODE, SOURCE_CLINE, SOURCE_CODEX_APP, SOURCE_COPILOT, SOURCE_CURSOR_CLI,
+    SOURCE_CURSOR_IDE, SOURCE_KIMI, SOURCE_MIMO_CODE, SOURCE_OMP, SOURCE_OPENCODE, SOURCE_PI,
+    SOURCE_QODER, SOURCE_QODER_CLI, SOURCE_QWEN_CODE, SOURCE_TRAE, SOURCE_WARP, SOURCE_WINDSURF,
+    SOURCE_WORKBUDDY, SOURCE_ZCODE,
 };
 use orgtrack_core::sources::imported_history::ImportedHistorySessionPage;
 use orgtrack_core::sources::imported_history::IMPORTED_STATUS_COMPLETED;
+use orgtrack_core::sources::kimi::history as kimi_history;
+use orgtrack_core::sources::mimo_code::history as mimo_code_history;
+use orgtrack_core::sources::omp::history as omp_history;
 use orgtrack_core::sources::opencode::history as opencode_history;
+use orgtrack_core::sources::pi::history as pi_history;
 use orgtrack_core::sources::qoder::history as qoder_history;
+use orgtrack_core::sources::qoder_cli::history as qoder_cli_history;
+use orgtrack_core::sources::qwen_code::history as qwen_code_history;
 use orgtrack_core::sources::trae::history as trae_history;
 use orgtrack_core::sources::warp::history as warp_history;
 use orgtrack_core::sources::windsurf::history as windsurf_history;
 use orgtrack_core::sources::workbuddy as workbuddy_history;
 use orgtrack_core::sources::zcode::history as zcode_history;
+use rusqlite::params;
 
 const AGENT_ORG_ICON_ID: &str = "network";
 
 use super::conversion::{
     cli_session_to_aggregate_record, cursor_ide_history_to_aggregate_record,
-    imported_history_to_aggregate_record, os_session_to_aggregate_record,
-    sde_session_to_aggregate_record, AgentMetadataResolver,
+    human_session_to_aggregate_record, imported_history_to_aggregate_record,
+    os_session_to_aggregate_record, sde_session_to_aggregate_record, AgentMetadataResolver,
 };
 use super::display::matches_text_query;
-use super::types::{SessionAggregateRecord, SessionFilter, SessionListResponse};
+use super::types::{
+    NativeSidebarSessionCursor, NativeSidebarSessionPageResponse, NativeSidebarSessionStream,
+    SessionAggregateRecord, SessionFilter, SessionListResponse,
+};
 
 const IMPORTED_HISTORY_PAGE_SIZE: usize = 500;
+pub const NATIVE_SIDEBAR_PAGE_MAX_LIMIT: usize = 50;
 
 enum ExternalHistoryPage {
     Imported(ImportedHistorySessionPage),
     CursorIde(CursorIdeSessionPage),
 }
 
+type ExternalHistoryPageLoader =
+    fn(&mut rusqlite::Connection, usize, usize) -> Result<ExternalHistoryPage, String>;
+
 struct ExternalHistorySourceLoader {
     source: &'static str,
-    load_page: fn(&mut rusqlite::Connection, usize, usize) -> Result<ExternalHistoryPage, String>,
+    load_page: ExternalHistoryPageLoader,
+    /// Filtered cache-snapshot reader for continuation pages. Sources whose
+    /// page-zero loader filters beyond the generic cache predicate (Cursor
+    /// IDE's listable-session check) must re-apply that filter on "Load
+    /// more", or offsets computed against page zero's filtered stream
+    /// misalign — duplicating rows already shown and surfacing rows page
+    /// zero hides. `None` = the generic cache page matches page zero.
+    load_continuation_page: Option<ExternalHistoryPageLoader>,
 }
 
 fn load_claude_code_external_history_page(
@@ -82,6 +109,15 @@ fn load_cursor_ide_external_history_page(
     offset: usize,
 ) -> Result<ExternalHistoryPage, String> {
     cursor_ide_history::list_cursor_ide_sessions_paginated(conn, limit, offset)
+        .map(ExternalHistoryPage::CursorIde)
+}
+
+fn load_cursor_ide_external_history_continuation_page(
+    conn: &mut rusqlite::Connection,
+    limit: usize,
+    offset: usize,
+) -> Result<ExternalHistoryPage, String> {
+    cursor_ide_history::list_cursor_ide_sessions_paginated_cached(conn, limit, offset)
         .map(ExternalHistoryPage::CursorIde)
 }
 
@@ -166,72 +202,183 @@ fn load_qoder_external_history_page(
         .map(ExternalHistoryPage::Imported)
 }
 
+fn load_mimo_code_external_history_page(
+    conn: &mut rusqlite::Connection,
+    limit: usize,
+    offset: usize,
+) -> Result<ExternalHistoryPage, String> {
+    mimo_code_history::list_mimo_code_history_sessions_paginated(conn, limit, offset)
+        .map(ExternalHistoryPage::Imported)
+}
+
+fn load_omp_external_history_page(
+    conn: &mut rusqlite::Connection,
+    limit: usize,
+    offset: usize,
+) -> Result<ExternalHistoryPage, String> {
+    omp_history::list_omp_history_sessions_paginated(conn, limit, offset)
+        .map(ExternalHistoryPage::Imported)
+}
+
+fn load_pi_external_history_page(
+    conn: &mut rusqlite::Connection,
+    limit: usize,
+    offset: usize,
+) -> Result<ExternalHistoryPage, String> {
+    pi_history::list_pi_history_sessions_paginated(conn, limit, offset)
+        .map(ExternalHistoryPage::Imported)
+}
+
+fn load_qoder_cli_external_history_page(
+    conn: &mut rusqlite::Connection,
+    limit: usize,
+    offset: usize,
+) -> Result<ExternalHistoryPage, String> {
+    qoder_cli_history::list_qoder_cli_history_sessions_paginated(conn, limit, offset)
+        .map(ExternalHistoryPage::Imported)
+}
+
+fn load_qwen_code_external_history_page(
+    conn: &mut rusqlite::Connection,
+    limit: usize,
+    offset: usize,
+) -> Result<ExternalHistoryPage, String> {
+    qwen_code_history::list_qwen_code_history_sessions_paginated(conn, limit, offset)
+        .map(ExternalHistoryPage::Imported)
+}
+
+fn load_kimi_external_history_page(
+    conn: &mut rusqlite::Connection,
+    limit: usize,
+    offset: usize,
+) -> Result<ExternalHistoryPage, String> {
+    kimi_history::list_kimi_history_sessions_paginated(conn, limit, offset)
+        .map(ExternalHistoryPage::Imported)
+}
+
+fn load_copilot_external_history_page(
+    conn: &mut rusqlite::Connection,
+    limit: usize,
+    offset: usize,
+) -> Result<ExternalHistoryPage, String> {
+    copilot_history::list_copilot_history_sessions_paginated(conn, limit, offset)
+        .map(ExternalHistoryPage::Imported)
+}
+
 const EXTERNAL_HISTORY_SOURCE_LOADERS: &[ExternalHistorySourceLoader] = &[
     ExternalHistorySourceLoader {
         source: SOURCE_CLAUDE_CODE,
         load_page: load_claude_code_external_history_page,
+        load_continuation_page: None,
     },
     ExternalHistorySourceLoader {
         source: SOURCE_CODEX_APP,
         load_page: load_codex_app_external_history_page,
+        load_continuation_page: None,
     },
     ExternalHistorySourceLoader {
         source: SOURCE_CURSOR_IDE,
         load_page: load_cursor_ide_external_history_page,
+        load_continuation_page: Some(load_cursor_ide_external_history_continuation_page),
     },
     ExternalHistorySourceLoader {
         source: SOURCE_CURSOR_CLI,
         load_page: load_cursor_cli_external_history_page,
+        load_continuation_page: None,
     },
     ExternalHistorySourceLoader {
         source: SOURCE_OPENCODE,
         load_page: load_opencode_external_history_page,
+        load_continuation_page: None,
     },
     ExternalHistorySourceLoader {
         source: SOURCE_WINDSURF,
         load_page: load_windsurf_external_history_page,
+        load_continuation_page: None,
     },
     ExternalHistorySourceLoader {
         source: SOURCE_WORKBUDDY,
         load_page: load_workbuddy_external_history_page,
+        load_continuation_page: None,
     },
     ExternalHistorySourceLoader {
         source: SOURCE_TRAE,
         load_page: load_trae_external_history_page,
+        load_continuation_page: None,
     },
     ExternalHistorySourceLoader {
         source: SOURCE_CLINE,
         load_page: load_cline_external_history_page,
+        load_continuation_page: None,
     },
     ExternalHistorySourceLoader {
         source: SOURCE_WARP,
         load_page: load_warp_external_history_page,
+        load_continuation_page: None,
     },
     ExternalHistorySourceLoader {
         source: SOURCE_ZCODE,
         load_page: load_zcode_external_history_page,
+        load_continuation_page: None,
     },
     ExternalHistorySourceLoader {
         source: SOURCE_QODER,
         load_page: load_qoder_external_history_page,
+        load_continuation_page: None,
+    },
+    ExternalHistorySourceLoader {
+        source: SOURCE_MIMO_CODE,
+        load_page: load_mimo_code_external_history_page,
+        load_continuation_page: None,
+    },
+    ExternalHistorySourceLoader {
+        source: SOURCE_OMP,
+        load_page: load_omp_external_history_page,
+        load_continuation_page: None,
+    },
+    ExternalHistorySourceLoader {
+        source: SOURCE_PI,
+        load_page: load_pi_external_history_page,
+        load_continuation_page: None,
+    },
+    ExternalHistorySourceLoader {
+        source: SOURCE_QODER_CLI,
+        load_page: load_qoder_cli_external_history_page,
+        load_continuation_page: None,
+    },
+    ExternalHistorySourceLoader {
+        source: SOURCE_QWEN_CODE,
+        load_page: load_qwen_code_external_history_page,
+        load_continuation_page: None,
+    },
+    ExternalHistorySourceLoader {
+        source: SOURCE_COPILOT,
+        load_page: load_copilot_external_history_page,
+        load_continuation_page: None,
+    },
+    ExternalHistorySourceLoader {
+        source: SOURCE_KIMI,
+        load_page: load_kimi_external_history_page,
+        load_continuation_page: None,
     },
 ];
 
-/// Force a source's on-disk store to be re-read and its metadata cache
-/// re-synced, discarding the returned page. This runs the exact sync the
+/// Discover a source's current records and incrementally re-sync its metadata
+/// cache, discarding the returned page. This runs the exact sync the
 /// sidebar/list path performs (re-parsing every record whose signature changed,
-/// e.g. after a parser-version bump), so the manual "Rescan" action can refresh
-/// counts and names immediately instead of waiting for a lazy list load.
+/// e.g. after a parser-version bump), so a manual update can refresh counts and
+/// names immediately instead of waiting for a lazy list load.
 pub fn resync_external_history_source(
     conn: &mut rusqlite::Connection,
     source: &str,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let loader = EXTERNAL_HISTORY_SOURCE_LOADERS
         .iter()
         .find(|loader| loader.source == source)
         .ok_or_else(|| format!("Unknown external history source: {source}"))?;
+    let changes_before = conn.total_changes();
     (loader.load_page)(conn, IMPORTED_HISTORY_PAGE_SIZE, 0)?;
-    Ok(())
+    Ok(conn.total_changes() > changes_before)
 }
 
 fn append_external_history_page(
@@ -310,12 +457,20 @@ fn load_imported_history_sessions(
         .and_then(|filter| filter.session_ids.as_ref())
         .filter(|session_ids| !session_ids.is_empty())
     {
+        let include_superseded = filter
+            .and_then(|filter| filter.include_continuation_superseded)
+            .unwrap_or(false);
         for session_id in session_ids {
-            let Some((source, session)) =
+            let resolved = if include_superseded {
+                imported_history_cache::query_cached_session_by_session_id_including_superseded_from_conn(
+                    &conn, session_id,
+                )?
+            } else {
                 imported_history_cache::query_cached_session_by_session_id_from_conn(
                     &conn, session_id,
                 )?
-            else {
+            };
+            let Some((source, session)) = resolved else {
                 continue;
             };
             if source_filter.is_some_and(|expected| expected != source.as_str())
@@ -350,7 +505,39 @@ fn load_imported_history_sessions(
         if disabled_sources.contains(loader.source) {
             continue;
         }
-        let page = (loader.load_page)(&mut conn, page_limit, page_offset)?;
+        // Page zero is the explicit freshness boundary: it discovers the
+        // provider and incrementally updates its cache. Follow-up "Load more"
+        // pages read that stable cache snapshot directly. Re-running a full
+        // provider scan for every offset made pagination multiply filesystem
+        // and SQLite work without improving freshness.
+        let loaded = if page_offset == 0 {
+            (loader.load_page)(&mut conn, page_limit, page_offset)
+        } else if let Some(load_continuation_page) = loader.load_continuation_page {
+            load_continuation_page(&mut conn, page_limit, page_offset)
+        } else {
+            imported_history_cache::query_imported_session_page_from_conn(
+                &conn,
+                loader.source,
+                page_limit,
+                page_offset,
+            )
+            .map(ExternalHistoryPage::Imported)
+        };
+        // One provider's on-disk store must not decide whether the others are
+        // visible. Propagating here dropped every source after the failing one
+        // from the sidebar — and Claude Code, the most likely to hit an
+        // unreadable transcript, is first in the list.
+        let page = match loaded {
+            Ok(page) => page,
+            Err(error) => {
+                tracing::warn!(
+                    source = loader.source,
+                    error = %error,
+                    "session_directory: skipping external history source that failed to load"
+                );
+                continue;
+            }
+        };
         append_external_history_page(&mut records, loader.source, page);
     }
 
@@ -401,6 +588,9 @@ fn plain_native_page(
         created_after_ms,
         created_before_ms,
         active_only,
+        // Only meaningful with session_ids, and plain requires session_ids
+        // to be absent, so the flag cannot affect the fast path.
+        include_continuation_superseded: _,
     } = filter;
 
     let plain = session_ids.is_none()
@@ -471,6 +661,19 @@ fn plain_native_page(
             let mut resolver = AgentMetadataResolver::new();
             page.into_iter()
                 .map(|session| os_session_to_aggregate_record(session, &mut resolver))
+                .collect::<Vec<_>>()
+        }
+        Some("human") => {
+            let human_filter = agent_core::session::SessionListFilter {
+                type_name: Some(session_type::HUMAN.to_string()),
+                limit: Some(limit),
+                offset: Some(offset),
+                ..Default::default()
+            };
+            session_persistence::list_sessions(&human_filter)
+                .map_err(|err| format!("Failed to load Human session page: {err}"))?
+                .into_iter()
+                .map(human_session_to_aggregate_record)
                 .collect::<Vec<_>>()
         }
         None => return plain_directory_page(filter, limit, offset),
@@ -593,6 +796,9 @@ fn plain_directory_page(
                         t if t == session_type::DESKTOP => {
                             sessions.push(os_session_to_aggregate_record(record, &mut resolver));
                         }
+                        t if t == session_type::HUMAN => {
+                            sessions.push(human_session_to_aggregate_record(record));
+                        }
                         // Gateway/subagent/custom sessions are infrastructure
                         // the merge path never lists either.
                         _ => continue,
@@ -643,6 +849,7 @@ pub fn list_all_sessions(filter: Option<&SessionFilter>) -> Result<SessionListRe
             .is_some();
     let load_agent = wants_category("agent");
     let load_os = wants_category("os");
+    let load_human = wants_category("human");
     let mut all_sessions: Vec<SessionAggregateRecord> = Vec::new();
     let mut metadata_resolver = (load_agent || load_os).then(AgentMetadataResolver::new);
 
@@ -713,6 +920,19 @@ pub fn list_all_sessions(filter: Option<&SessionFilter>) -> Result<SessionListRe
         for session in os_sessions {
             all_sessions.push(os_session_to_aggregate_record(session, resolver));
         }
+    }
+    if load_human {
+        let human_filter = agent_core::session::SessionListFilter {
+            type_name: Some(session_type::HUMAN.to_string()),
+            ..Default::default()
+        };
+        let human_sessions = session_persistence::list_sessions(&human_filter)
+            .map_err(|err| format!("Failed to load Human sessions: {err}"))?;
+        all_sessions.extend(
+            human_sessions
+                .into_iter()
+                .map(human_session_to_aggregate_record),
+        );
     }
     // Apply filters
     if let Some(filter) = filter {
@@ -867,9 +1087,9 @@ fn apply_sorting(sessions: &mut [SessionAggregateRecord], filter: Option<&Sessio
         }
         "name" => {
             if sort_desc {
-                sessions.sort_by(|a, b| b.name.to_lowercase().cmp(&a.name.to_lowercase()));
+                sessions.sort_by_key(|session| std::cmp::Reverse(session.name.to_lowercase()));
             } else {
-                sessions.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                sessions.sort_by_key(|a| a.name.to_lowercase());
             }
         }
         _ => {
@@ -909,17 +1129,22 @@ fn agent_org_display_name(run: &AgentOrgRunRecord) -> String {
 }
 
 fn annotate_agent_org_root_rows(sessions: &mut [SessionAggregateRecord]) -> Result<(), String> {
-    let root_session_ids: std::collections::HashMap<String, (String, String)> =
-        AgentOrgRunStore::list_runs(usize::MAX)?
-            .into_iter()
-            .filter_map(|run| {
-                let root_session_id = run.root_session_id.clone()?;
-                let org_name = agent_org_display_name(&run);
-                Some((root_session_id, (run.org_id, org_name)))
-            })
-            .collect();
-    if root_session_ids.is_empty() {
+    let requested_root_ids = sessions
+        .iter()
+        .map(|session| session.session_id.clone())
+        .collect::<Vec<_>>();
+    if requested_root_ids.is_empty() {
         return Ok(());
+    }
+    let mut root_session_ids = std::collections::HashMap::new();
+    for run in AgentOrgRunStore::list_runs_for_root_session_ids(&requested_root_ids)? {
+        let Some(root_session_id) = run.root_session_id.clone() else {
+            continue;
+        };
+        let org_name = agent_org_display_name(&run);
+        root_session_ids
+            .entry(root_session_id)
+            .or_insert((run.org_id, org_name));
     }
 
     for session in sessions {
@@ -933,6 +1158,237 @@ fn annotate_agent_org_root_rows(sessions: &mut [SessionAggregateRecord]) -> Resu
     Ok(())
 }
 
+/// Load a bounded page for one native sidebar stream.
+///
+/// The store applies stream membership and pin state before LIMIT. We
+/// over-fetch one row to compute `has_more`; continuation uses the final
+/// `(updated_at, session_id)` key instead of a cache-derived offset.
+pub fn list_native_sidebar_sessions(
+    stream: NativeSidebarSessionStream,
+    cursor: Option<&NativeSidebarSessionCursor>,
+    limit: usize,
+) -> Result<NativeSidebarSessionPageResponse, String> {
+    if limit == 0 || limit > NATIVE_SIDEBAR_PAGE_MAX_LIMIT {
+        return Err(format!(
+            "Native sidebar page limit must be between 1 and {NATIVE_SIDEBAR_PAGE_MAX_LIMIT}"
+        ));
+    }
+    let fetch_limit = limit
+        .checked_add(1)
+        .ok_or_else(|| "Native sidebar page limit overflow".to_string())?;
+    let persistence_cursor =
+        cursor.map(|cursor| (cursor.updated_at.as_str(), cursor.session_id.as_str()));
+
+    let mut sessions = match stream {
+        NativeSidebarSessionStream::PinnedNative => {
+            list_pinned_native_sidebar_sessions(fetch_limit, cursor)?
+        }
+        NativeSidebarSessionStream::StandaloneAgent => {
+            let page = list_standalone_coding_sessions_page(fetch_limit, persistence_cursor)?;
+            let mut resolver = AgentMetadataResolver::new();
+            page.into_iter()
+                .map(|session| sde_session_to_aggregate_record(session, &mut resolver))
+                .collect::<Vec<_>>()
+        }
+        NativeSidebarSessionStream::AgentOrgRoot => {
+            let page = list_agent_org_root_sessions_page(fetch_limit, persistence_cursor)?;
+            let mut resolver = AgentMetadataResolver::new();
+            let mut sessions = page
+                .into_iter()
+                .map(|session| sde_session_to_aggregate_record(session, &mut resolver))
+                .collect::<Vec<_>>();
+            annotate_agent_org_root_rows(&mut sessions)?;
+            sessions
+        }
+        NativeSidebarSessionStream::OsAgent => {
+            let page = list_unpinned_sessions_by_type_page(
+                session_type::DESKTOP,
+                fetch_limit,
+                persistence_cursor,
+            )?;
+            let mut resolver = AgentMetadataResolver::new();
+            page.into_iter()
+                .map(|session| os_session_to_aggregate_record(session, &mut resolver))
+                .collect::<Vec<_>>()
+        }
+        NativeSidebarSessionStream::CliAgent => {
+            let page = cli_session_persistence::list_unpinned_root_sessions_page(
+                fetch_limit,
+                persistence_cursor,
+            )
+            .map_err(|err| format!("Failed to load CLI sidebar page: {err}"))?;
+            page.into_iter()
+                .map(cli_session_to_aggregate_record)
+                .collect::<Vec<_>>()
+        }
+        NativeSidebarSessionStream::HumanSession => {
+            let page = list_unpinned_sessions_by_type_page(
+                session_type::HUMAN,
+                fetch_limit,
+                persistence_cursor,
+            )?;
+            page.into_iter()
+                .map(human_session_to_aggregate_record)
+                .collect::<Vec<_>>()
+        }
+    };
+    let has_more = sessions.len() > limit;
+    sessions.truncate(limit);
+    let next_cursor = sessions.last().map(|session| NativeSidebarSessionCursor {
+        updated_at: session.updated_at.clone(),
+        session_id: session.session_id.clone(),
+    });
+
+    Ok(NativeSidebarSessionPageResponse {
+        sessions,
+        next_cursor,
+        has_more,
+    })
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PinnedNativeSource {
+    Agent,
+    Cli,
+}
+
+struct PinnedNativeRow {
+    source: PinnedNativeSource,
+    session_id: String,
+}
+
+/// Query the global pinned stream in one ordered SQL page, then hydrate each
+/// row from its owning native store. Imported history is intentionally absent:
+/// those sources do not persist ORGII pin state.
+fn list_pinned_native_sidebar_sessions(
+    limit: usize,
+    cursor: Option<&NativeSidebarSessionCursor>,
+) -> Result<Vec<SessionAggregateRecord>, String> {
+    let conn = get_connection().map_err(|err| format!("Failed to open session DB: {err}"))?;
+    let bounded_limit = limit.min(i64::MAX as usize) as i64;
+    let base = "
+        SELECT s.session_id, s.updated_at, 'agent' AS source_kind
+        FROM agent_sessions s
+        WHERE s.pinned = 1
+          AND s.status != ?1
+          AND s.parent_session_id IS NULL
+          AND s.session_type IN (?2, ?3, ?4)
+        {agent_cursor}
+        UNION ALL
+        SELECT c.session_id, c.updated_at, 'cli' AS source_kind
+        FROM code_sessions c
+        WHERE c.pinned = 1
+          AND c.parent_session_id IS NULL
+        {cli_cursor}
+        ORDER BY updated_at DESC, session_id DESC
+        LIMIT {limit_parameter}";
+    let rows = if let Some(cursor) = cursor {
+        let cursor_predicate = "AND (updated_at < ?5 OR (updated_at = ?5 AND session_id < ?6))";
+        let sql = base
+            .replace("{agent_cursor}", cursor_predicate)
+            .replace("{cli_cursor}", cursor_predicate)
+            .replace("{limit_parameter}", "?7");
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|err| format!("Prepare pinned sidebar page: {err}"))?;
+        let rows = stmt
+            .query_map(
+                params![
+                    SessionStatus::Archived.as_str(),
+                    session_type::CODING,
+                    session_type::DESKTOP,
+                    session_type::HUMAN,
+                    cursor.updated_at.as_str(),
+                    cursor.session_id.as_str(),
+                    bounded_limit
+                ],
+                |row| {
+                    let source = match row.get::<_, String>(2)?.as_str() {
+                        "agent" => PinnedNativeSource::Agent,
+                        "cli" => PinnedNativeSource::Cli,
+                        _ => unreachable!("pinned source is a SQL literal"),
+                    };
+                    Ok(PinnedNativeRow {
+                        session_id: row.get(0)?,
+                        source,
+                    })
+                },
+            )
+            .map_err(|err| format!("Query pinned sidebar page: {err}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| format!("Read pinned sidebar page: {err}"))?;
+        rows
+    } else {
+        let sql = base
+            .replace("{agent_cursor}", "")
+            .replace("{cli_cursor}", "")
+            .replace("{limit_parameter}", "?5");
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|err| format!("Prepare pinned sidebar page: {err}"))?;
+        let rows = stmt
+            .query_map(
+                params![
+                    SessionStatus::Archived.as_str(),
+                    session_type::CODING,
+                    session_type::DESKTOP,
+                    session_type::HUMAN,
+                    bounded_limit
+                ],
+                |row| {
+                    let source = match row.get::<_, String>(2)?.as_str() {
+                        "agent" => PinnedNativeSource::Agent,
+                        "cli" => PinnedNativeSource::Cli,
+                        _ => unreachable!("pinned source is a SQL literal"),
+                    };
+                    Ok(PinnedNativeRow {
+                        session_id: row.get(0)?,
+                        source,
+                    })
+                },
+            )
+            .map_err(|err| format!("Query pinned sidebar page: {err}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| format!("Read pinned sidebar page: {err}"))?;
+        rows
+    };
+
+    let mut resolver = AgentMetadataResolver::new();
+    let mut sessions = Vec::with_capacity(rows.len());
+    for row in rows {
+        match row.source {
+            PinnedNativeSource::Cli => {
+                if let Some(session) = cli_session_persistence::get_session(&row.session_id)
+                    .map_err(|err| format!("Hydrate pinned CLI session: {err}"))?
+                {
+                    sessions.push(cli_session_to_aggregate_record(session));
+                }
+            }
+            PinnedNativeSource::Agent => {
+                let Some(session) = session_persistence::get_session(&row.session_id)
+                    .map_err(|err| format!("Hydrate pinned agent session: {err}"))?
+                else {
+                    continue;
+                };
+                match session.session_type.as_str() {
+                    session_type::CODING => {
+                        sessions.push(sde_session_to_aggregate_record(session, &mut resolver));
+                    }
+                    session_type::DESKTOP => {
+                        sessions.push(os_session_to_aggregate_record(session, &mut resolver));
+                    }
+                    session_type::HUMAN => {
+                        sessions.push(human_session_to_aggregate_record(session));
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    annotate_agent_org_root_rows(&mut sessions)?;
+    Ok(sessions)
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -943,6 +1399,18 @@ mod tests {
     use crate::agent_sessions::session_directory::display::generate_display_label;
     use crate::agent_sessions::session_directory::status::is_active_status;
     use crate::agent_sessions::session_directory::types::SessionCategory;
+    use agent_core::session::persistence::UnifiedSessionRecord;
+
+    #[test]
+    fn pi_external_history_loader_is_registered_once() {
+        assert_eq!(
+            EXTERNAL_HISTORY_SOURCE_LOADERS
+                .iter()
+                .filter(|loader| loader.source == SOURCE_PI)
+                .count(),
+            1
+        );
+    }
 
     fn make_session(
         id: &str,
@@ -961,6 +1429,8 @@ mod tests {
             external_history_source: None,
             user_input: None,
             repo_path: None,
+            repo_root_path: None,
+            repo_remote_urls: None,
             storage_path: None,
             repo_name: None,
             branch: None,
@@ -985,7 +1455,6 @@ mod tests {
             is_active: is_active_status(status),
             display_label: generate_display_label(&name, None),
             parent_session_id: None,
-            parent_session_relation: None,
             org_member_id: None,
             agent_org_id: None,
             agent_org_name: None,
@@ -993,6 +1462,7 @@ mod tests {
             agent_icon_id: None,
             agent_display_name: None,
             agent_exec_mode: None,
+            product_mode: None,
             draft_text: None,
             reply_target_event_id: None,
             pinned: false,
@@ -1000,7 +1470,6 @@ mod tests {
             lines_added: None,
             lines_removed: None,
             touched_files: None,
-            channel: None,
         }
     }
 
@@ -1019,6 +1488,39 @@ mod tests {
 
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, "2");
+    }
+
+    #[test]
+    fn desktop_external_history_loaders_include_qwen_code_once() {
+        assert_eq!(
+            EXTERNAL_HISTORY_SOURCE_LOADERS
+                .iter()
+                .filter(|loader| loader.source == SOURCE_QWEN_CODE)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn desktop_external_history_loaders_include_kimi_once() {
+        assert_eq!(
+            EXTERNAL_HISTORY_SOURCE_LOADERS
+                .iter()
+                .filter(|loader| loader.source == SOURCE_KIMI)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn desktop_external_history_loaders_include_copilot_once() {
+        assert_eq!(
+            EXTERNAL_HISTORY_SOURCE_LOADERS
+                .iter()
+                .filter(|loader| loader.source == SOURCE_COPILOT)
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -1136,5 +1638,149 @@ mod tests {
         let mut sorted_by_name = plain_page_filter();
         sorted_by_name.sort_by = Some("name".to_string());
         assert!(plain_native_page(Some(&sorted_by_name)).unwrap().is_none());
+    }
+
+    #[test]
+    fn native_sidebar_page_rejects_unbounded_limits_before_querying() {
+        for invalid_limit in [0, NATIVE_SIDEBAR_PAGE_MAX_LIMIT + 1] {
+            let error = list_native_sidebar_sessions(
+                NativeSidebarSessionStream::StandaloneAgent,
+                None,
+                invalid_limit,
+            )
+            .expect_err("invalid native sidebar limit must fail");
+            assert!(error.contains("between 1 and 50"));
+        }
+    }
+
+    #[test]
+    fn pinned_native_page_merges_agent_and_cli_roots_in_stable_order() {
+        let _sandbox = crate::test_utils::test_env::sandbox();
+        let conn = get_connection().expect("sandbox database");
+
+        for (session_id, session_type, updated_at, pinned, parent, status) in [
+            (
+                "sdeagent-pinned",
+                session_type::CODING,
+                "2026-07-30T14:00:00Z",
+                true,
+                None,
+                "idle",
+            ),
+            (
+                "osagent-pinned",
+                session_type::DESKTOP,
+                "2026-07-30T12:00:00Z",
+                true,
+                None,
+                "idle",
+            ),
+            (
+                "humansession-pinned",
+                session_type::HUMAN,
+                "2026-07-30T11:00:00Z",
+                true,
+                None,
+                "completed",
+            ),
+            (
+                "sdeagent-unpinned",
+                session_type::CODING,
+                "2026-07-30T16:00:00Z",
+                false,
+                None,
+                "idle",
+            ),
+            (
+                "sdeagent-worker",
+                session_type::CODING,
+                "2026-07-30T15:00:00Z",
+                true,
+                Some("sdeagent-pinned"),
+                "running",
+            ),
+            (
+                "sdeagent-archived",
+                session_type::CODING,
+                "2026-07-30T13:00:00Z",
+                true,
+                None,
+                "archived",
+            ),
+        ] {
+            session_persistence::upsert_session(&UnifiedSessionRecord {
+                session_id: session_id.to_string(),
+                name: session_id.to_string(),
+                status: status.to_string(),
+                session_type: session_type.to_string(),
+                parent_session_id: parent.map(str::to_string),
+                created_at: updated_at.to_string(),
+                updated_at: updated_at.to_string(),
+                pinned,
+                ..Default::default()
+            })
+            .expect("seed native session");
+        }
+
+        for (session_id, updated_at, pinned, parent) in [
+            ("cliagent-pinned", "2026-07-30T13:00:00Z", true, None),
+            ("cliagent-unpinned", "2026-07-30T17:00:00Z", false, None),
+            (
+                "cliagent-worker",
+                "2026-07-30T16:00:00Z",
+                true,
+                Some("cliagent-pinned"),
+            ),
+        ] {
+            conn.execute(
+                "INSERT INTO code_sessions (
+                    session_id, cli_agent_type, created_at, updated_at,
+                    pinned, parent_session_id
+                 ) VALUES (?1, 'codex', ?2, ?2, ?3, ?4)",
+                params![session_id, updated_at, pinned, parent],
+            )
+            .expect("seed CLI session");
+        }
+
+        let page = list_native_sidebar_sessions(NativeSidebarSessionStream::PinnedNative, None, 10)
+            .expect("load global pinned page");
+
+        assert_eq!(
+            page.sessions
+                .iter()
+                .map(|session| session.session_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "sdeagent-pinned",
+                "cliagent-pinned",
+                "osagent-pinned",
+                "humansession-pinned",
+            ]
+        );
+        assert!(page.sessions.iter().all(|session| session.pinned));
+        assert!(!page.has_more);
+    }
+
+    #[test]
+    fn native_sidebar_wire_contract_is_camel_case_and_rejects_unknown_streams() {
+        let response = NativeSidebarSessionPageResponse {
+            sessions: Vec::new(),
+            next_cursor: Some(NativeSidebarSessionCursor {
+                updated_at: "2026-07-30T12:00:00Z".to_string(),
+                session_id: "sdeagent-10".to_string(),
+            }),
+            has_more: true,
+        };
+        let value = serde_json::to_value(response).expect("serialize page");
+
+        assert_eq!(value["nextCursor"]["updatedAt"], "2026-07-30T12:00:00Z");
+        assert_eq!(value["nextCursor"]["sessionId"], "sdeagent-10");
+        assert_eq!(value["hasMore"], true);
+        assert!(
+            serde_json::from_value::<NativeSidebarSessionStream>(serde_json::json!(
+                "unknownStream"
+            ))
+            .is_err()
+        );
     }
 }

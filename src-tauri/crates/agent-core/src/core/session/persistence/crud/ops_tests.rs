@@ -20,8 +20,8 @@
 //! `list_sessions` pair without inventing a parallel test fixture.
 
 use super::ops::{
-    finalize_terminal_turn_status, list_sessions, reconcile_sessions_with_terminal_turn_markers,
-    update_project_link, upsert_session,
+    delete_session, finalize_terminal_turn_status, list_sessions,
+    reconcile_sessions_with_terminal_turn_markers, upsert_session,
 };
 use super::record::UnifiedSessionRecord;
 use crate::session::persistence;
@@ -108,6 +108,41 @@ fn seed_session(session_id: &str, status: SessionStatus) {
     upsert_session(&record).expect("seed upsert");
 }
 
+#[test]
+#[serial_test::serial]
+fn delete_session_refuses_active_shell_before_removing_session_row() {
+    let _sandbox = test_env::sandbox();
+    let session_id = "sid-active-shell-delete";
+    seed_session(session_id, SessionStatus::Running);
+    let replay_root = crate::tools::impls::coding::exec::shell_replay::resolve_replay_root();
+    let mut writer = crate::tools::impls::coding::exec::shell_replay::ShellReplayWriter::create(
+        &replay_root,
+        crate::tools::impls::coding::exec::shell_replay::ShellReplayTarget::new(
+            session_id,
+            "call-active-delete",
+        ),
+        "sleep",
+        std::path::Path::new("/tmp"),
+        None,
+    )
+    .unwrap();
+    writer
+        .append(
+            crate::tools::impls::coding::exec::shell_replay::ShellReplayStream::Stdout,
+            b"running",
+        )
+        .unwrap();
+
+    let error = delete_session(session_id).unwrap_err().to_string();
+    assert!(error.contains("cannot delete session"), "{error}");
+    assert!(super::ops::get_session(session_id).unwrap().is_some());
+
+    writer
+        .finalize(core_types::session_event::ShellReplayStatus::Complete, None)
+        .unwrap();
+    crate::tools::impls::coding::exec::shell_replay::remove_session_replays(session_id).unwrap();
+}
+
 /// `list_sessions(&SessionListFilter::default())` must hide archived
 /// rows from the default listing, but an explicit
 /// `status = Some("archived")` filter must surface them. Both halves
@@ -177,72 +212,30 @@ fn terminal_turn_finalize_updates_session_status_and_marker() {
 }
 
 #[test]
-fn project_link_persists_project_metadata_and_clears_work_item() {
-    let _sandbox = test_env::sandbox();
-    seed_session("sid-project", SessionStatus::Idle);
-
-    let mut record = super::ops::get_session("sid-project")
-        .expect("get seed")
-        .expect("seed exists");
-    record.work_item_id = Some("OLD-1".to_string());
-    upsert_session(&record).expect("seed work item link");
-
-    assert!(update_project_link(
-        "sid-project",
-        "org-1",
-        "proj-1",
-        "Project One",
-        "project-one"
-    )
-    .expect("link project"));
-    let linked = super::ops::get_session("sid-project")
-        .expect("get linked")
-        .expect("linked exists");
-    assert_eq!(linked.org_id.as_deref(), Some("org-1"));
-    assert_eq!(linked.project_id.as_deref(), Some("proj-1"));
-    assert_eq!(linked.project_name.as_deref(), Some("Project One"));
-    assert_eq!(linked.project_slug.as_deref(), Some("project-one"));
-    assert_eq!(linked.work_item_id, None);
-}
-
-#[test]
-fn restart_reconciliation_repairs_orphaned_terminal_turn_rows_only() {
+fn reconcile_repairs_all_in_flight_rows_with_terminal_turn_markers() {
     let _sandbox = test_env::sandbox();
 
-    for (session_id, terminal_status) in [
-        ("sid-completed", "completed"),
-        ("sid-cancelled", "cancelled"),
-        ("sid-failed", "failed"),
-    ] {
-        seed_session(session_id, SessionStatus::Running);
+    for (index, status) in SessionStatus::IN_FLIGHT.into_iter().enumerate() {
+        let session_id = format!("sid-reconcile-{index}");
+        seed_session(&session_id, status);
         finalize_terminal_turn_status(
-            session_id,
-            &format!("turn-{session_id}"),
-            terminal_status,
-            SessionStatus::Running,
+            &session_id,
+            &format!("turn-{index}"),
+            "completed",
+            status,
             "2026-06-05T12:30:00.000Z",
         )
         .expect("seed mismatched terminal marker");
-
-        let row = super::ops::get_session(session_id)
-            .expect("get seeded session")
-            .expect("seeded session exists");
-        assert_eq!(row.status, SessionStatus::Running.as_str());
     }
-    seed_session("sid-idle", SessionStatus::Idle);
 
     let updated = reconcile_sessions_with_terminal_turn_markers().expect("reconcile markers");
 
-    assert_eq!(updated, 3);
-    for (session_id, expected_status) in [
-        ("sid-completed", SessionStatus::Completed),
-        ("sid-cancelled", SessionStatus::Cancelled),
-        ("sid-failed", SessionStatus::Failed),
-        ("sid-idle", SessionStatus::Idle),
-    ] {
-        let row = super::ops::get_session(session_id)
+    assert_eq!(updated, SessionStatus::IN_FLIGHT.len());
+    for index in 0..SessionStatus::IN_FLIGHT.len() {
+        let row = super::ops::get_session(&format!("sid-reconcile-{index}"))
             .expect("get session")
             .expect("session exists");
-        assert_eq!(row.status, expected_status.as_str());
+        assert_eq!(row.status, SessionStatus::Completed.as_str());
+        assert_eq!(row.updated_at, "2026-06-05T12:30:00.000Z");
     }
 }

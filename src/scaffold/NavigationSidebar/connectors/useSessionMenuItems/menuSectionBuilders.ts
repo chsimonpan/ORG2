@@ -1,5 +1,4 @@
 import {
-  CHANNEL_LABELS,
   SESSION_GROUP_LABELS,
   SESSION_GROUP_ORDER,
   type SessionGroupKey,
@@ -49,7 +48,7 @@ export function buildByTimeMenuItems({
   }
 
   const items: NavigationMenuItem[] = [];
-  let hasHiddenLocalSessions = appendPinnedSessions(items);
+  let hasHiddenLocalSessions = appendPinnedSessions(items, false);
   for (const groupKey of DATE_GROUP_KEYS) {
     const groupSessions = groups[groupKey];
     if (groupSessions.length === 0) continue;
@@ -79,20 +78,8 @@ export function buildByAgentMenuItems({
 }: BuildByAgentMenuItemsParams): NavigationMenuItem[] {
   const groups = new Map<SessionGroupKey, Session[]>();
   const agentOrgGroups = new Map<string, Session[]>();
-  const channelGroups = new Map<string, Session[]>();
 
   for (const session of unpinnedSessions) {
-    // Channel-originated sessions go to their own "Channels" section.
-    if (session.channel) {
-      const bucket = channelGroups.get(session.channel);
-      if (bucket) {
-        bucket.push(session);
-      } else {
-        channelGroups.set(session.channel, [session]);
-      }
-      continue;
-    }
-
     if (session.agentOrgId) {
       const bucket = agentOrgGroups.get(session.agentOrgId);
       if (bucket) {
@@ -113,28 +100,7 @@ export function buildByAgentMenuItems({
   }
 
   const items: NavigationMenuItem[] = [];
-  let hasHiddenLocalSessions = appendPinnedSessions(items);
-  const loadMoreEmitted = new Set<SessionListCategory>();
-
-  // ── Channel groups (Feishu, Telegram, etc.) ──
-  const sortedChannelKeys = Array.from(channelGroups.keys()).sort();
-  for (const channelKey of sortedChannelKeys) {
-    const groupSessions = channelGroups.get(channelKey)!;
-    const label =
-      CHANNEL_LABELS[channelKey] ??
-      channelKey.charAt(0).toUpperCase() + channelKey.slice(1);
-    items.push(separator(`channel:${channelKey}`, label));
-    const groupHasHidden = appendGroupSessions(
-      items,
-      `channel:${channelKey}`,
-      groupSessions
-    );
-    if (groupHasHidden) {
-      hasHiddenLocalSessions = true;
-    }
-  }
-
-  // ── Agent Org groups ──
+  appendPinnedSessions(items, true);
   const sortedAgentOrgGroups = Array.from(agentOrgGroups.entries()).sort(
     ([orgIdA, sessionsA], [orgIdB, sessionsB]) => {
       const labelA = sessionsA[0]?.agentOrgName ?? orgIdA;
@@ -143,6 +109,7 @@ export function buildByAgentMenuItems({
     }
   );
 
+  let agentOrgHasHiddenRows = false;
   for (const [orgId, groupSessions] of sortedAgentOrgGroups) {
     const label = groupSessions[0]?.agentOrgName ?? orgId;
     items.push(separator(`agent-org:${orgId}`, label));
@@ -152,29 +119,39 @@ export function buildByAgentMenuItems({
       groupSessions
     );
     if (hasHiddenOrgSessions) {
-      hasHiddenLocalSessions = true;
-      loadMoreEmitted.add("rust_agent");
+      agentOrgHasHiddenRows = true;
     }
   }
+  if (!agentOrgHasHiddenRows) {
+    const row = loadMoreRowFor("agent_org_root");
+    if (row) items.push(row);
+  }
 
-  for (const key of SESSION_GROUP_ORDER) {
+  const hiddenByCategory = new Set<SessionListCategory>();
+  const lastGroupIndexByCategory = new Map<SessionListCategory, number>();
+  SESSION_GROUP_ORDER.forEach((key, index) => {
+    lastGroupIndexByCategory.set(groupKeyToWireCategory(key), index);
+  });
+  for (const [groupIndex, key] of SESSION_GROUP_ORDER.entries()) {
     const groupSessions = groups.get(key);
-    if (!groupSessions || groupSessions.length === 0) continue;
-    items.push(separator(key, SESSION_GROUP_LABELS[key]));
-    const groupHasHiddenLocalSessions = appendGroupSessions(
-      items,
-      `agent:${key}`,
-      groupSessions
-    );
-    hasHiddenLocalSessions =
-      groupHasHiddenLocalSessions || hasHiddenLocalSessions;
     const wireCategory = groupKeyToWireCategory(key);
-    if (!hasHiddenLocalSessions && !loadMoreEmitted.has(wireCategory)) {
-      const row = loadMoreRowFor(wireCategory);
-      if (row) {
-        items.push(row);
-        loadMoreEmitted.add(wireCategory);
+    if (groupSessions && groupSessions.length > 0) {
+      items.push(separator(key, SESSION_GROUP_LABELS[key]));
+      const groupHasHiddenLocalSessions = appendGroupSessions(
+        items,
+        `agent:${key}`,
+        groupSessions
+      );
+      if (groupHasHiddenLocalSessions) {
+        hiddenByCategory.add(wireCategory);
       }
+    }
+    if (
+      lastGroupIndexByCategory.get(wireCategory) === groupIndex &&
+      !hiddenByCategory.has(wireCategory)
+    ) {
+      const row = loadMoreRowFor(wireCategory);
+      if (row) items.push(row);
     }
   }
   return items;
@@ -218,7 +195,7 @@ export function buildByWorkspaceMenuItems({
   });
 
   const items: NavigationMenuItem[] = [];
-  let hasHiddenLocalSessions = appendPinnedSessions(items);
+  let hasHiddenLocalSessions = appendPinnedSessions(items, false);
   for (const key of orderedKeys) {
     const groupSessions = groups.get(key);
     if (!groupSessions || groupSessions.length === 0) continue;

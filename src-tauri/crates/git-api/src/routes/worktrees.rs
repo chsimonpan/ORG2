@@ -24,6 +24,7 @@ use crate::types::{
 /// Cache TTL for worktree diff summaries. Recomputation is skipped if the
 /// HEAD SHA hasn't changed and the entry is younger than this duration.
 const DIFF_CACHE_TTL: Duration = Duration::from_secs(5);
+const DIFF_CACHE_MAX_ENTRIES: usize = 128;
 
 struct DiffCacheEntry {
     cached_at: Instant,
@@ -36,6 +37,24 @@ static DIFF_CACHE: std::sync::OnceLock<Mutex<HashMap<(String, String), DiffCache
 
 fn diff_cache() -> &'static Mutex<HashMap<(String, String), DiffCacheEntry>> {
     DIFF_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn insert_diff_cache_entry(
+    cache: &mut HashMap<(String, String), DiffCacheEntry>,
+    key: (String, String),
+    entry: DiffCacheEntry,
+) {
+    cache.retain(|_, cached| cached.cached_at.elapsed() < DIFF_CACHE_TTL);
+    if !cache.contains_key(&key) && cache.len() >= DIFF_CACHE_MAX_ENTRIES {
+        if let Some(oldest_key) = cache
+            .iter()
+            .min_by_key(|(_, cached)| cached.cached_at)
+            .map(|(key, _)| key.clone())
+        {
+            cache.remove(&oldest_key);
+        }
+    }
+    cache.insert(key, entry);
 }
 
 pub fn routes() -> Router {
@@ -242,7 +261,8 @@ fn summarize_worktree_diff(
     });
 
     if let Ok(mut cache) = diff_cache().lock() {
-        cache.insert(
+        insert_diff_cache_entry(
+            &mut cache,
             cache_key,
             DiffCacheEntry {
                 cached_at: Instant::now(),
@@ -259,22 +279,6 @@ fn summarize_worktree_diff(
 /// meaningful scope-picker signal (common on abandoned agent worktrees).
 fn is_pathological_worktree_checkout(files: u32, additions: u32, deletions: u32) -> bool {
     files > 100 && deletions > 100_000 && additions < deletions / 100
-}
-
-#[cfg(test)]
-mod tests {
-    use super::is_pathological_worktree_checkout;
-
-    #[test]
-    fn detects_mass_deletion_checkout_drift() {
-        assert!(is_pathological_worktree_checkout(8072, 0, 1_446_726));
-    }
-
-    #[test]
-    fn accepts_normal_uncommitted_changes() {
-        assert!(!is_pathological_worktree_checkout(2, 10, 3));
-        assert!(!is_pathological_worktree_checkout(50, 500, 120));
-    }
 }
 
 fn validate_new_worktree_path(path: &str) -> GitApiResult<PathBuf> {
@@ -306,5 +310,42 @@ fn resolve_repo_path(repo_id: &str, query_path: Option<&str>) -> GitApiResult<st
         validate_path(path)
     } else {
         lookup_repo_path(repo_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        insert_diff_cache_entry, is_pathological_worktree_checkout, DiffCacheEntry,
+        DIFF_CACHE_MAX_ENTRIES,
+    };
+    use std::collections::HashMap;
+    use std::time::Instant;
+
+    #[test]
+    fn detects_mass_deletion_checkout_drift() {
+        assert!(is_pathological_worktree_checkout(8072, 0, 1_446_726));
+    }
+
+    #[test]
+    fn accepts_normal_uncommitted_changes() {
+        assert!(!is_pathological_worktree_checkout(2, 10, 3));
+        assert!(!is_pathological_worktree_checkout(50, 500, 120));
+    }
+
+    #[test]
+    fn diff_cache_never_exceeds_hard_cap() {
+        let mut cache = HashMap::new();
+        for index in 0..(DIFF_CACHE_MAX_ENTRIES + 10) {
+            insert_diff_cache_entry(
+                &mut cache,
+                (format!("/worktree/{index}"), format!("sha-{index}")),
+                DiffCacheEntry {
+                    cached_at: Instant::now(),
+                    summary: None,
+                },
+            );
+        }
+        assert_eq!(cache.len(), DIFF_CACHE_MAX_ENTRIES);
     }
 }

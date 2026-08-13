@@ -16,8 +16,6 @@ pub const RUN_SHELL: &str = "run_shell";
 pub const AWAIT_OUTPUT: &str = "await_output";
 pub const INSPECT_TERMINALS: &str = "inspect_terminals";
 pub const CODE_SEARCH: &str = "code_search";
-pub const USE_CODE_MAP: &str = "use_code_map";
-pub const MANAGE_CODE_MAP: &str = "manage_code_map";
 pub const EDIT_FILE: &str = "edit_file";
 pub const DELETE_FILE: &str = "delete_file";
 pub const APPLY_PATCH: &str = "apply_patch";
@@ -76,7 +74,10 @@ pub const MANAGE_SECRETS: &str = "manage_secrets";
 /// and sets `0o600` on Unix.
 pub const WRITE_ENV_FILE: &str = "write_env_file";
 
-// ── Project ─────────────────────────────────────────────────────────
+// ── Project (retired) ───────────────────────────────────────────────
+// The typed PM tools were retired in favour of the `org2-pm` CLI; the
+// names remain for retired-alias denial and historical transcript
+// rendering.
 pub const MANAGE_PROJECT: &str = "manage_project";
 pub const MANAGE_WORK_ITEM: &str = "manage_work_item";
 pub const IMPORT_CONTEXT: &str = "import_context";
@@ -111,6 +112,9 @@ pub const ORG_SEND_MESSAGE: &str = "org_send_message";
 /// Create a new task on the org-run-scoped task board. Only available
 /// inside an Agent Org run.
 pub const TASK_CREATE: &str = "task_create";
+/// Atomically create a dependency graph using local node keys. Only
+/// available to the coordinator inside an Agent Org run.
+pub const TASK_GRAPH_CREATE: &str = "task_graph_create";
 /// Update a task on the board (subject, owner, status, blocks, …).
 /// Setting `owner` triggers a `TaskAssigned` inbox row for the new
 /// owner; setting `status="deleted"` removes the task. Only available
@@ -123,6 +127,11 @@ pub const TASK_LIST: &str = "task_list";
 /// active_form, owner, status, blocks, blocked_by, metadata).
 /// Read-only. Only available inside an Agent Org run.
 pub const TASK_GET: &str = "task_get";
+/// Record a coordinator completion request at the current durable work
+/// revision. Finality checks remain authoritative.
+pub const ORG_RUN_COMPLETE: &str = "org_run_complete";
+/// Inspect or explicitly resolve an undeliverable Agent Org Inbox row.
+pub const ORG_INBOX_REPAIR: &str = "org_inbox_repair";
 
 // ── Channel workspace tools ─────────────────────────────────────────
 /// List known workspace paths seen in recent sessions.

@@ -8,10 +8,9 @@
  *
  * Design mirrors `useWorkstationIssues` (repo resolution, cache-seed-then-
  * revalidate, atom publishing, unmount reset). All detail sources are fetched
- * in parallel; a per-PR snapshot is cached (stale-while-revalidate) so opening
- * a PR — or hovering it in the sidebar (`prefetchWorkstationPrDetail`) — paints
- * instantly. In-flight requests are de-duplicated by PR so hover + click don't
- * double-fetch.
+ * in parallel; a small per-PR snapshot cache provides stale-while-revalidate
+ * behavior after a PR is explicitly opened. In-flight requests are
+ * de-duplicated by PR.
  */
 import { useSetAtom } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -19,7 +18,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getGitRemotes } from "@src/api/http/git/remotes";
 import {
   type GitHubChecksSummary,
+  type GitHubIssueUser,
   type PrReviewEvent,
+  type PullRequestMergeMethod,
   createIssueCommentLocal,
   createPrReviewCommentLocal,
   createPrReviewLocal,
@@ -30,7 +31,14 @@ import {
   listPRFilesLocal,
   listPrReviewCommentsLocal,
   listPrReviewsLocal,
+  listRepoAssigneesLocal,
+  mergePRLocal,
+  removePRReviewersLocal,
   replyPrReviewCommentLocal,
+  requestPRReviewersLocal,
+  setPRAutoMergeLocal,
+  updatePRDraftStateLocal,
+  updatePRStateLocal,
 } from "@src/api/tauri/github";
 import {
   type CachedPrDetail,
@@ -38,8 +46,10 @@ import {
   isPrDetailStale,
   prDetailKey,
   setCachedPrDetail,
+  updateCachedPrDetail,
 } from "@src/services/git/githubListCache";
 import { parseGithubRepoFullName } from "@src/services/git/operations/createPullRequest";
+import { readRequestedReviewers } from "@src/shared/pr/prLevelActions";
 import {
   type PrIdentity,
   initialSelectedPrState,
@@ -49,6 +59,26 @@ import {
 } from "@src/store/workstation/codeEditor/workstationSelectedPrAtom";
 
 type PrDetailBundle = Omit<CachedPrDetail, "cachedAt">;
+
+function upsertById<T extends { id: number }>(items: T[], item: T): T[] {
+  const index = items.findIndex((candidate) => candidate.id === item.id);
+  if (index === -1) return [...items, item];
+  const next = [...items];
+  next[index] = item;
+  return next;
+}
+
+/**
+ * Per-PR request-id counters, keyed by `prDetailKey(repoFullName, prNumber)`.
+ * Scoping the guard per PR (instead of one counter per hook instance) means
+ * switching PR A -> B -> A only supersedes in-flight work for the PR that
+ * actually changed; an unrelated in-flight load for A keeps its result.
+ */
+function bumpRequestId(counters: Map<string, number>, key: string): number {
+  const next = (counters.get(key) ?? 0) + 1;
+  counters.set(key, next);
+  return next;
+}
 
 function readString(
   source: Record<string, unknown> | null,
@@ -63,8 +93,9 @@ function readString(
 }
 
 /**
- * Fetch every detail source for a PR in parallel and write the snapshot to the
- * cache. `getPRLocal` is not individually caught — a hard failure there (auth /
+ * Fetch every detail source for a PR in parallel. The caller writes the
+ * snapshot only after confirming this request still owns the visible panel.
+ * `getPRLocal` is not individually caught — a hard failure there (auth /
  * network) rejects the whole bundle so callers surface an error; the softer
  * sources degrade to empty on their own errors.
  */
@@ -101,44 +132,41 @@ async function fetchPrDetailBundle(
     files,
     checks,
   };
-  setCachedPrDetail(prDetailKey(repoFullName, prNumber), bundle);
   return bundle;
 }
 
-// ── In-flight de-duplication (shared by hover-prefetch and click-load) ───────
+// ── In-flight de-duplication ────────────────────────────────────────────────
 
 const inFlight = new Map<string, Promise<PrDetailBundle>>();
 
+/**
+ * Fetch a PR detail bundle, de-duplicating concurrent callers for the same
+ * PR onto a single in-flight request.
+ *
+ * `bypassDedup` starts a genuinely fresh request even if one is already in
+ * flight, and installs it as the new in-flight entry (future callers coalesce
+ * onto it instead). This is used by post-mutation reconciliation: an
+ * already-in-flight fetch may have been dispatched *before* the mutation
+ * landed server-side, so reusing it would silently apply pre-mutation data.
+ * The superseded promise still resolves for its original caller — it just no
+ * longer owns the `inFlight` slot, so it won't be handed to new callers and
+ * its `finally` no-ops instead of deleting the fresher entry.
+ */
 function loadBundleDeduped(
   repoFullName: string,
-  prNumber: number
+  prNumber: number,
+  opts?: { bypassDedup?: boolean }
 ): Promise<PrDetailBundle> {
   const key = prDetailKey(repoFullName, prNumber);
-  const existing = inFlight.get(key);
-  if (existing) return existing;
+  if (!opts?.bypassDedup) {
+    const existing = inFlight.get(key);
+    if (existing) return existing;
+  }
   const promise = fetchPrDetailBundle(repoFullName, prNumber).finally(() => {
     if (inFlight.get(key) === promise) inFlight.delete(key);
   });
   inFlight.set(key, promise);
   return promise;
-}
-
-/**
- * Warm the PR detail cache without touching any atom — called on sidebar-row
- * hover so a subsequent click renders instantly. No-op when a fresh snapshot
- * already exists. Swallows errors (best-effort).
- */
-export async function prefetchWorkstationPrDetail(
-  repoFullName: string,
-  prNumber: number
-): Promise<void> {
-  const key = prDetailKey(repoFullName, prNumber);
-  if (getCachedPrDetail(key) && !isPrDetailStale(key)) return;
-  try {
-    await loadBundleDeduped(repoFullName, prNumber);
-  } catch {
-    // best-effort prefetch; the real load will surface any error
-  }
 }
 
 export interface UseWorkstationPrDetailOptions {
@@ -170,6 +198,19 @@ export function useWorkstationPrDetail({
   // Freshest PR head SHA, kept in a ref so inline-comment creation can read it
   // without re-subscribing its callback on every atom write.
   const latestHeadShaRef = useRef<string | null>(null);
+  const latestRequestedReviewersRef = useRef<GitHubIssueUser[]>([]);
+  const latestAuthorLoginRef = useRef<string | null>(null);
+  const prActionPendingRef = useRef(false);
+  const reviewerCandidatesAttemptedRef = useRef(false);
+  const [prActionPending, setPrActionPending] = useState(false);
+  const [reviewerCandidates, setReviewerCandidates] = useState<
+    GitHubIssueUser[]
+  >([]);
+  const [loadingReviewerCandidates, setLoadingReviewerCandidates] =
+    useState(false);
+  const [reviewerCandidatesError, setReviewerCandidatesError] = useState<
+    string | null
+  >(null);
 
   // ── Resolve owner/repo from the origin remote ─────────────────────────────
   const [repoFullName, setRepoFullName] = useState<string | null>(null);
@@ -197,11 +238,27 @@ export function useWorkstationPrDetail({
     };
   }, [repoPath, repoId]);
 
-  const requestIdRef = useRef(0);
+  useEffect(() => {
+    reviewerCandidatesAttemptedRef.current = false;
+    setReviewerCandidates([]);
+    setLoadingReviewerCandidates(false);
+    setReviewerCandidatesError(null);
+  }, [repoFullName]);
+
+  // Per-PR request-id counters — see `bumpRequestId` above for why this is a
+  // Map keyed by PR rather than a single instance-wide counter.
+  const requestIdsRef = useRef(new Map<string, number>());
 
   const applyBundle = useCallback(
     (identity: PrIdentity, bundle: PrDetailBundle) => {
       latestHeadShaRef.current = bundle.headSha;
+      latestRequestedReviewersRef.current = readRequestedReviewers(
+        bundle.detail
+      );
+      latestAuthorLoginRef.current = readString(bundle.detail, [
+        "user",
+        "login",
+      ]);
       setSelectedPr((prev) => ({
         ...prev,
         identity,
@@ -223,31 +280,56 @@ export function useWorkstationPrDetail({
   );
 
   const loadDetail = useCallback(
-    (identity: PrIdentity, opts?: { force?: boolean }) => {
+    (
+      identity: PrIdentity,
+      opts?: {
+        force?: boolean;
+        /**
+         * Post-mutation reconciliation: a successful mutation already
+         * applied its own optimistic patch, so this always uses the
+         * lightweight `refreshing` indicator (never the full-page loading
+         * skeleton) and always issues a fresh network request — an
+         * in-flight fetch that might be de-duped onto could have been
+         * dispatched before the mutation landed server-side.
+         */
+        reconcile?: boolean;
+      }
+    ) => {
       if (!repoFullName) return;
-      const requestId = ++requestIdRef.current;
-      const isCurrent = () => requestId === requestIdRef.current;
       const key = prDetailKey(repoFullName, identity.number);
-      const cached = getCachedPrDetail(key);
+      const requestId = bumpRequestId(requestIdsRef.current, key);
+      const isCurrent = () => requestIdsRef.current.get(key) === requestId;
 
-      if (cached && !opts?.force) {
-        applyBundle(identity, cached);
-        if (!isPrDetailStale(key)) return;
+      if (opts?.reconcile) {
         setSelectedPr((prev) => ({ ...prev, refreshing: true }));
       } else {
-        setSelectedPr((prev) => ({
-          ...prev,
-          ...initialSelectedPrState,
-          identity,
-          baseRef: identity.baseBranch ?? null,
-          loading: true,
-        }));
+        const cached = getCachedPrDetail(key);
+        if (cached && !opts?.force) {
+          applyBundle(identity, cached);
+          if (!isPrDetailStale(key)) return;
+          setSelectedPr((prev) => ({ ...prev, refreshing: true }));
+        } else {
+          setSelectedPr((prev) => ({
+            ...prev,
+            ...initialSelectedPrState,
+            identity,
+            baseRef: identity.baseBranch ?? null,
+            loading: true,
+          }));
+        }
       }
 
       void (async () => {
         try {
-          const bundle = await loadBundleDeduped(repoFullName, identity.number);
+          const bundle = await loadBundleDeduped(
+            repoFullName,
+            identity.number,
+            {
+              bypassDedup: opts?.reconcile,
+            }
+          );
           if (!mountedRef.current || !isCurrent()) return;
+          setCachedPrDetail(key, bundle);
           applyBundle(identity, bundle);
         } catch (err) {
           if (!mountedRef.current || !isCurrent()) return;
@@ -274,52 +356,77 @@ export function useWorkstationPrDetail({
   const addComment = useCallback(
     async (body: string) => {
       if (!repoFullName || !pr) return;
-      setSelectedPr((prev) => ({ ...prev, submittingComment: true }));
+      const key = prDetailKey(repoFullName, pr.number);
+      bumpRequestId(requestIdsRef.current, key);
+      setSelectedPr((prev) => ({
+        ...prev,
+        refreshing: false,
+        submittingComment: true,
+      }));
       try {
         const comment = await createIssueCommentLocal(
           repoFullName,
           pr.number,
           body
         );
+        updateCachedPrDetail(key, (cached) => ({
+          conversation: upsertById(cached.conversation, comment),
+        }));
         if (!mountedRef.current) return;
         setSelectedPr((prev) => ({
           ...prev,
-          conversation: [...prev.conversation, comment],
+          conversation: upsertById(prev.conversation, comment),
           submittingComment: false,
         }));
+        // Reconcile in the background: the server response now reflects
+        // this comment, so refetching restores every other field
+        // (commits/files/checks/headSha) that would otherwise stay stale
+        // until the next explicit refresh.
+        loadDetail(pr, { reconcile: true });
       } catch {
         if (mountedRef.current) {
           setSelectedPr((prev) => ({ ...prev, submittingComment: false }));
         }
       }
     },
-    [repoFullName, pr, setSelectedPr]
+    [repoFullName, pr, setSelectedPr, loadDetail]
   );
 
   const submitReview = useCallback(
     async (event: PrReviewEvent, body: string) => {
       if (!repoFullName || !pr) return;
-      setSelectedPr((prev) => ({ ...prev, submittingReview: true }));
+      const key = prDetailKey(repoFullName, pr.number);
+      bumpRequestId(requestIdsRef.current, key);
+      setSelectedPr((prev) => ({
+        ...prev,
+        refreshing: false,
+        submittingReview: true,
+      }));
       try {
         const review = await createPrReviewLocal(
           repoFullName,
           pr.number,
           event,
-          body || undefined
+          body || undefined,
+          latestHeadShaRef.current ?? undefined
         );
+        updateCachedPrDetail(key, (cached) => ({
+          reviews: upsertById(cached.reviews, review),
+        }));
         if (!mountedRef.current) return;
         setSelectedPr((prev) => ({
           ...prev,
-          reviews: [...prev.reviews, review],
+          reviews: upsertById(prev.reviews, review),
           submittingReview: false,
         }));
+        loadDetail(pr, { reconcile: true });
       } catch {
         if (mountedRef.current) {
           setSelectedPr((prev) => ({ ...prev, submittingReview: false }));
         }
       }
     },
-    [repoFullName, pr, setSelectedPr]
+    [repoFullName, pr, setSelectedPr, loadDetail]
   );
 
   const addInlineComment = useCallback(
@@ -332,39 +439,234 @@ export function useWorkstationPrDetail({
       startSide?: "LEFT" | "RIGHT";
     }) => {
       if (!repoFullName || !pr) return;
-      const commitId = latestHeadShaRef.current;
-      if (!commitId) return;
-      const comment = await createPrReviewCommentLocal(
-        repoFullName,
-        pr.number,
-        { ...params, commitId }
-      );
-      if (!mountedRef.current) return;
+      const key = prDetailKey(repoFullName, pr.number);
+      bumpRequestId(requestIdsRef.current, key);
       setSelectedPr((prev) => ({
         ...prev,
-        reviewComments: [...prev.reviewComments, comment],
+        refreshing: false,
+        submittingInlineComment: true,
       }));
+      try {
+        const commitId = latestHeadShaRef.current;
+        if (!commitId) {
+          throw new Error("Missing PR head commit SHA for inline comment.");
+        }
+        const comment = await createPrReviewCommentLocal(
+          repoFullName,
+          pr.number,
+          { ...params, commitId }
+        );
+        updateCachedPrDetail(key, (cached) => ({
+          reviewComments: upsertById(cached.reviewComments, comment),
+        }));
+        if (!mountedRef.current) return;
+        setSelectedPr((prev) => ({
+          ...prev,
+          reviewComments: upsertById(prev.reviewComments, comment),
+          submittingInlineComment: false,
+        }));
+        loadDetail(pr, { reconcile: true });
+      } catch (err) {
+        if (mountedRef.current) {
+          setSelectedPr((prev) => ({
+            ...prev,
+            submittingInlineComment: false,
+            error: err instanceof Error ? err.message : String(err),
+          }));
+        }
+      }
     },
-    [repoFullName, pr, setSelectedPr]
+    [repoFullName, pr, setSelectedPr, loadDetail]
   );
 
   const replyInlineComment = useCallback(
     async (commentId: number, body: string) => {
       if (!repoFullName || !pr) return;
-      const comment = await replyPrReviewCommentLocal(
-        repoFullName,
-        pr.number,
-        commentId,
-        body
-      );
-      if (!mountedRef.current) return;
+      const key = prDetailKey(repoFullName, pr.number);
+      bumpRequestId(requestIdsRef.current, key);
       setSelectedPr((prev) => ({
         ...prev,
-        reviewComments: [...prev.reviewComments, comment],
+        refreshing: false,
+        submittingInlineComment: true,
       }));
+      try {
+        const comment = await replyPrReviewCommentLocal(
+          repoFullName,
+          pr.number,
+          commentId,
+          body
+        );
+        updateCachedPrDetail(key, (cached) => ({
+          reviewComments: upsertById(cached.reviewComments, comment),
+        }));
+        if (!mountedRef.current) return;
+        setSelectedPr((prev) => ({
+          ...prev,
+          reviewComments: upsertById(prev.reviewComments, comment),
+          submittingInlineComment: false,
+        }));
+        loadDetail(pr, { reconcile: true });
+      } catch (err) {
+        if (mountedRef.current) {
+          setSelectedPr((prev) => ({
+            ...prev,
+            submittingInlineComment: false,
+            error: err instanceof Error ? err.message : String(err),
+          }));
+        }
+      }
     },
-    [repoFullName, pr, setSelectedPr]
+    [repoFullName, pr, setSelectedPr, loadDetail]
   );
+
+  const runPrMutation = useCallback(
+    async (mutation: () => Promise<unknown>): Promise<void> => {
+      if (!repoFullName || !pr) {
+        throw new Error("GitHub repository context is unavailable");
+      }
+      if (prActionPendingRef.current) {
+        throw new Error("Another pull request action is still running");
+      }
+      prActionPendingRef.current = true;
+      setPrActionPending(true);
+      setSelectedPr((current) => ({ ...current, error: null }));
+      try {
+        await mutation();
+        loadDetail(pr, { reconcile: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setSelectedPr((current) => ({ ...current, error: message }));
+        loadDetail(pr, { reconcile: true });
+        throw error;
+      } finally {
+        prActionPendingRef.current = false;
+        setPrActionPending(false);
+      }
+    },
+    [repoFullName, pr, setSelectedPr, loadDetail]
+  );
+
+  const mergePullRequest = useCallback(
+    async (method: PullRequestMergeMethod): Promise<void> => {
+      if (!repoFullName || !pr) {
+        throw new Error("GitHub repository context is unavailable");
+      }
+      await runPrMutation(() =>
+        mergePRLocal(
+          repoFullName,
+          pr.number,
+          method,
+          latestHeadShaRef.current ?? undefined
+        )
+      );
+    },
+    [repoFullName, pr, runPrMutation]
+  );
+
+  const setPullRequestAutoMerge = useCallback(
+    async (enabled: boolean, method: PullRequestMergeMethod): Promise<void> => {
+      if (!repoFullName || !pr) {
+        throw new Error("GitHub repository context is unavailable");
+      }
+      await runPrMutation(() =>
+        setPRAutoMergeLocal(
+          repoFullName,
+          pr.number,
+          enabled,
+          method,
+          latestHeadShaRef.current ?? undefined
+        )
+      );
+    },
+    [repoFullName, pr, runPrMutation]
+  );
+
+  const updatePullRequestState = useCallback(
+    async (state: "open" | "closed"): Promise<void> => {
+      if (!repoFullName || !pr) {
+        throw new Error("GitHub repository context is unavailable");
+      }
+      await runPrMutation(() =>
+        updatePRStateLocal(repoFullName, pr.number, state)
+      );
+    },
+    [repoFullName, pr, runPrMutation]
+  );
+
+  const updatePullRequestDraft = useCallback(
+    async (draft: boolean): Promise<void> => {
+      if (!repoFullName || !pr) {
+        throw new Error("GitHub repository context is unavailable");
+      }
+      await runPrMutation(() =>
+        updatePRDraftStateLocal(repoFullName, pr.number, draft)
+      );
+    },
+    [repoFullName, pr, runPrMutation]
+  );
+
+  const updateRequestedReviewers = useCallback(
+    async (reviewers: string[]): Promise<void> => {
+      if (!repoFullName || !pr) {
+        throw new Error("GitHub repository context is unavailable");
+      }
+      const current = new Map(
+        latestRequestedReviewersRef.current.map((reviewer) => [
+          reviewer.login.toLowerCase(),
+          reviewer.login,
+        ])
+      );
+      const next = new Map(
+        reviewers.map((reviewer) => [reviewer.toLowerCase(), reviewer])
+      );
+      const added = [...next]
+        .filter(([normalized]) => !current.has(normalized))
+        .map(([, login]) => login);
+      const removed = [...current]
+        .filter(([normalized]) => !next.has(normalized))
+        .map(([, login]) => login);
+      if (added.length === 0 && removed.length === 0) return;
+
+      await runPrMutation(async () => {
+        if (added.length > 0) {
+          await requestPRReviewersLocal(repoFullName, pr.number, added);
+        }
+        if (removed.length > 0) {
+          await removePRReviewersLocal(repoFullName, pr.number, removed);
+        }
+        latestRequestedReviewersRef.current = reviewers.map((login) => {
+          const candidate = reviewerCandidates.find(
+            (reviewer) => reviewer.login.toLowerCase() === login.toLowerCase()
+          );
+          return candidate ?? { login, avatar_url: "" };
+        });
+      });
+    },
+    [repoFullName, pr, reviewerCandidates, runPrMutation]
+  );
+
+  const loadReviewerCandidates = useCallback(async (): Promise<void> => {
+    if (!repoFullName || reviewerCandidatesAttemptedRef.current) return;
+    reviewerCandidatesAttemptedRef.current = true;
+    setLoadingReviewerCandidates(true);
+    setReviewerCandidatesError(null);
+    try {
+      const authorLogin = latestAuthorLoginRef.current?.toLowerCase();
+      const candidates = await listRepoAssigneesLocal(repoFullName);
+      setReviewerCandidates(
+        candidates.filter(
+          (candidate) => candidate.login.toLowerCase() !== authorLogin
+        )
+      );
+    } catch (error) {
+      reviewerCandidatesAttemptedRef.current = false;
+      setReviewerCandidatesError(
+        error instanceof Error ? error.message : String(error)
+      );
+    } finally {
+      setLoadingReviewerCandidates(false);
+    }
+  }, [repoFullName]);
 
   const refresh = useCallback(() => {
     if (pr) loadDetail(pr, { force: true });
@@ -377,6 +679,11 @@ export function useWorkstationPrDetail({
       submitReview,
       addInlineComment,
       replyInlineComment,
+      mergePullRequest,
+      setPullRequestAutoMerge,
+      updatePullRequestDraft,
+      updatePullRequestState,
+      updateRequestedReviewers,
       refresh,
     });
   }, [
@@ -384,6 +691,11 @@ export function useWorkstationPrDetail({
     submitReview,
     addInlineComment,
     replyInlineComment,
+    mergePullRequest,
+    setPullRequestAutoMerge,
+    updatePullRequestDraft,
+    updatePullRequestState,
+    updateRequestedReviewers,
     refresh,
     setCallbacks,
   ]);
@@ -391,12 +703,20 @@ export function useWorkstationPrDetail({
   // Cleanup on unmount.
   useEffect(() => {
     return () => {
-      setSelectedPr(initialSelectedPrState);
+      setSelectedPr((current) => ({
+        ...initialSelectedPrState,
+        viewState: current.viewState,
+      }));
       setCallbacks({
         addComment: null,
         submitReview: null,
         addInlineComment: null,
         replyInlineComment: null,
+        mergePullRequest: null,
+        setPullRequestAutoMerge: null,
+        updatePullRequestDraft: null,
+        updatePullRequestState: null,
+        updateRequestedReviewers: null,
         refresh: null,
       });
     };
@@ -409,6 +729,16 @@ export function useWorkstationPrDetail({
       submitReview,
       addInlineComment,
       replyInlineComment,
+      mergePullRequest,
+      setPullRequestAutoMerge,
+      updatePullRequestDraft,
+      updatePullRequestState,
+      updateRequestedReviewers,
+      loadReviewerCandidates,
+      reviewerCandidates,
+      loadingReviewerCandidates,
+      reviewerCandidatesError,
+      prActionPending,
       refresh,
       latestHeadShaRef,
     }),
@@ -418,6 +748,16 @@ export function useWorkstationPrDetail({
       submitReview,
       addInlineComment,
       replyInlineComment,
+      mergePullRequest,
+      setPullRequestAutoMerge,
+      updatePullRequestDraft,
+      updatePullRequestState,
+      updateRequestedReviewers,
+      loadReviewerCandidates,
+      reviewerCandidates,
+      loadingReviewerCandidates,
+      reviewerCandidatesError,
+      prActionPending,
       refresh,
     ]
   );

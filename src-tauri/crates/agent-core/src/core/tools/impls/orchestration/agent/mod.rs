@@ -20,9 +20,8 @@
 //!   `user_allowed_tools` on top of this list (capability-gated) and
 //!   honours `excluded_tools` from either source.
 //!
-//! `manage_project`, `manage_work_item`, and `manage_agent_def` are
-//! management-capability tools for OS/coordinator-style sessions, not
-//! default SDE worker tools.
+//! `manage_agent_def` is a management-capability tool for
+//! OS/coordinator-style sessions, not a default SDE worker tool.
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -404,7 +403,6 @@ impl AgentTool {
             plan_slot_cache: None,
             agent_org_context: self.config.agent_org_context.as_deref().cloned(),
             agent_org_current_member_id: None,
-            session_org_id: None,
             channel_context: None,
         };
         let mut overlay = ToolRegistry::with_fallback(base_registry);
@@ -554,7 +552,7 @@ impl Tool for AgentTool {
                     let partial = {
                         let sid = handle.to_string();
                         tokio::task::block_in_place(|| {
-                            crate::session::persistence::load_llm_history_for_active_journey(&sid)
+                            crate::session::persistence::load_llm_history(&sid)
                                 .ok()
                                 .and_then(|msgs| crate::turn_executor::last_assistant_text(&msgs))
                         })
@@ -797,14 +795,12 @@ impl Tool for AgentTool {
 
         let subagent_provider: Arc<dyn LLMProvider> = match sub_reliability_opt.as_ref() {
             Some(reliability) => {
-                let subagent_session_id = format!("{parent_session_id}:subagent:{agent_id}");
                 match crate::providers::factory::create_provider_with_native_harness_preflight(
                     &model,
                     parent_account_id_for_provider.as_deref(),
                     reliability,
                     self.config.native_harness_type,
                     Some(self.config.workspace.clone()),
-                    Some(&subagent_session_id),
                 )
                 .await
                 {
@@ -826,14 +822,12 @@ impl Tool for AgentTool {
                 }
             }
             None if self.config.native_harness_type.is_some() => {
-                let subagent_session_id = format!("{parent_session_id}:subagent:{agent_id}");
                 match crate::providers::factory::create_provider_with_native_harness_preflight(
                     &model,
                     parent_account_id_for_provider.as_deref(),
                     &crate::config::ReliabilityConfig::default(),
                     self.config.native_harness_type,
                     Some(self.config.workspace.clone()),
-                    Some(&subagent_session_id),
                 )
                 .await
                 {
@@ -895,7 +889,7 @@ impl Tool for AgentTool {
 
         // 6. Build system prompt (base soul + context + learnings + scratchpad)
         let full_system_prompt = self
-            .build_full_system_prompt(&agent, &agent_id, &delegation_config, &model, prompt)
+            .build_full_system_prompt(&agent, &agent_id, &delegation_config, &model)
             .await?;
 
         // 7. Build initial messages (resume / fork / fresh)
@@ -926,6 +920,8 @@ impl Tool for AgentTool {
             .map(|sm| sm.max_iterations)
             .unwrap_or(DEFAULT_SUBAGENT_MAX_ITERATIONS);
         let turn_config = TurnConfig {
+            turn_intent_id: String::new(),
+            projected_inbox_ids: Vec::new(),
             model: model.clone(),
             account_id: self.config.session_account_id.clone(),
             context_window_override: agent.context_window,
@@ -1000,12 +996,14 @@ impl Tool for AgentTool {
             parent_key_source,
             parent_agent_exec_mode,
             parent_native_harness_type,
+            parent_product_mode,
         ) = match crate::session::persistence::get_session(&parent_session_id) {
             Ok(Some(parent)) => (
                 parent.account_id,
                 parent.key_source,
                 parent.agent_exec_mode,
                 parent.native_harness_type,
+                parent.product_mode,
             ),
             Ok(None) => {
                 warn!(
@@ -1018,6 +1016,7 @@ impl Tool for AgentTool {
                 (
                     None,
                     core_types::key_source::KeySource::default(),
+                    None,
                     None,
                     None,
                 )
@@ -1034,16 +1033,18 @@ impl Tool for AgentTool {
                     core_types::key_source::KeySource::default(),
                     None,
                     None,
+                    None,
                 )
             }
         };
 
-        // Exec-mode overlay (see the comment above step 6): the worker's
-        // policy must reflect the parent's CURRENT mode, not the base
-        // policy snapshotted at init. A Plan-mode parent therefore spawns
-        // read-only workers (Plan's deny layer strips edit/shell/MCP
-        // write surfaces); Build/Wingman parents are unaffected.
-        let effective_policy = Self::overlay_parent_exec_mode(
+        // Mode overlay (see the comment above step 6): the worker's
+        // policy must reflect the parent's CURRENT exec mode, not the
+        // base policy snapshotted at init. A Plan-mode parent therefore
+        // spawns read-only workers. Product mode is not a tool overlay:
+        // the child record inherits it below, and `org2-pm` enforces it
+        // at the application boundary via the injected ORGII_MODE.
+        let effective_policy = Self::overlay_parent_modes(
             effective_policy,
             parent_agent_exec_mode
                 .as_deref()
@@ -1072,6 +1073,7 @@ impl Tool for AgentTool {
                 // fallback writes to ~/.orgii/plans/{agent_id}/ instead.
                 workspace_path: self.config.workspace_path.clone(),
                 agent_exec_mode: parent_agent_exec_mode,
+                product_mode: parent_product_mode,
                 native_harness_type: parent_native_harness_type,
                 created_at: chrono::Utc::now().to_rfc3339(),
                 updated_at: chrono::Utc::now().to_rfc3339(),

@@ -59,6 +59,10 @@ export interface StreamingErrorDetails {
   toolName?: string;
   /** File path if applicable. */
   filePath?: string;
+  /** Queue message identity when a scheduled turn fails before normal finality. */
+  messageId?: string;
+  /** Canonical intent identity for attributing the failure to one turn. */
+  turnIntentId?: string;
 }
 
 /**
@@ -129,6 +133,10 @@ export interface AgentWSEvent {
   success?: boolean;
   chunk?: string;
   stream?: string;
+  /** Monotonic per-shell replay sequence assigned by the Rust writer. */
+  sequence?: number;
+  /** Durable replay byte watermark after this chunk was persisted. */
+  persistedBytes?: number;
   files?: string[];
   workspacePath?: string;
   todos?: unknown[];
@@ -137,6 +145,8 @@ export interface AgentWSEvent {
   operation?: "list" | "inspect" | "dispatch";
   action?: string;
   params?: Record<string, unknown>;
+  /** Trusted local session identity for actions bound to the invoking turn. */
+  invokingSessionId?: string;
   agentType?: RustAgentType;
 
   // ============================================
@@ -186,6 +196,8 @@ export interface AgentWSEvent {
 
   /** Turn summary text (agent:turn_summary) */
   summary?: string;
+  /** Canonical user-intent id carried by authoritative terminal events. */
+  turnIntentId?: string;
   /** Stable turn id for anchoring post-turn summary events. */
   turnId?: string;
   /** Transcript timestamp for anchoring post-turn summary events. */
@@ -216,8 +228,6 @@ export interface AgentWSEvent {
   exitCode?: number;
   /** Whether the process was killed (vs normal exit) */
   killed?: boolean;
-  /** Path to the terminal log file */
-  logPath?: string;
   /** Shell command (explicit for shell process events) */
   command?: string;
   /**

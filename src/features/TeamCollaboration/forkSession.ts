@@ -33,10 +33,9 @@
  * The registry doubles as durable provenance: backend list reloads rebuild
  * `Session` rows from Rust (which does not know `forkedFrom`), so
  * `getSessionForkedFrom` falls back to the registry when the row field is
- * gone — "⑂ taken over from @owner" survives reloads. Comment-task forks
- * additionally carry a `taskContext` (agent-pickup design §4) read via
- * `getSessionTaskContext` — the durable source of the fork→thread backlink.
+ * gone — "⑂ taken over from @owner" survives reloads.
  */
+import { exists } from "@tauri-apps/plugin-fs";
 import { z } from "zod/v4";
 
 import { deleteSession, saveSession } from "@src/api/tauri/agent";
@@ -44,6 +43,10 @@ import type { SessionMeta } from "@src/api/tauri/agent";
 import Message from "@src/components/Message";
 import { eventStoreProxy } from "@src/engines/SessionCore/core/store/EventStoreProxy";
 import type { SessionEvent } from "@src/engines/SessionCore/core/types";
+import {
+  org2CloudAccessSettingsAtom,
+  withCloudSessionMode,
+} from "@src/features/Org2Cloud/org2CloudAccessSettings";
 import { org2CloudOrgsAtom } from "@src/features/Org2Cloud/org2CloudOrgsAtom";
 import i18n from "@src/i18n";
 import type { RemoteTeammateSessionMetadata } from "@src/store/collaboration/types";
@@ -59,7 +62,7 @@ import {
   getInstrumentedStore,
   isStoreInitialized,
 } from "@src/util/core/state/instrumentedStore";
-import { BUILTIN_SDE_DEF_ID } from "@src/util/session/sessionDispatch";
+import { toFsPluginPath } from "@src/util/file/pathUtils";
 
 import { normalizeRepoScopeKey } from "./collabSyncUtils";
 import { forkCheckoutRequestAtom } from "./components/ForkCheckoutPickerDialog";
@@ -73,8 +76,10 @@ import type {
   RemoteSessionFetchOptions,
 } from "./engine/collabSyncEngineHelpers";
 import { forkSession } from "./engine/collabSyncEngineHelpers";
+import { ForkOperationError } from "./forkSnapshotIntegrity";
 import {
   resolveLocalCheckoutForScopeKey,
+  resolveMatchingOrgRepoScope,
   resolveShareableScopeKeys,
 } from "./repoScopeResolver";
 import {
@@ -104,43 +109,10 @@ const SessionForkedFromSchema = z.object({
   rootSessionId: z.string().optional(),
 }) satisfies z.ZodType<SessionForkedFrom>;
 
-/**
- * Comment-task provenance (agent-pickup design §4): stamped onto the registry
- * entry by the comment-task runner when the fork was created to address a
- * comment thread. Durable source for BOTH the "Addressing comment: …" header
- * chip and the `addressesComment` wire field the cloud push restores on every
- * pass (`buildCloudSessionMetadata`) — the same registry-fallback lesson as
- * `forkedFrom`.
- */
-export interface ForkTaskContext {
-  orgId: string;
-  /** Bare session id (owner-side) the comment thread is anchored to. */
-  sourceSessionId: string;
-  /** Top-level comment (thread head) id the fork is addressing. */
-  commentId: string;
-  taskId: string;
-  /** Bounded thread-head excerpt for the header chip (display only). */
-  excerpt: string;
-}
-
-const ForkTaskContextSchema = z.object({
-  orgId: z.string(),
-  sourceSessionId: z.string(),
-  commentId: z.string(),
-  taskId: z.string(),
-  excerpt: z.string(),
-}) satisfies z.ZodType<ForkTaskContext>;
-
 const ForkRelayEntrySchema = z.object({
   forkedFrom: SessionForkedFromSchema,
   /** True until the first successful message send consumes the handoff. */
   handoffPending: z.boolean(),
-  /**
-   * Present only on comment-task forks (the runner writes it). Additive on
-   * purpose: entries persisted before the task layer must keep parsing —
-   * a corrupt-looking registry silently resets to {} (see readRegistry).
-   */
-  taskContext: ForkTaskContextSchema.optional(),
 });
 
 type ForkRelayEntry = z.output<typeof ForkRelayEntrySchema>;
@@ -207,17 +179,13 @@ export function getSessionForkedFrom(
   return session.forkedFrom ?? readRegistry()[session.session_id]?.forkedFrom;
 }
 
-/**
- * Comment-task provenance for a session row — the read API for the
- * "Addressing comment: …" header chip and the cloud push's
- * `addressesComment` restore. Unlike `getSessionForkedFrom` there is no live
- * `Session` field to prefer: the registry is the ONLY local carrier (the
- * wire copy lives on the pushed row for teammates).
- */
-export function getSessionTaskContext(
-  session: Pick<Session, "session_id">
-): ForkTaskContext | undefined {
-  return readRegistry()[session.session_id]?.taskContext;
+/** Snapshot resolver for batch scans, avoiding one storage parse per row. */
+export function createSessionForkedFromResolver(): (
+  session: Pick<Session, "session_id" | "forkedFrom">
+) => SessionForkedFrom | undefined {
+  const registry = readRegistry();
+  return (session) =>
+    session.forkedFrom ?? registry[session.session_id]?.forkedFrom;
 }
 
 // ============================================================================
@@ -238,9 +206,7 @@ export function getSessionTaskContext(
  * a workspace (plus a non-blocking hint) rather than with a dead foreign
  * path.
  *
- * Exported for the comment-task runner's pre-flight workspace confirm
- * (agent-pickup design §4): a null here is what triggers the runner's
- * "run without workspace / pick a folder" dialog BEFORE any lease is spent.
+ * Exported so every fork entry point shares the same workspace resolver.
  */
 export async function resolveForkWorkspacePath(
   remoteSession: RemoteTeammateSessionMetadata
@@ -253,12 +219,31 @@ export async function resolveForkWorkspacePath(
     if (repo.path) candidates.push(repo.path);
   }
   for (const session of store.get(sessionsAtom) as Session[]) {
-    if (session.repoPath) candidates.push(session.repoPath);
+    const candidate = session.repoRootPath ?? session.repoPath;
+    if (candidate) candidates.push(candidate);
+  }
+
+  // Repo/session atoms may retain another machine's absolute path after a
+  // cloud import. Only paths that exist on THIS machine may participate in
+  // scope resolution or the same-machine fallback.
+  const existingCandidates: string[] = [];
+  const seenCandidates = new Set<string>();
+  for (const candidate of candidates) {
+    const normalized = normalizeRepoScopeKey(candidate);
+    if (!normalized || seenCandidates.has(normalized)) continue;
+    seenCandidates.add(normalized);
+    try {
+      if (await exists(toFsPluginPath(candidate))) {
+        existingCandidates.push(candidate);
+      }
+    } catch {
+      // Invalid/stale paths fail closed; a later valid checkout can still win.
+    }
   }
 
   const byScopeKey = await resolveLocalCheckoutForScopeKey(
     remoteSession.repoScopeKey,
-    candidates
+    existingCandidates
   );
   if (byScopeKey) return byScopeKey;
 
@@ -269,7 +254,7 @@ export async function resolveForkWorkspacePath(
     const normalizedOwnerPath = normalizeRepoScopeKey(remoteSession.repoPath);
     if (
       normalizedOwnerPath &&
-      candidates.some(
+      existingCandidates.some(
         (candidate) => normalizeRepoScopeKey(candidate) === normalizedOwnerPath
       )
     ) {
@@ -284,15 +269,6 @@ export interface ForkTeammateSessionOptions extends RemoteSessionFetchOptions {
   promptForExecution?: boolean;
   /** Pre-resolved execution choice for headless/programmatic callers. */
   execution?: ForkExecutionSelection;
-  /**
-   * Comment-task provenance (agent-pickup design §4): when present it is
-   * stamped into the fork-relay registry entry alongside
-   * `forkedFrom`/`handoffPending`, so the fork→thread backlink survives
-   * restarts — read back via `getSessionTaskContext` for the header chip and
-   * restored onto the wire (`addressesComment`) by `buildCloudSessionMetadata`
-   * on every push. Plain (non-task) forks simply omit it.
-   */
-  taskContext?: ForkTaskContext;
   /**
    * Workspace override with KEY-PRESENCE semantics (agent-pickup design §4),
    * mirroring the engine's `ForkSessionOptions.workspaceRepoPath`:
@@ -311,6 +287,8 @@ export interface ForkSessionSetupSource {
   sourceTitle: string;
   sourceScopeKey?: string;
   sourceModel?: string;
+  sourceAgentDisplayName?: string;
+  sourceAgentDefinitionId?: string;
 }
 
 /**
@@ -330,6 +308,8 @@ export async function requestForkSessionSetup(
         sourceTitle: source.sourceTitle,
         sourceScopeKey: source.sourceScopeKey,
         sourceModel: source.sourceModel,
+        sourceAgentDisplayName: source.sourceAgentDisplayName,
+        sourceAgentDefinitionId: source.sourceAgentDefinitionId,
         resolve,
       });
     }
@@ -339,7 +319,10 @@ export async function requestForkSessionSetup(
     if (!selected.workspaceRepoPath) throw new ForkCancelledError();
     const normalizedKey = normalizeRepoScopeKey(source.sourceScopeKey);
     const keys = await resolveShareableScopeKeys(selected.workspaceRepoPath);
-    if (!keys?.includes(normalizedKey)) {
+    const matchingScope = await resolveMatchingOrgRepoScope(keys, [
+      normalizedKey,
+    ]);
+    if (!matchingScope) {
       Message.error(
         i18n.t("navigation:collaboration.session.forkCheckoutMismatch", {
           repo: source.sourceScopeKey,
@@ -359,6 +342,8 @@ async function pickForkSessionSetup(
     sourceTitle: remoteSession.title,
     sourceScopeKey: remoteSession.repoScopeKey,
     sourceModel: remoteSession.model,
+    sourceAgentDisplayName: remoteSession.agentDisplayName,
+    sourceAgentDefinitionId: remoteSession.agentDefinitionId,
   });
 }
 
@@ -435,7 +420,10 @@ async function pickMatchingCheckout(
   // re-pointed since its cache entry).
   const normalizedKey = normalizeRepoScopeKey(sourceScopeKey);
   const keys = await resolveShareableScopeKeys(selected);
-  if (!keys?.includes(normalizedKey)) {
+  const matchingScope = await resolveMatchingOrgRepoScope(keys, [
+    normalizedKey,
+  ]);
+  if (!matchingScope) {
     Message.error(
       i18n.t("navigation:collaboration.session.forkCheckoutMismatch", {
         repo: sourceScopeKey,
@@ -478,8 +466,16 @@ export async function forkTeammateSession(
   } else {
     workspaceRepoPath = await resolveForkWorkspacePath(options.remoteSession);
   }
-  // taskContext is registry-only provenance — keep it out of the engine call.
-  const { taskContext, promptForExecution: _prompt, ...fetchOptions } = options;
+  // A headless caller must provide the same explicit local execution choice
+  // as the setup dialog. Never resurrect the old implicit builtin:sde path.
+  if (!execution?.agentDefinitionId) {
+    throw new ForkOperationError(
+      "agent_unavailable",
+      options.remoteSession.sourceSessionId,
+      "No local agent was selected for this fork"
+    );
+  }
+  const { promptForExecution: _prompt, ...fetchOptions } = options;
   const result = await forkSession({
     ...fetchOptions,
     workspaceRepoPath,
@@ -517,10 +513,16 @@ export async function forkTeammateSession(
     workspacePath: workspaceRepoPath ?? undefined,
     model: result.model,
     accountId: result.accountId,
+    // Preserve the collaboration filing in Rust too. Without this, the
+    // backend defaults the durable row to `personal-org`; the next
+    // loadSessions() then moves a cloud fork out of its Team sidebar even
+    // though the optimistic TS row and cloud tag still point at the source
+    // org. Guest-share forks deliberately remain Personal.
+    orgId: options.shareToken ? undefined : orgId,
     // agentsession-* has no builtin prefix mapping in agent-core, so the
-    // persisted definition id is THE thing that makes the lazy init_session
-    // on the first agent_send_message resolve an agent (see module doc).
-    agentDefinitionId: BUILTIN_SDE_DEF_ID,
+    // explicitly confirmed LOCAL definition id is the lazy-init authority.
+    // The source's wire id is only a picker hint and is never trusted here.
+    agentDefinitionId: execution.agentDefinitionId,
     sessionType: "sde",
   } as SessionMeta;
   try {
@@ -537,7 +539,12 @@ export async function forkTeammateSession(
       const store = getInstrumentedStore();
       persistSessions(store.get(sessionsAtom) as Session[]);
     }
-    throw error;
+    throw new ForkOperationError(
+      "backend_registration",
+      remoteSession.sourceSessionId,
+      "Failed to register the forked session backend",
+      error
+    );
   }
 
   writeRegistryEntry(result.localSessionId, {
@@ -557,10 +564,6 @@ export async function forkTeammateSession(
         remoteSession.sourceSessionId,
     },
     handoffPending: true,
-    // Present only on comment-task forks; an undefined value serializes to
-    // an ABSENT key (JSON.stringify drops it), keeping plain forks on the
-    // pre-taskContext registry shape.
-    taskContext,
   });
 
   if (isStoreInitialized()) {
@@ -575,6 +578,22 @@ export async function forkTeammateSession(
       store.set(sessionOrgTagsAtom, (current) =>
         withTag(current, result.localSessionId, cloudOrgToken(orgId))
       );
+      // Inherit the SOURCE's sharing level as the fork's explicit per-session
+      // intent. Without it, a fork in a floor=off org has no ladder entry and
+      // silently floors to metadata_only — teammates see the fork row but can
+      // never open its replay, and nobody errors (the "defaults silently
+      // degrading shares" escape class). The stamp is just the default the
+      // per-session dialog would show; the user can change it there.
+      if (remoteSession.accessMode) {
+        store.set(org2CloudAccessSettingsAtom, (current) =>
+          withCloudSessionMode(
+            current,
+            orgId,
+            result.localSessionId,
+            remoteSession.accessMode ?? null
+          )
+        );
+      }
     }
     if (workspaceRepoPath === null && !hasWorkspaceOverride) {
       // Non-blocking: the fork opened fine, it just has no workspace until

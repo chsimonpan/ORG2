@@ -25,36 +25,38 @@ import { getAdapterForSession } from "@src/engines/SessionCore/sync/types";
 import {
   chatPanelTabsAtom,
   openOrFocusChatPanelStartPageTabAtom,
+  openOrFocusSessionInChatPanelTabAtom,
 } from "@src/store/chatPanel/chatPanelTabsAtom";
 import { reposAtom, selectedRepoIdAtom } from "@src/store/repo/atoms";
 import {
   type ContextUsageSnapshot,
   isPendingCancelAtom,
   lastUserMessageAtom,
+  postStopDispatchSessionsAtom,
   restoreToInputAtom,
   sessionContextTokensAtom,
   sessionContextUsageAtom,
   sessionRolledBackAtom,
   sessionRuntimeStatusAtom,
   streamRetryStatusAtom,
-  userInitiatedCancelAtom,
 } from "@src/store/session/cliSessionStatusAtom";
 import {
   pendingPlanApprovalsAtom,
   upsertPendingPlanApproval,
 } from "@src/store/session/planApprovalAtom";
+import { sessionsAtom } from "@src/store/session/sessionAtom/atoms";
+import { loadSessions } from "@src/store/session/sessionAtom/loaders";
 import { upsertSession } from "@src/store/session/sessionAtom/mutations";
+import { sessionPaginationAtom } from "@src/store/session/sessionAtom/paginationAtoms";
 import type { Session } from "@src/store/session/sessionAtom/types";
 import {
   activeSessionIdAtom,
   jumpToSessionAtom,
-  openSessionAtom,
   workstationActiveSessionIdAtom,
 } from "@src/store/session/viewAtom";
 import { chatImageAttachmentsAtom } from "@src/store/ui/chatImageAtom";
 import {
   CHAT_PANEL_CONTENT_MODE,
-  CHAT_PANEL_START_PAGE_TAB,
   DEFAULT_CHAT_PANEL_CREATE_TARGET,
   chatPanelContentModeAtom,
   chatPanelCreateTargetAtom,
@@ -282,9 +284,7 @@ export function createSessionHelpers(store: E2EStore) {
       // New-session creation now lives inside the singleton Launchpad's Work
       // tab. Focus that canonical tab instead of forcing the legacy bare
       // session surface, which no longer mounts SessionCreator by itself.
-      store.set(openOrFocusChatPanelStartPageTabAtom, {
-        section: CHAT_PANEL_START_PAGE_TAB.WORK,
-      });
+      store.set(openOrFocusChatPanelStartPageTabAtom, {});
       store.set(chatPanelCreateTargetAtom, DEFAULT_CHAT_PANEL_CREATE_TARGET);
       store.set(chatPanelSelectedWorkItemAtom, null);
       store.set(chatPanelMaximizedAtom, true);
@@ -296,7 +296,7 @@ export function createSessionHelpers(store: E2EStore) {
       resetTurnLifecycleForTests();
       store.set(chatImageAttachmentsAtom, []);
       store.set(isPendingCancelAtom, false);
-      store.set(userInitiatedCancelAtom, false);
+      store.set(postStopDispatchSessionsAtom, {});
       store.set(sessionRuntimeStatusAtom, "idle");
       store.set(sessionContextTokensAtom, 0);
       store.set(sessionContextUsageAtom, null);
@@ -394,6 +394,9 @@ export function createSessionHelpers(store: E2EStore) {
           launchParams.agentDefinitionId ?? launchParams.agent_definition_id,
         agent_org_id: launchParams.agentOrgId ?? launchParams.agent_org_id,
         work_item_id: launchParams.workItemId ?? launchParams.work_item_id,
+        // The wire name for the exec mode is `mode`; specs historically
+        // pass `agentExecMode`, which serde would silently drop.
+        mode: launchParams.mode ?? launchParams.agentExecMode,
         agent_role: launchParams.agentRole ?? launchParams.agent_role,
         worktree_path: launchParams.worktreePath ?? launchParams.worktree_path,
         project_slug: launchParams.projectSlug ?? launchParams.project_slug,
@@ -453,7 +456,15 @@ export function createSessionHelpers(store: E2EStore) {
       store.set(chatPanelSelectedWorkItemAtom, null);
       store.set(chatPanelMaximizedAtom, true);
       store.set(chatWidthAtom, 560);
-      store.set(openSessionAtom, { sessionId, sessionName, repoPath });
+      // Keep the canonical tab identity and the legacy session atoms in one
+      // transition. Writing `openSessionAtom` alone leaves a previously-active
+      // cloud-org/work-item tab in front of the seeded session, so rendered
+      // E2E would test a stale management surface instead of the product flow.
+      store.set(openOrFocusSessionInChatPanelTabAtom, {
+        sessionId,
+        sessionName,
+        repoPath,
+      });
       store.set(sessionIdAtom, sessionId);
       store.set(sessionRuntimeStatusAtom, "idle");
       await eventStoreProxy.switchSession(sessionId);
@@ -752,6 +763,66 @@ export function createSessionHelpers(store: E2EStore) {
     }
   };
 
+  const reloadSessionList = async (): Promise<
+    Result<{ count: number; sessionIds: string[] }>
+  > => {
+    try {
+      await loadSessions({ forceRefresh: true });
+      const sessions = store.get(sessionsAtom) as Session[];
+      return {
+        ok: true,
+        count: sessions.length,
+        sessionIds: sessions.map((session) => session.session_id),
+      };
+    } catch (err) {
+      return asError(err);
+    }
+  };
+
+  const primeSidebarEntityCache = async (): Promise<
+    Result<{ count: number }>
+  > => {
+    try {
+      await loadSessions({ forceRefresh: true });
+      return {
+        ok: true,
+        count: (store.get(sessionsAtom) as Session[]).length,
+      };
+    } catch (err) {
+      return asError(err);
+    }
+  };
+
+  const inspectSidebarPagination = async (
+    sessionIds: string[] = []
+  ): Promise<Result<{ pagination: Json; sessions: Json[] }>> => {
+    try {
+      const requestedIds = new Set(sessionIds);
+      const sessions = (store.get(sessionsAtom) as Session[])
+        .filter(
+          (session) =>
+            requestedIds.size === 0 || requestedIds.has(session.session_id)
+        )
+        .map((session) => ({
+          sessionId: session.session_id,
+          updatedAt: session.updated_at,
+          pinned: session.pinned ?? false,
+          category: session.category,
+          agentOrgId: session.agentOrgId,
+          agentOrgName: session.agentOrgName,
+          orgId: session.orgId,
+          parentSessionId: session.parentSessionId,
+        }));
+      return {
+        ok: true,
+        pagination: store.get(sessionPaginationAtom) as unknown as Json,
+        sessions: sessions as Json[],
+      };
+    } catch (err) {
+      return asError(err);
+    }
+  };
+
   return {
     promptDump: promptDumpHelper,
     getActiveSessionId,
@@ -761,6 +832,9 @@ export function createSessionHelpers(store: E2EStore) {
     inspectCliHistoryMutation,
     resetToNewSession,
     openSession,
+    reloadSessionList,
+    primeSidebarEntityCache,
+    inspectSidebarPagination,
     launchSession,
     getSessionAggregateRow,
     getSessionAggregateRowFromList,
@@ -781,6 +855,8 @@ export function createSessionHelpers(store: E2EStore) {
     killSubagentJobWire: seeders.killSubagentJobWire,
     listRunningSubagentJobsWire: seeders.listRunningSubagentJobsWire,
     debugSeedChildSessionWire: seeders.debugSeedChildSessionWire,
+    debugSeedSidebarCodingSessionWire:
+      seeders.debugSeedSidebarCodingSessionWire,
     debugSeedPendingPlanWire: seeders.debugSeedPendingPlanWire,
     deleteSessionWire: seeders.deleteSessionWire,
     patchSessionExecModeWire,

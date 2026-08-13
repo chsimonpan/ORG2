@@ -252,6 +252,22 @@ describe("ProjectSyncChannel", () => {
     expect(deps.bridge.notifyOutboxFlushed).not.toHaveBeenCalled();
   });
 
+  it("applies a Realtime pull without probing the local outbox", async () => {
+    deps.bridge.applyRemote.mockResolvedValue(1);
+
+    const result = await channel.sync(
+      {
+        org: ORG,
+        state: orgState({ projects: [{ id: "p-1", version: 2 }] }),
+      },
+      { pushOutbox: false }
+    );
+
+    expect(deps.bridge.applyRemote).toHaveBeenCalledTimes(1);
+    expect(deps.bridge.drainOutbox).not.toHaveBeenCalled();
+    expect(result.pushErrors).toEqual([]);
+  });
+
   it("acks non-conflict push failures with the error message (backoff Rust-side)", async () => {
     deps.bridge.drainOutbox
       .mockResolvedValueOnce([pushItem()])

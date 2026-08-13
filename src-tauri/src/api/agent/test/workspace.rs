@@ -281,6 +281,7 @@ pub async fn test_session_launch_seed_only(
         native_harness_type: native_harness_type.clone(),
         platform: None,
         branch: None,
+        worktree_base_ref: None,
         hosted_token: None,
         tier: None,
         name: name_hint,
@@ -293,6 +294,7 @@ pub async fn test_session_launch_seed_only(
         apply_agent_org_member_overrides_for_future: false,
         isolate: false,
         mode,
+        product_mode: None,
         org_id: None,
         project_id: None,
         project_name: None,
@@ -301,8 +303,7 @@ pub async fn test_session_launch_seed_only(
         worktree_path: None,
         project_slug: None,
         parent_session_id: None,
-        journey_workspace_id: None,
-        journey_topic_tags: Vec::new(),
+        durable_run_id: None,
         additional_directories,
     };
 

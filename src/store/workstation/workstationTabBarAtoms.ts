@@ -91,6 +91,7 @@ export const WORK_MANAGEMENT_SECTION = {
   PROJECTS: "projects",
   GITHUB_ISSUES: "github-issues",
   GITHUB_PRS: "github-prs",
+  RUNS: "runs",
 } as const;
 
 export type WorkManagementSection =
@@ -129,6 +130,10 @@ export interface WorkstationTabHeaderSlots {
   content?: ReactNode;
   trailing?: ReactNode;
   sidebarToggleDisabled?: boolean;
+  /** Hide shell-owned leading chrome when the published surface has no sidebar. */
+  shellLeadingChromeHidden?: boolean;
+  /** Visually joins this 40px header to a following pane-owned row. */
+  joinWithFollowingRow?: boolean;
 }
 
 export type WorkstationTabHeaderContribution =
@@ -146,7 +151,9 @@ function isWorkstationTabHeaderSlots(
     ("leading" in contribution ||
       "content" in contribution ||
       "trailing" in contribution ||
-      "sidebarToggleDisabled" in contribution)
+      "sidebarToggleDisabled" in contribution ||
+      "shellLeadingChromeHidden" in contribution ||
+      "joinWithFollowingRow" in contribution)
   );
 }
 

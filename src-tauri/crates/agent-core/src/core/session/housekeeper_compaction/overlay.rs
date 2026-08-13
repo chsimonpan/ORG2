@@ -44,7 +44,7 @@ pub(crate) fn apply(session_id: &str, messages: &mut Vec<Value>) -> Result<Overl
         return Ok(OverlayOutcome::Missing);
     }
 
-    let history = session_persistence::load_llm_history_for_active_journey(session_id)
+    let history = session_persistence::load_llm_history(session_id)
         .map_err(|err| format!("load MiniCPM overlay history failed: {err}"))?;
     let current_hash = prefix_hash(&history, record.covered_message_count);
     if current_hash.as_deref() != Some(record.covered_prefix_hash.as_str()) {

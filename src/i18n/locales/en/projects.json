@@ -78,7 +78,7 @@
     "heading": "Create a project from GitHub Issues",
     "description": "Pick a GitHub repository, create an ORGII project, and keep its GitHub Issues synced as work items.",
     "importButton": "Import GitHub Issues",
-    "projectDescription": "Synced from GitHub Issues in {{owner}}/{{repo}}.",
+    "projectDescription": "GitHub Issues · {{owner}}/{{repo}}",
     "fields": {
       "projectName": "Project name",
       "repo": "GitHub repository",
@@ -148,18 +148,25 @@
       "overview": "Overview",
       "profile": "Profile",
       "syncMethods": "Sync Methods",
-      "orgNameDescription": "Display name for this project org.",
+      "orgNameDescription": "Display name for this project org",
       "orgKey": "Org key",
-      "orgKeyDescription": "Stable short key used for org-scoped project IDs.",
-      "projectCountDescription": "Native projects currently assigned to this org.",
+      "orgKeyDescription": "Stable short key used for org-scoped project IDs",
+      "projectCountDescription": "Native projects currently assigned to this org",
       "gitFolderSync": "Git folder sync",
-      "gitFolderSyncDescription": "Mirror this org's projects and work items through a Git working tree.",
+      "gitFolderSyncDescription": "Mirror this org's projects and work items through a Git working tree",
       "notConfigured": "Not configured",
-      "syncNowDescription": "Import remote file changes and export local database changes.",
+      "syncNowDescription": "Import remote file changes and export local database changes",
       "syncSummary": "{{projects}} projects, {{workItems}} work items, {{conflicts}} conflicts",
-      "syncHowItWorks": "Git folder sync connects this org to an existing Git repository. ORGII stores the org’s exported projects and work items under `.orgii/projects/...` inside that repo, imports file changes from there, exports local database changes back to files, and pauses on conflicts so you can review them before anything is overwritten.",
+      "syncHowItWorks": "Git folder sync connects this org to an existing Git repository. ORGII stores the org’s exported projects and work items under `.orgii/projects/...` inside that repo, imports file changes from there, exports local database changes back to files, and pauses on conflicts so you can review them before anything is overwritten",
       "noProjectsForCatalog": "This org has no projects yet.",
-      "noProjectsForCatalogHint": "Create a project in this org before managing shared members or labels."
+      "noProjectsForCatalogHint": "Create a project in this org before managing shared labels",
+      "dangerZone": "Danger Zone",
+      "deleteOrg": "Delete this org",
+      "deleteOrgDescription": "Permanently delete {{org}} and all of its local projects and work items. This action cannot be undone",
+      "personalOrgDeleteDisabled": "The default personal org is permanent and cannot be deleted",
+      "deleteTypeToConfirm": "Type {{org}} to confirm",
+      "deleteOrgAction": "Delete org",
+      "deletedToast": "Deleted {{org}}"
     }
   },
   "properties": {
@@ -360,9 +367,14 @@
     },
     "activity": {
       "title": "Activity",
+      "discussionTitle": "Discussion",
+      "activityHistory": "Activity history",
+      "activityHistoryCount": "{{count}} events",
+      "noComments": "No comments yet",
       "subscribe": "Subscribe",
       "unsubscribe": "Unsubscribe",
       "commentPlaceholder": "Leave a comment...",
+      "mentionPeople": "Mention people",
       "you": "You",
       "createdWorkItem": "created the work item",
       "deletedWorkItem": "deleted the work item",
@@ -381,6 +393,16 @@
       "clearedField": "cleared {{field}}",
       "changedDescription": "updated the description",
       "editedFields": "edited {{count}} fields:",
+      "groupedChanges": "made {{count}} changes",
+      "groupedTodoChanges": "updated to-dos · {{count}} actions",
+      "todoAdded": "added “{{todo}}”",
+      "todoRemoved": "removed “{{todo}}”",
+      "todoCompleted": "completed “{{todo}}”",
+      "todoReopened": "reopened “{{todo}}”",
+      "todoStarted": "started “{{todo}}”",
+      "todoMarkedPending": "marked “{{todo}}” as pending",
+      "todoRenamed": "renamed “{{from}}” to “{{to}}”",
+      "todoUpdated": "updated “{{todo}}”",
       "justNow": "just now",
       "daysAgo": "{{count}}d ago",
       "hoursAgo": "{{count}}h ago",
@@ -403,7 +425,8 @@
         "todos": "to-dos",
         "comments": "comments",
         "schedule": "schedule",
-        "orchestratorConfig": "orchestrator config"
+        "orchestratorConfig": "orchestrator config",
+        "handoff": "handoff"
       }
     },
     "todos": {
@@ -479,6 +502,7 @@
       "title": "Agent Workflow",
       "startAgent": "Start Agent",
       "startAgentAndChat": "Start Agent & Open Chat",
+      "noWorkspaceForAgent": "Open a repository workspace before starting an agent on this item.",
       "running": "Running...",
       "pendingLaunch": "Pending launch...",
       "completed": "Completed",
@@ -490,7 +514,6 @@
       "openSession": "Open Session",
       "viewLiveChat": "View Live Chat",
       "viewConversation": "View Conversation",
-      "viewSessionJourney": "Session Journey",
       "noWorkflowRun": "No agent workflow has been run yet",
       "confirmStart": "Start the SDE agent on this work item?",
       "sdePhase": "SDE Development",
@@ -588,7 +611,9 @@
       "newSession": "New Session",
       "starting": "Starting...",
       "emptyOverview": "No sessions yet",
-      "emptyOverviewHint": "Start an Agent session to track execution here."
+      "emptyOverviewHint": "Start an Agent session to track execution here.",
+      "originTitle": "Creation session",
+      "originStatus": "Created this item"
     },
     "outputTab": {
       "prSection": "Pull Request",
@@ -612,7 +637,27 @@
       "cycles": "cycles"
     },
     "viewWorkItems": "View work items",
-    "fromRoutine": "From routine: {{name}}"
+    "fromRoutine": "From routine: {{name}}",
+    "subItems": {
+      "title": "Sub-items",
+      "parent": "Parent",
+      "progress": "{{completed}} of {{total}} completed",
+      "add": "Add sub-item",
+      "addFirst": "Add the first sub-item",
+      "titlePlaceholder": "Add a sub-item title",
+      "stagePicker": "Sub-item stage",
+      "noStage": "No stage",
+      "stage": "Stage {{stage}}",
+      "openStatus": "Open",
+      "completedStatus": "Completed",
+      "cancelledStatus": "Cancelled",
+      "createError": "Could not create the sub-item. Try again."
+    },
+    "sessionRail": {
+      "notOnDeviceTitle": "Session not on this device",
+      "notOnDeviceHint": "This session ran on another device. Its transcript is not synced here.",
+      "finalOutput": "Final output"
+    }
   },
   "settings": {
     "sidebarGeneral": "General",
@@ -695,6 +740,11 @@
         "notAttached": "Not attached",
         "attach": "Attach",
         "detach": "Detach",
+        "detachProjectMenuLabel": "Unlink GitHub",
+        "detachProjectTitle": "Unlink GitHub from {{project}}?",
+        "detachProjectDescription": "GitHub Issues sync will stop. The local project and imported work items will stay in ORGII.",
+        "detachProjectAction": "Unlink GitHub from {{project}}",
+        "detachProjectSuccess": "GitHub unlinked from {{project}}",
         "changeWarning": "Detach the current adapter before attaching a new one."
       },
       "accountPicker": {
@@ -925,9 +975,7 @@
     "empty": "No workspace items found",
     "issues": "Issues",
     "views": "Views",
-    "more": "More",
-    "projectTree": "Project Tree",
-    "projectJourney": "Project Journey"
+    "more": "More"
   },
   "teams": {
     "title": "Your teams",

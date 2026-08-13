@@ -1,12 +1,11 @@
 import { emit } from "@tauri-apps/api/event";
+import { useSetAtom } from "jotai";
 import { useCallback, useMemo } from "react";
 
 import {
   type LinkedSession,
   type WorkItemData,
-  type WorkItemFrontmatter,
   projectApi,
-  workItemDataToUI,
 } from "@src/api/http/project";
 import Message from "@src/components/Message";
 import type { SessionLaunchSuccessInfo } from "@src/engines/SessionCore/hooks/session/useSessionCreator/useSessionLaunch/types";
@@ -14,23 +13,24 @@ import {
   allocateCloudAwareStandaloneWorkItemId,
   allocateCloudAwareWorkItemId,
 } from "@src/features/Org2Cloud/cloudShortId";
+import { useWorkStationTabs } from "@src/hooks/workStation";
 import i18n from "@src/i18n";
 import type { AgentDefinition } from "@src/modules/MainApp/AgentOrgs/types";
+import { openSessionInNewChatTabAtom } from "@src/store/chatPanel/chatPanelTabsAtom";
 import { SESSION_TARGET_KIND } from "@src/store/session";
 import type { SessionCreatorState } from "@src/store/session/creatorStateAtom";
 import {
-  CHAT_PANEL_CONTENT_MODE,
-  CHAT_PANEL_CREATE_TARGET,
-  type ChatPanelContentMode,
   type ChatPanelCreateProjectContext,
-  type ChatPanelCreateTarget,
   type ChatPanelSelectedProject,
-  type ChatPanelSelectedWorkItem,
 } from "@src/store/ui/chatPanelAtom";
+import { STATION_MODE, stationModeAtom } from "@src/store/ui/simulatorAtom";
 import type { WorkItemDraft } from "@src/store/workstation/projectManager";
+import { createWorkItemDetailTab } from "@src/store/workstation/tabs";
 import { getDispatchCategory } from "@src/util/session/sessionDispatch";
 
-const WORK_ITEM_DEFAULT_AGENT_DEF_ID = "builtin:work-item-manager";
+// Work Item Manager persona was retired; the generic OS Agent fills
+// the draft through the injected `org2-pm` CLI from its shell.
+const WORK_ITEM_DEFAULT_AGENT_DEF_ID = "builtin:os";
 const AI_WORK_ITEM_DEFAULT_TITLE = "AI Work Item Draft";
 
 interface AiWorkItemLaunchMetadata {
@@ -75,16 +75,10 @@ interface UseAiWorkItemCreatorOptions {
    */
   createProjectContext: ChatPanelCreateProjectContext | null;
   creatorState: SessionCreatorState;
-  dispatchClearSession: () => void;
   setActiveSessionId: (sessionId: string | null) => void;
-  setContentMode: (mode: ChatPanelContentMode) => void;
-  setCreateTarget: (target: ChatPanelCreateTarget) => void;
   setSelectedProject: (project: ChatPanelSelectedProject | null) => void;
-  setSelectedWorkItem: (workItem: ChatPanelSelectedWorkItem | null) => void;
-  setShowWorkItemAgentCreator: (enabled: boolean) => void;
   setWorkItemCreateDraft: (draft: WorkItemDraft | null) => void;
   setWorkstationActiveSessionId: (sessionId: string | null) => void;
-  sessionCreatorAvailable: boolean;
   workItemCreateDraft: WorkItemDraft | null;
 }
 
@@ -92,18 +86,15 @@ export function useAiWorkItemCreator({
   allAgentDefs,
   createProjectContext,
   creatorState,
-  dispatchClearSession,
   setActiveSessionId,
-  setContentMode,
-  setCreateTarget,
   setSelectedProject,
-  setSelectedWorkItem,
-  setShowWorkItemAgentCreator,
   setWorkItemCreateDraft,
   setWorkstationActiveSessionId,
-  sessionCreatorAvailable,
   workItemCreateDraft,
 }: UseAiWorkItemCreatorOptions) {
+  const openLaunchedSessionTab = useSetAtom(openSessionInNewChatTabAtom);
+  const setStationMode = useSetAtom(stationModeAtom);
+  const { openTab: openStationTab } = useWorkStationTabs();
   const resolveAiWorkItemAssignee = useCallback(
     (draft: WorkItemDraft): ResolvedAiWorkItemAssignee | null => {
       if (draft.assigneeType === "agent" && draft.assigneeId) {
@@ -197,7 +188,6 @@ export function useAiWorkItemCreator({
     const selectedProjectSlug = selectedProject?.slug ?? "";
     const selectedProjectId = selectedProject?.meta.id ?? draft.projectId ?? "";
     const selectedProjectName = selectedProject?.meta.name ?? "";
-    const now = new Date().toISOString();
     // Project-scoped ids go through the collab-aware allocator (design
     // §16.5): server counter under a collab-synced org, local counter
     // otherwise. Standalone work items have no project row, so they use
@@ -213,24 +203,21 @@ export function useAiWorkItemCreator({
       : await allocateCloudAwareStandaloneWorkItemId(standaloneOrgId);
     const title = draft.name.trim() || AI_WORK_ITEM_DEFAULT_TITLE;
     const description = draft.description.trim();
-    const frontmatter: WorkItemFrontmatter = {
-      id: shortId,
-      short_id: shortId,
+
+    // Canonical work.create: the Rust service owns row construction.
+    const request = {
       title,
-      project: selectedProjectId || undefined,
+      body: description,
+      projectId: selectedProjectId || undefined,
       status: draft.status || "planned",
       priority: draft.priority || "none",
       assignee: assignee.assigneeId,
-      assignee_type: assignee.assigneeType,
+      assigneeType: assignee.assigneeType,
       labels: draft.labelIds,
       milestone: draft.milestoneId,
-      start_date: draft.startDate,
-      target_date: draft.targetDate,
-      created_at: now,
-      updated_at: now,
-      starred: false,
-      todos: [],
-      orchestrator_config: {
+      startDate: draft.startDate,
+      targetDate: draft.targetDate,
+      orchestratorConfig: {
         ...(draft.orchestratorConfig ?? {
           review_enabled: false,
           follow_up_enabled: false,
@@ -245,32 +232,25 @@ export function useAiWorkItemCreator({
       schedule: draft.schedule ?? undefined,
     };
 
-    if (selectedProjectSlug) {
-      await projectApi.writeWorkItem(
-        selectedProjectSlug,
-        shortId,
-        frontmatter,
-        description
-      );
-    } else {
-      await projectApi.writeStandaloneWorkItem(
-        shortId,
-        frontmatter,
-        description,
-        standaloneOrgId ? { orgId: standaloneOrgId } : undefined
-      );
-    }
-
-    const item: WorkItemData = {
-      frontmatter,
-      body: description,
-      filename: `${shortId}.md`,
-    };
+    const item: WorkItemData = selectedProjectSlug
+      ? await projectApi.createWorkItem(selectedProjectSlug, shortId, request)
+      : await projectApi.createStandaloneWorkItem(
+          shortId,
+          request,
+          standaloneOrgId ? { orgId: standaloneOrgId } : undefined
+        );
 
     return {
       workItemId: shortId,
       projectSlug: selectedProjectSlug || undefined,
+      orgId: standaloneOrgId,
       agentRole: "custom" as const,
+      agentExecMode: "build",
+      // The draft-fill session runs OS Agent: it always carries
+      // run_shell, and the launch injects the org2-pm identity so the
+      // linked-work-item brief can be acted on. The item's assignee is
+      // unaffected — it stays whatever was resolved above.
+      agentDefinitionId: WORK_ITEM_DEFAULT_AGENT_DEF_ID,
       metadata: {
         shortId,
         projectSlug: selectedProjectSlug,
@@ -321,47 +301,46 @@ export function useAiWorkItemCreator({
           { linkedSessions: [linkedSession] }
         );
       } else {
-        // Same org scope as the creating write — an orgless rewrite would
-        // re-home the item to personal-org and detach it from collab sync.
-        await projectApi.writeStandaloneWorkItem(
+        // Partial update in the same org scope as the creating write — an
+        // orgless whole-row rewrite would re-home the item to personal-org
+        // and detach it from collab sync, and could race concurrent edits.
+        await projectApi.updateStandaloneWorkItemPartial(
           metadata.shortId,
-          updatedItem.frontmatter,
-          updatedItem.body,
+          { linkedSessions: [linkedSession] },
           metadata.orgId ? { orgId: metadata.orgId } : undefined
         );
       }
 
-      const workItem = workItemDataToUI(updatedItem, {
-        labelMap: new Map(),
-        memberMap: new Map(),
-      });
       setSelectedProject(null);
-      setSelectedWorkItem({
-        shortId: metadata.shortId,
-        projectSlug: metadata.projectSlug,
-        projectId: metadata.projectId,
-        projectName: metadata.projectName,
-        orgId: metadata.orgId,
-        workItem,
-      });
-      setShowWorkItemAgentCreator(sessionCreatorAvailable);
       setWorkItemCreateDraft(null);
-      setCreateTarget(CHAT_PANEL_CREATE_TARGET.AGENT_SESSION);
-      setContentMode(CHAT_PANEL_CONTENT_MODE.NON_SESSION);
-      dispatchClearSession();
-      setWorkstationActiveSessionId(null);
-      setActiveSessionId(null);
+      // Land the launched session in the LEFT chat panel as a normal session
+      // tab (the existing chat UX), and open the Work Item detail in the
+      // RIGHT station pane. The item filling in live stays visible beside
+      // the conversation instead of competing with it for the chat surface.
+      setActiveSessionId(info.sessionId);
+      setWorkstationActiveSessionId(info.sessionId);
+      openLaunchedSessionTab({ sessionId: info.sessionId });
+      setStationMode(STATION_MODE.MY_STATION);
+      openStationTab(
+        createWorkItemDetailTab(
+          metadata.projectId || undefined,
+          metadata.projectName || undefined,
+          metadata.shortId,
+          updatedItem.frontmatter.title || AI_WORK_ITEM_DEFAULT_TITLE,
+          metadata.projectSlug || undefined,
+          undefined,
+          undefined,
+          updatedItem.frontmatter.status
+        )
+      );
       await emit("orgii-data-changed");
     },
     [
-      dispatchClearSession,
-      sessionCreatorAvailable,
+      openLaunchedSessionTab,
+      openStationTab,
       setActiveSessionId,
-      setContentMode,
-      setCreateTarget,
       setSelectedProject,
-      setSelectedWorkItem,
-      setShowWorkItemAgentCreator,
+      setStationMode,
       setWorkItemCreateDraft,
       setWorkstationActiveSessionId,
     ]

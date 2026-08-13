@@ -18,6 +18,7 @@ import { invoke as invokeTauri } from "@tauri-apps/api/core";
 import { useAtomValue, useSetAtom } from "jotai";
 import { useCallback, useEffect, useRef } from "react";
 
+import { getCodeEditorWebSocket } from "@src/api/realtime/codeEditorWebSocket";
 import {
   getFileResolutions,
   getSession,
@@ -29,7 +30,6 @@ import {
 } from "@src/api/tauri/agent";
 import type { SnapshotRecord } from "@src/api/tauri/agent";
 import { beginTimelineBoundary } from "@src/engines/SessionCore/control/sessionTimelineBoundary";
-import { sortedEventsAtom } from "@src/engines/SessionCore/core/atoms/events";
 import { sessionIdAtom } from "@src/engines/SessionCore/core/atoms/metadata";
 import { createLogger } from "@src/hooks/logger";
 import { sessionRuntimeStatusAtom } from "@src/store/session/cliSessionStatusAtom";
@@ -53,8 +53,7 @@ import {
 
 const log = createLogger("useFileReview");
 
-const SNAPSHOT_REFRESH_INTERVAL_MS = 1_000;
-const SNAPSHOT_REFRESH_WINDOW_MS = 120_000;
+export const SNAPSHOT_PUSH_DEBOUNCE_MS = 100;
 
 // ============================================
 // Types
@@ -132,7 +131,6 @@ export function useFileReviewSync(
   const globalSessionId = useAtomValue(sessionIdAtom);
   const sessionId =
     sessionIdOverride === undefined ? globalSessionId : sessionIdOverride;
-  const events = useAtomValue(sortedEventsAtom);
   const runtimeStatus = useAtomValue(sessionRuntimeStatusAtom);
   const resetSignal = useAtomValue(fileReviewResetSignalAtom);
   const registerBatch = useSetAtom(registerFileChangesBatchAtom);
@@ -335,19 +333,25 @@ export function useFileReviewSync(
     };
   }, [sessionId, runtimeStatus, clearReview, registerBatch, enabled]);
 
-  // ── Phase 2: Event-triggered refresh — lightweight, no cleanup ──
-  // CLI tool chunks and file-history snapshots can arrive after React has
-  // already processed the corresponding chat event. Keep polling briefly so
-  // Undo All / Keep All appear without requiring session re-entry.
+  // ── Phase 2: Snapshot-created push — lightweight, no cleanup ──
+  // The backend emits only after the snapshot row commits. The active primary
+  // ChatView refreshes on any snapshot because a root review also aggregates
+  // snapshots created by its child sessions.
   useEffect(() => {
     if (!enabled || !hasSnapshotSupport(sessionId)) return;
 
     let cancelled = false;
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+    let refreshInFlight: Promise<void> | undefined;
+    let refreshAfterInFlight = false;
     const sid = sessionId;
-    const startedAt = Date.now();
 
-    const refreshSnapshots = () => {
-      fetchSnapshots(sid)
+    function refreshSnapshots() {
+      if (refreshInFlight) {
+        refreshAfterInFlight = true;
+        return;
+      }
+      refreshInFlight = fetchSnapshots(sid)
         .then(async (records) => {
           if (cancelled || records.length === 0) return;
           const hasPreMessageSnapshot = records.some(
@@ -374,23 +378,37 @@ export function useFileReviewSync(
           if (!cancelled) {
             log.warn("[useFileReviewSync] Snapshot refresh failed:", error);
           }
+        })
+        .finally(() => {
+          refreshInFlight = undefined;
+          if (refreshAfterInFlight && !cancelled) {
+            refreshAfterInFlight = false;
+            scheduleRefresh();
+          }
         });
-    };
+    }
 
-    refreshSnapshots();
-    const intervalId = window.setInterval(() => {
-      if (Date.now() - startedAt > SNAPSHOT_REFRESH_WINDOW_MS) {
-        window.clearInterval(intervalId);
-        return;
-      }
-      refreshSnapshots();
-    }, SNAPSHOT_REFRESH_INTERVAL_MS);
+    function scheduleRefresh() {
+      if (cancelled || debounceTimer) return;
+      debounceTimer = setTimeout(() => {
+        debounceTimer = undefined;
+        refreshSnapshots();
+      }, SNAPSHOT_PUSH_DEBOUNCE_MS);
+    }
+    const websocket = getCodeEditorWebSocket();
+    const unsubscribeSnapshot = websocket?.on(
+      "agent:snapshot_created",
+      scheduleRefresh
+    );
+    const unsubscribeConnected = websocket?.on("connected", scheduleRefresh);
 
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
+      unsubscribeSnapshot?.();
+      unsubscribeConnected?.();
+      if (debounceTimer) clearTimeout(debounceTimer);
     };
-  }, [events.length, sessionId, registerBatch, enabled]);
+  }, [sessionId, registerBatch, enabled]);
 }
 
 // ============================================

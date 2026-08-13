@@ -4,7 +4,10 @@
 //! Rust-agent launch service or the CLI launch bridge.
 
 use key_vault::{AuthMethod, ModelType};
-use project_management::projects::types::PERSONAL_ORG_ID;
+use project_management::projects::types::{
+    EnqueueWorkItemRunRequest, WorkItemRunTarget, WorkItemRunTargetSnapshot, WorkItemRunTrigger,
+    WorkspaceExecutionMode, PERSONAL_ORG_ID,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -27,7 +30,7 @@ pub const SESSION_CATEGORY_RUST_AGENT: &str = "rust_agent";
 /// process (Cursor CLI, Claude Code, Codex, Gemini, …).
 pub const SESSION_CATEGORY_CLI_AGENT: &str = "cli_agent";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionLaunchParams {
     /// "rust_agent" or "cli_agent"
@@ -47,6 +50,7 @@ pub struct SessionLaunchParams {
     /// CLI agent type (wire name: `platform`)
     pub platform: Option<String>,
     pub branch: Option<String>,
+    pub worktree_base_ref: Option<String>,
 
     // Market-specific
     pub hosted_token: Option<String>,
@@ -67,6 +71,11 @@ pub struct SessionLaunchParams {
     #[serde(default)]
     pub isolate: bool,
     pub mode: Option<String>,
+    /// Product mode (`orgtrack/v1` §5.2): `build | plan | ask | project`.
+    /// Distinct from `mode` (the runtime exec mode) — the launch-from-
+    /// work/routine resolver overrides this with `project` server-side.
+    #[serde(default)]
+    pub product_mode: Option<String>,
 
     // Project/collaboration org + work-item fields
     pub org_id: Option<String>,
@@ -84,6 +93,13 @@ pub struct SessionLaunchParams {
     /// backend does not derive them from content or session metadata.
     #[serde(default)]
     pub journey_topic_tags: Vec<String>,
+
+    /// Internal durable Work Item Run identity. Ordinary frontend launches
+    /// omit this; `session_launch_impl` creates and claims the Run before
+    /// materializing the Session. Recovery deliveries set it explicitly so
+    /// they never enqueue a second episode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub durable_run_id: Option<String>,
 
     /// Extra workspace folders granted at launch time (multi-root IDE
     /// workspaces). Each path is injected into the session's
@@ -122,21 +138,132 @@ pub struct SessionLaunchResult {
     pub project_slug: Option<String>,
     pub work_item_id: Option<String>,
     pub agent_role: Option<String>,
+    pub product_mode: Option<String>,
     pub worktree_path: Option<String>,
+    pub worktree_branch: Option<String>,
+    pub base_ref: Option<String>,
 }
 
 pub async fn session_launch_impl(
     state: &AgentAppState,
     org_store: Option<&AgentOrgsStore>,
-    params: SessionLaunchParams,
+    mut params: SessionLaunchParams,
 ) -> Result<SessionLaunchResult, String> {
+    validate_workspace_launch_fields(
+        params.isolate,
+        params.workspace_path.as_deref(),
+        params.worktree_path.as_deref(),
+        params.worktree_base_ref.as_deref(),
+    )?;
     let auto_name = derive_name(params.name.as_deref(), &params.content);
+
+    if params.work_item_id.is_some() && params.durable_run_id.is_none() {
+        let work_item_id = params.work_item_id.clone().unwrap_or_default();
+        let org_id = params
+            .org_id
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| PERSONAL_ORG_ID.to_string());
+        let mut target_snapshot =
+            WorkItemRunTargetSnapshot::new(WorkItemRunTarget::StartWorkItem {
+                account_id: params.account_id.clone(),
+                model_id: params.model.clone(),
+            });
+        target_snapshot.workspace_path = params.workspace_path.clone();
+        target_snapshot.workspace_mode = Some(
+            if params.isolate
+                || params
+                    .worktree_path
+                    .as_deref()
+                    .is_some_and(|path| !path.trim().is_empty())
+            {
+                WorkspaceExecutionMode::Worktree
+            } else {
+                WorkspaceExecutionMode::LocalWorkspace
+            },
+        );
+        target_snapshot.agent_definition_id = params.agent_definition_id.clone();
+        target_snapshot.agent_org_id = params.agent_org_id.clone();
+        let launch_snapshot = serde_json::to_value(&params)
+            .map_err(|err| format!("manual Work Item launch snapshot: {err}"))?;
+        let run = project_management::work_run_service::enqueue_for_inline_dispatch(
+            EnqueueWorkItemRunRequest {
+                project_slug: params.project_slug.clone(),
+                org_id,
+                work_item_id,
+                trigger: WorkItemRunTrigger::Manual,
+                target_snapshot,
+                input: serde_json::json!({
+                    "content": params.content.clone(),
+                    "displayText": params.content.clone(),
+                    "sessionLaunchParams": launch_snapshot,
+                }),
+                idempotency_key: format!("manual-launch:{}", uuid::Uuid::new_v4().simple()),
+                max_attempts: 3,
+                parent_run_id: None,
+            },
+        )?;
+        let worker_id = format!("inline_session_{}", uuid::Uuid::new_v4().simple());
+        let lease = project_management::work_run_service::claim_dispatch_for_run(
+            &run.id, &worker_id, 30_000,
+        )?;
+        params.durable_run_id = Some(run.id);
+
+        let result = match params.category.as_str() {
+            SESSION_CATEGORY_RUST_AGENT => {
+                launch_rust_agent(state, org_store, params, auto_name).await
+            }
+            SESSION_CATEGORY_CLI_AGENT => launch_cli_agent(params, auto_name).await,
+            other => Err(format!("Unknown session category: {other}")),
+        };
+        return match result {
+            Ok(result) => {
+                project_management::work_run_service::acknowledge_dispatch_started(
+                    &lease.dispatch_id,
+                    &lease.lease_token,
+                    &result.session_id,
+                )?;
+                Ok(result)
+            }
+            Err(err) => {
+                let _ = project_management::work_run_service::record_dispatch_failure(
+                    &lease.dispatch_id,
+                    &lease.lease_token,
+                    &err,
+                );
+                Err(err)
+            }
+        };
+    }
 
     match params.category.as_str() {
         SESSION_CATEGORY_RUST_AGENT => launch_rust_agent(state, org_store, params, auto_name).await,
         SESSION_CATEGORY_CLI_AGENT => launch_cli_agent(params, auto_name).await,
         other => Err(format!("Unknown session category: {other}")),
     }
+}
+
+fn validate_workspace_launch_fields(
+    isolate: bool,
+    workspace_path: Option<&str>,
+    worktree_path: Option<&str>,
+    worktree_base_ref: Option<&str>,
+) -> Result<(), String> {
+    let has_existing_worktree = worktree_path.is_some_and(|path| !path.trim().is_empty());
+    let has_base_ref = worktree_base_ref.is_some_and(|base| !base.trim().is_empty());
+
+    if (isolate || has_existing_worktree)
+        && workspace_path.is_none_or(|path| path.trim().is_empty())
+    {
+        return Err("Worktree mode requires workspacePath".to_string());
+    }
+    if isolate && has_existing_worktree {
+        return Err("isolate and worktreePath are mutually exclusive".to_string());
+    }
+    if has_base_ref && !isolate {
+        return Err("worktreeBaseRef requires isolate=true".to_string());
+    }
+    Ok(())
 }
 
 async fn launch_rust_agent(
@@ -148,7 +275,7 @@ async fn launch_rust_agent(
     let content = params.content.clone();
     let model = params.model.clone();
     let account_id = params.account_id.clone();
-    let branch = params.branch.clone();
+    let session_branch = params.branch.clone();
     let background = params.background;
     let target = match params
         .agent_org_id
@@ -179,7 +306,7 @@ async fn launch_rust_agent(
         WorkspaceLaunchTarget::Worktree {
             workspace_path,
             worktree_path: params.worktree_path.clone(),
-            branch: params.branch.clone(),
+            branch: params.worktree_base_ref.clone(),
             create_isolated: params.isolate,
             additional_directories: params.additional_directories.clone(),
         }
@@ -213,6 +340,7 @@ async fn launch_rust_agent(
         state,
         org_store,
         AgentRunLaunchRequest {
+            durable_run_id: params.durable_run_id.clone(),
             content: params.content,
             target,
             resources: LaunchResourceSelection {
@@ -225,6 +353,7 @@ async fn launch_rust_agent(
             org_context,
             provenance,
             mode: params.mode,
+            product_mode: params.product_mode,
             name: Some(name.clone()),
             images: params.images,
             ide_context: params.ide_context,
@@ -244,7 +373,7 @@ async fn launch_rust_agent(
         created_at: result.created_at,
         user_input: content,
         workspace_path: result.workspace_path,
-        branch,
+        branch: result.worktree_branch.clone().or(session_branch),
         background,
         model,
         cli_agent_type: None,
@@ -257,7 +386,10 @@ async fn launch_rust_agent(
         project_slug: result.project_slug,
         work_item_id: result.work_item_id,
         agent_role: result.agent_role,
+        product_mode: result.product_mode,
         worktree_path: result.worktree_path,
+        worktree_branch: result.worktree_branch,
+        base_ref: result.base_ref,
     })
 }
 
@@ -315,7 +447,7 @@ async fn launch_cli_agent(
     let model = params.model.clone();
     let account_id = params.account_id.clone();
     let background = params.background;
-    let branch = params.branch.clone();
+    let session_branch = params.branch.clone();
     let workspace_path = params.workspace_path.clone();
 
     let org_id = params
@@ -345,6 +477,8 @@ async fn launch_cli_agent(
         account_id: params.account_id,
         repo_path: params.workspace_path,
         branch: params.branch,
+        worktree_path: params.worktree_path,
+        worktree_base_ref: params.worktree_base_ref,
         hosted_token: params.hosted_token,
         isolate: params.isolate,
         worktree_path: params.worktree_path.clone(),
@@ -359,6 +493,8 @@ async fn launch_cli_agent(
         project_slug: project_slug.clone(),
         work_item_id: work_item_id.clone(),
         agent_role: agent_role.clone(),
+        product_mode: params.product_mode.clone(),
+        durable_run_id: params.durable_run_id.clone(),
         user_input: params.content,
         ide_context: params.ide_context,
         mode: params.mode,
@@ -368,6 +504,10 @@ async fn launch_cli_agent(
     let outcome = launch_cli_agent(bridge_params).await?;
     let session_id = outcome.session_id;
     let created_at = outcome.created_at;
+    let workspace_path = outcome.workspace_path.or(workspace_path);
+    let worktree_path = outcome.worktree_path;
+    let worktree_branch = outcome.worktree_branch;
+    let base_ref = outcome.base_ref;
 
     Ok(SessionLaunchResult {
         session_id,
@@ -377,7 +517,7 @@ async fn launch_cli_agent(
         created_at,
         user_input: content,
         workspace_path,
-        branch,
+        branch: worktree_branch.clone().or(session_branch),
         background,
         model,
         cli_agent_type: Some(platform),
@@ -390,7 +530,10 @@ async fn launch_cli_agent(
         project_slug,
         work_item_id,
         agent_role,
-        worktree_path: None,
+        product_mode: params.product_mode,
+        worktree_path,
+        worktree_branch,
+        base_ref,
     })
 }
 
@@ -412,4 +555,46 @@ fn derive_name(explicit: Option<&str>, content: &str) -> String {
         boundary -= 1;
     }
     format!("{}...", &trimmed[..boundary])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_workspace_launch_fields;
+
+    #[test]
+    fn workspace_launch_rejects_fresh_and_existing_worktree_together() {
+        let error =
+            validate_workspace_launch_fields(true, Some("/repo"), Some("/repo/worktree"), None)
+                .expect_err("fresh and existing modes must be exclusive");
+        assert!(error.contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn workspace_launch_rejects_base_ref_without_isolation() {
+        let error = validate_workspace_launch_fields(false, Some("/repo"), None, Some("develop"))
+            .expect_err("a base ref only applies to fresh worktrees");
+        assert!(error.contains("requires isolate=true"));
+    }
+
+    #[test]
+    fn workspace_launch_accepts_all_three_supported_modes() {
+        assert!(validate_workspace_launch_fields(false, Some("/repo"), None, None).is_ok());
+        assert!(
+            validate_workspace_launch_fields(true, Some("/repo"), None, Some("develop")).is_ok()
+        );
+        assert!(validate_workspace_launch_fields(
+            false,
+            Some("/repo"),
+            Some("/repo/worktree"),
+            None
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn workspace_launch_rejects_worktree_mode_without_workspace_root() {
+        let error = validate_workspace_launch_fields(true, None, None, None)
+            .expect_err("worktree mode needs a repository root");
+        assert!(error.contains("requires workspacePath"));
+    }
 }

@@ -46,7 +46,8 @@
     "projectManager": "Project Manager",
     "diff": "Diff",
     "colleagues": "Коллеги",
-    "terminals": "Терминалы"
+    "terminals": "Терминалы",
+    "environment": "Окружение"
   },
   "trajectoryPanel": {
     "title": "Траектория",
@@ -60,15 +61,9 @@
     "startSession": "Начать сессию",
     "sessions": "Session",
     "selectProject": "Выбрать Project",
-    "startPage": "Главная страница",
     "inbox": "Входящие",
     "login": "Вход",
     "setup": "Настройка",
-    "devJourney": "Dev Journey",
-    "devRecord": "Журнал разработки",
-    "gitDashboard": "Git Панель",
-    "devActivity": "Dev Активность",
-    "usageHistory": "История использования",
     "tokenMarket": "Token маркет",
     "taskMarket": "Рынок задач",
     "channels": "Каналы",
@@ -84,20 +79,8 @@
     "ideaArea": "Пространство идей",
     "changelog": "Журнал изменений"
   },
-  "appGrid": {
-    "customizeGrid": "Настроить сетку",
-    "horizontalGap": "Горизонтальный интервал",
-    "verticalGap": "Вертикальный интервал",
-    "resetToDefault": "Сбросить по умолчанию"
-  },
-  "greetings": {
-    "morning": "Доброе утро",
-    "afternoon": "Добрый день",
-    "evening": "Добрый вечер"
-  },
   "sidebar": {
     "tabs": {
-      "build": "Главная",
       "workstation": "Workstation",
       "manage": "Управление",
       "core": "Ядро",
@@ -133,9 +116,7 @@
     "actions": {
       "addNew": "Добавить новое",
       "collapseAll": "Свернуть все",
-      "markAllRead": "Отметить все как прочитанные",
-      "openHome": "Открыть Home",
-      "openWorkstation": "Открыть Workstation"
+      "markAllRead": "Отметить все как прочитанные"
     },
     "search": {
       "folders": "Искать в рабочей области...",
@@ -158,7 +139,8 @@
       "workstation": "Рабочая станция",
       "viewRam": "Показать RAM",
       "tutorials": "Обучение",
-      "openSettings": "Открыть настройки"
+      "openSettings": "Открыть настройки",
+      "setupChecklist": "Быстрая настройка"
     },
     "empty": {
       "noItems": "Нет элементов",
@@ -181,6 +163,37 @@
       "duration1h": "1 час",
       "duration2h": "2 часа",
       "durationTomorrow": "Завтра"
+    },
+    "guide": {
+      "trigger": "Открыть руководство",
+      "title": "Начало работы с ORGII",
+      "startSession": "Начать сессию",
+      "quickSetup": "Язык и внешний вид",
+      "close": "Закрыть руководство",
+      "progressLabel": "Выполнено {{completed}} из {{total}} шагов",
+      "localWorkspace": "Локальное рабочее пространство",
+      "connectOrganization": "Подключить или создать организацию",
+      "createOrganizationHint": "Введите название организации и нажмите «Создать». После создания облачной организации руководство перейдёт к следующему шагу.",
+      "inviteTeammate": "Пригласить участника команды",
+      "inviteTeammateHint": "Создайте здесь ссылку-приглашение и отправьте её участнику команды.",
+      "invitePermissionHint": "Здесь можно просмотреть список участников. Приглашение должен создать администратор или владелец организации.",
+      "devPanelTitle": "Тестовые состояния onboarding",
+      "devPanelHint": "Временный предпросмотр сценария приглашения. Данные организации на сервере не изменяются.",
+      "devScenarioLive": "Реальные данные",
+      "devScenarioNoOrganization": "Нет организации",
+      "devScenarioMember": "Участник · без права приглашать",
+      "devScenarioAdmin": "Администратор · может приглашать",
+      "devScenarioOwner": "Владелец · может приглашать",
+      "devScenarioRequiresOrganization": "Для предпросмотра ролей нужна хотя бы одна реальная облачная организация.",
+      "devSimulationActive": "Симуляция разработки активна",
+      "devSimulationReadOnly": "Предпросмотр страницы участников доступен только для чтения. Действия управления отключены.",
+      "viewTeamActivity": "Просмотреть использование команды",
+      "viewTeamActivityHint": "Runtime открыт на вкладке «Участники». Выберите участника, чтобы посмотреть использование Codex, Claude и Cursor. Если данных нет, сначала включите синхронизацию командного Runtime.",
+      "exploreProduct": "Обзор основных страниц",
+      "nextStep": "Следующий шаг"
+    },
+    "developerTestPanel": {
+      "title": "Панель тестирования разработки"
     }
   },
   "myRole": {
@@ -357,22 +370,13 @@
       "projects": "Проекты"
     }
   },
-  "changelog": {
-    "title": "Журнал изменений",
-    "subtitle": "Обновления продукта",
-    "commitCount": "{{count}} коммитов",
-    "commitCount_one": "{{count}} коммит",
-    "details": "Подробности",
-    "frontend": "Frontend",
-    "backend": "Backend"
-  },
   "collaboration": {
     "switchOrg": "Сменить ORG",
     "addOrg": "Добавить ORG",
     "createOrg": "Создать",
     "joinOrg": "Присоединиться",
     "orgSource": "Источник организации",
-    "localOrg": "Local",
+    "localOrg": "Локально",
     "orgName": "Название ORG",
     "orgNamePlaceholder": "Team Alpha",
     "inviteCode": "Ссылка или код приглашения",
@@ -397,7 +401,11 @@
       "forkSetupNoWorkspace": "Continue without a workspace",
       "forkSetupAccount": "Account",
       "forkSetupModel": "Model",
-      "forkSetupContinue": "Fork & continue"
+      "forkSetupContinue": "Fork & continue",
+      "forkSnapshotIncomplete": "The cloud snapshot is incomplete. Ask the owner to finish syncing, then retry.",
+      "forkAgentUnavailable": "Choose a local agent before forking.",
+      "forkBackendRegistrationFailed": "The session history was copied, but the runnable fork could not be registered. Retry.",
+      "forkReplayUnavailable": "Full replay is not available for this session. Ask the owner to share the replay, then retry."
     },
     "repoPicker": {
       "loading": "Loading repos…",
@@ -418,7 +426,22 @@
       "sendFailed": "Форк создан, но сообщение не отправилось — текст восстановлен в поле ввода",
       "forkedChipTooltip": "Форк от {{name}}",
       "sourceChipTooltip": "Shared by {{name}}",
-      "continuePlaceholder": "Message to fork and continue in ORGII…"
+      "continuePlaceholder": "Message to fork and continue in ORGII…",
+      "snapshotError": "The cloud snapshot is incomplete. Ask the owner to finish syncing, then retry.",
+      "agentError": "Choose a local agent before forking.",
+      "backendError": "The session history was copied, but the runnable fork could not be registered. Retry.",
+      "parentOpenUnavailable": "The source session could not be opened from this fork.",
+      "replayError": "Full replay is not available for this session. Ask the owner to share the replay, then retry.",
+      "openParentButton": "Открыть исходную сессию от {{name}}"
+    },
+    "continueCli": {
+      "headerButton": "Продолжить в {{agent}}",
+      "headerTooltip": "Снова открыть эту сессию в {{agent}} во вкладке терминала ({{command}})",
+      "notInstalled": "{{agent}} не установлен на этом компьютере",
+      "missingWorkspace": "Исходная папка сессии не найдена — {{agent}} может возобновить её только из этой папки",
+      "sourceMissing": "Исходные данные сессии больше не находятся на диске",
+      "launchFailed": "Не удалось открыть терминал {{agent}}",
+      "composerPlaceholder": "Напишите, чтобы продолжить в новой сессии ORGII — или возобновите в {{agent}} через кнопку в шапке…"
     }
   },
   "cloud": {
@@ -465,7 +488,61 @@
       "retentionUpgrade": "Эта сессия вне окна реплея вашего плана — обновите план, чтобы её открыть",
       "importError": "Не удалось импортировать сессию",
       "manageBilling": "Manage billing",
-      "manageBillingNote": "Cancel or change your plan in the billing portal"
+      "manageBillingNote": "Cancel or change your plan in the billing portal",
+      "aboutMeTitle": "Обо мне",
+      "sync": {
+        "tabTitle": "Синхронизация",
+        "connectionTitle": "Подключение",
+        "endpointLabel": "Эндпоинт бэкенда",
+        "endpointOfficial": "Управляемый ORG2 Cloud",
+        "endpointCustom": "Собственное развёртывание",
+        "endpointUnknown": "Неизвестно",
+        "signedInLabel": "Выполнен вход как",
+        "signedOut": "Вход не выполнен",
+        "signedOutHint": "Войдите в ORG2 Cloud, чтобы увидеть данные аккаунта и возможностей",
+        "tokenExpiresLabel": "Токен доступа истекает",
+        "tokenExpired": "Истёк — войдите снова",
+        "schemaLabel": "Схема бэкенда",
+        "schemaChecking": "Проверка…",
+        "schemaMatched": "Совпадает (v{{version}})",
+        "schemaMismatch": "Несовпадение — бэкенд v{{backend}}, приложение ожидает v{{expected}}",
+        "schemaUnknown": "Не удалось прочитать версию схемы бэкенда",
+        "capabilitiesLabel": "Возможности бэкенда",
+        "capabilitiesChecking": "Проверка…",
+        "capabilitiesUnavailable": "Недоступно",
+        "capabilityEnabled": "вкл",
+        "capabilityDisabled": "выкл",
+        "capability": {
+          "broadcastSignals": "Сигналы в реальном времени",
+          "storageSegments": "Сегменты хранилища повторов",
+          "homeEndpoints": "Региональные эндпоинты",
+          "teamInboxMentions": "Упоминания во входящих команды",
+          "memberRuntime": "Общий доступ к среде выполнения команды"
+        },
+        "lastSyncTitle": "Последняя синхронизация",
+        "lastSyncLabel": "Последняя успешная синхронизация",
+        "lastSyncNever": "Синхронизации не было",
+        "lastAttemptLabel": "Последняя попытка",
+        "manualLabel": "Запустить проход синхронизации сейчас",
+        "manualAction": "Синхронизировать",
+        "manualRunning": "Синхронизация…",
+        "manualSuccess": "Синхронизация завершена",
+        "manualError": "Ошибка синхронизации: {{message}}",
+        "coverageTitle": "Охват сессий",
+        "coverageSummary": "Синхронизировано {{synced}}/{{syncable}} ({{percent}} %)",
+        "coveragePercentLabel": "Охват",
+        "coverageEmpty": "В областях репозиториев этой организации пока нет сессий",
+        "logsTitle": "Журнал синхронизации",
+        "logsHelp": "Недавние события синхронизации на этом устройстве. Очищаются при перезапуске и никогда не выгружаются",
+        "logsEmpty": "События синхронизации пока не записаны",
+        "logsClear": "Очистить",
+        "logsCopy": "Копировать",
+        "logsCopied": "Скопировано",
+        "logsOrg": "организация {{orgId}}",
+        "levelInfo": "Информация",
+        "levelWarn": "Предупреждение",
+        "levelError": "Ошибка"
+      }
     },
     "sidebar": {
       "teamSessions": "Сессии команды",
@@ -481,7 +558,12 @@
       "viewerOverflow": "и ещё {{count}} смотрят",
       "memberViewing": "смотрит: {{title}}",
       "viewerOverflow_one": "and 1 more viewer",
-      "viewerOverflow_other": "and {{count}} more viewers"
+      "viewerOverflow_other": "and {{count}} more viewers",
+      "mySessions": "Мои сессии",
+      "copyId": "Копировать ID",
+      "loadingSession": "Загрузка сессии…",
+      "downloadProgress": "Скачивание… {{percent}}%",
+      "downloadProgressEta": "Скачивание… {{percent}}% · осталось ~{{eta}}"
     },
     "sync": {
       "quotaExceededToast": "Синхронизация ORG2 Cloud приостановлена: квота плана этой организации исчерпана",
@@ -532,7 +614,9 @@
         "stateExhausted": "Исчерпано",
         "linkOneTimeNote": "Скопируйте сейчас — ссылка показывается на этом устройстве только один раз.",
         "copyLink": "Скопировать ссылку",
-        "copied": "Скопировано"
+        "copied": "Скопировано",
+        "createTitle": "Новое приглашение",
+        "historyTitle": "Предыдущие приглашения"
       },
       "members": {
         "roleChangeTitle": "Изменить роль",
@@ -544,7 +628,8 @@
         "youTag": "Вы",
         "ownerTag": "Владелец",
         "floorOff": "Без минимума",
-        "floorTooltip": "Минимальный уровень доступа для этого участника. Действует более строгий из этого и общеорганизационного минимума."
+        "floorTooltip": "Минимальный уровень доступа для этого участника. Действует более строгий из этого и общеорганизационного минимума.",
+        "floorOrgMinimum": "Минимум организации ({{mode}})"
       },
       "leave": {
         "action": "Покинуть организацию",
@@ -585,7 +670,7 @@
         "joinedFallbackToast": "Вы присоединились к облачной организации"
       },
       "create": {
-        "sourceCloud": "ORG2 Cloud (управляемый)",
+        "sourceCloud": "Облако",
         "signInFirst": "Войдите в ORG2 Cloud, чтобы создать управляемую организацию или присоединиться к ней.",
         "openSettings": "Открыть настройки входа",
         "createdToast": "Облачная организация создана"
@@ -602,7 +687,9 @@
         "inviteInvalid": "Этот код приглашения недействителен.",
         "inviteRevoked": "Это приглашение отозвано.",
         "inviteExpired": "Срок действия приглашения истёк.",
-        "inviteExhausted": "У этого приглашения не осталось использований."
+        "inviteExhausted": "У этого приглашения не осталось использований.",
+        "alreadyMember": "Вы уже участник этой организации.",
+        "network": "Не удалось подключиться к облачному сервису. Проверьте сеть и повторите попытку."
       }
     },
     "defaultAccess": {
@@ -620,7 +707,8 @@
       "visibilityOrg": "Вся организация",
       "visibilityRestricted": "Только я",
       "taggedNote": "Эта сессия перемещена в организацию, поэтому, пока стоит метка, она передаёт как минимум метаданные.",
-      "floorNote": "Администратор организации требует делиться минимум на уровне {{mode}}."
+      "floorNote": "Администратор организации требует делиться минимум на уровне {{mode}}.",
+      "orgMinimumOption": "Минимум организации ({{mode}})"
     },
     "share": {
       "menuItem": "Облачный доступ…",
@@ -651,7 +739,14 @@
       "importPasteClipboard": "Вставить из буфера обмена",
       "importSubmit": "Импортировать",
       "importInvalidInput": "Это не похоже на действительную ссылку для доступа или токен.",
-      "selectAll": "Все ({{count}})"
+      "selectAll": "Все ({{count}})",
+      "incomingEndpointMismatch": "Этот ресурс относится к другому пользовательскому облаку. Настройте его адрес перед импортом.",
+      "incomingConnectionError": "Не удалось подключиться к облачному сервису. Проверьте сеть и повторите попытку.",
+      "incomingIncompatibleError": "Облако вернуло несовместимый ответ. Обновите ORGII или проверьте развёртывание.",
+      "incomingServerError": "Облачный сервис не смог обработать этот ресурс. Повторите попытку.",
+      "incomingAlreadyOnDevice": "Эта сессия уже есть на устройстве. Откройте оригинал вместо импорта копии.",
+      "incomingOpenExisting": "Открыть сессию",
+      "incomingRetry": "Повторить"
     },
     "agentRunner": {
       "title": "Раннер задач агента",
@@ -677,7 +772,8 @@
         "openBadge_one": "Задач агента в ожидании: {{count}}",
         "openBadge": "Задач агента в ожидании: {{count}}",
         "activeBadge_one": "Агентов работает над этой сессией: {{count}}",
-        "activeBadge": "Агентов работает над этой сессией: {{count}}"
+        "activeBadge": "Агентов работает над этой сессией: {{count}}",
+        "mentionSuggestion": "Назначить этот комментарий агенту"
       },
       "toggleLabel": "Комментарии",
       "notesButton": "Заметки сессии",
@@ -715,7 +811,9 @@
       "addressConfirm_other": "Обработать {{count}} комментариев",
       "agentAuthor": "Агент @{{name}}",
       "addressSessionScope": "Session notes",
-      "addressRoundScope": "Round comments"
+      "addressRoundScope": "Round comments",
+      "mentionMembers": "Упомянуть",
+      "searchMembers": "Поиск участников"
     },
     "sharingFloor": {
       "label": "Минимальный уровень доступа",
@@ -725,6 +823,165 @@
     },
     "billing": {
       "openFailed": "Couldn't open billing. Please try again."
+    },
+    "signedInAs": "Выполнен вход как {{name}}",
+    "sessionExpired": "Сеанс ORG2 Cloud истёк. Войдите снова, чтобы продолжить.",
+    "sessionRef": {
+      "chipLabel": "Сессия команды",
+      "notMember": "Вы не являетесь участником организации, которой принадлежит эта сессия.",
+      "signInRequired": "Войдите в ORG2 Cloud, чтобы открыть эту сессию.",
+      "sessionNotFound": "Эта сессия не принадлежит этой организации.",
+      "notPublished": "Поделитесь этой сессией с организацией, прежде чем копировать ссылку на неё.",
+      "chooseOrg": "Эта сессия принадлежит нескольким организациям. Переключитесь на нужную организацию и скопируйте ссылку ещё раз.",
+      "opening": "Открытие командной сессии…"
+    },
+    "renameDisplayName": "Изменить отображаемое имя",
+    "renameSaved": "Отображаемое имя обновлено",
+    "renameFailed": "Не удалось обновить отображаемое имя",
+    "download": {
+      "title": "Скачивание командной сессии…",
+      "events": "{{loaded}} / {{total}} событий",
+      "eta": "Осталось около {{eta}}",
+      "finalizing": "Завершение…",
+      "complete": "Загрузка завершена",
+      "estimate": "В этой сессии {{count}} событий для загрузки (около {{eta}})",
+      "start": "Скачать",
+      "pause": "Пауза",
+      "paused": "Приостановлено",
+      "resume": "Возобновить"
+    },
+    "channels": {
+      "title": "Каналы",
+      "createAction": "Создать канал",
+      "createFirst": "Создать канал",
+      "manageMembers": "Управление участниками",
+      "archiveAction": "Архивировать канал",
+      "unarchive": "Разархивировать",
+      "unarchiveFailed": "Не удалось разархивировать канал",
+      "deleteAction": "Удалить канал",
+      "leave": "Покинуть канал",
+      "archivedGroup": "В архиве",
+      "loadError": "Не удалось загрузить каналы",
+      "settings": {
+        "action": "Настройки канала",
+        "title": "Настройки #{{name}}",
+        "submit": "Сохранить",
+        "managerRequired": "Изменять канал могут только его менеджеры",
+        "error": "Не удалось обновить канал. Попробуйте ещё раз."
+      },
+      "local": {
+        "quotaExceeded": "Достигнут лимит каналов на этом устройстве",
+        "archiveBody": "После архивирования канал скрывается из боковой панели. История сохраняется, и канал можно разархивировать позже",
+        "deleteWarning": "Канал будет безвозвратно удалён с этого устройства. Это действие нельзя отменить"
+      },
+      "cancel": "Отмена",
+      "create": {
+        "title": "Создать канал",
+        "nameLabel": "Название",
+        "namePlaceholder": "например, code-review",
+        "topicLabel": "Тема",
+        "topicOptional": "(необязательно)",
+        "topicPlaceholder": "О чём этот канал?",
+        "visibilityLabel": "Видимость",
+        "publicTitle": "Открытый",
+        "publicDesc": "Любой участник организации может видеть обсуждение и присоединиться",
+        "privateTitle": "Закрытый",
+        "privateDesc": "Только приглашённые участники могут видеть этот канал",
+        "membersLabel": "Добавить участников",
+        "membersHint": "Вы автоматически станете менеджером канала",
+        "membersLoading": "Загрузка участников…",
+        "membersEmpty": "В организации пока нет других участников",
+        "postPolicyLabel": "Кто может писать",
+        "postPolicyEveryone": "Все",
+        "postPolicyManagers": "Только менеджеры канала",
+        "submit": "Создать",
+        "nameTaken": "Это название уже занято",
+        "quotaExceeded": "Организация достигла лимита каналов",
+        "error": "Не удалось создать канал. Попробуйте ещё раз."
+      },
+      "archive": {
+        "title": "Архивировать #{{name}}?",
+        "body": "После архивирования канал скрывается из боковой панели у всех. История сохраняется, и канал можно разархивировать позже",
+        "confirm": "Архивировать",
+        "managerRequired": "Архивировать канал могут только его менеджеры",
+        "error": "Не удалось архивировать канал. Попробуйте ещё раз."
+      },
+      "delete": {
+        "title": "Удалить #{{name}}?",
+        "warning": "Канал будет безвозвратно удалён для всех. Это действие нельзя отменить",
+        "acknowledge": "Да, удалить канал навсегда",
+        "confirm": "Удалить",
+        "adminRequired": "Удалять каналы могут только администраторы организации",
+        "error": "Не удалось удалить канал. Попробуйте ещё раз."
+      },
+      "members": {
+        "title": "Участники #{{name}}",
+        "loading": "Загрузка участников…",
+        "empty": "В этом канале пока нет участников",
+        "loadError": "Не удалось загрузить участников канала. Попробуйте ещё раз.",
+        "managerBadge": "Менеджер",
+        "you": "Вы",
+        "addLabel": "Добавить участников",
+        "addEmpty": "Все участники организации уже в этом канале",
+        "addSubmit": "Добавить",
+        "actions": "Действия с участником",
+        "remove": "Удалить из канала",
+        "makeManager": "Назначить менеджером канала",
+        "removeManager": "Снять роль менеджера канала",
+        "leave": "Покинуть канал",
+        "lastManager": "Сначала назначьте другого менеджера",
+        "error": "Что-то пошло не так. Попробуйте ещё раз."
+      },
+      "feed": {
+        "composerPlaceholder": "Написать в #{{name}}",
+        "save": "Сохранить",
+        "edit": "Изменить сообщение",
+        "delete": "Удалить сообщение",
+        "edited": "(изменено)",
+        "deletedMessage": "сообщение удалено",
+        "today": "Сегодня",
+        "yesterday": "Вчера",
+        "you": "Вы",
+        "memberCount": "участников: {{memberCount}}",
+        "emptyTitle": "Это начало канала #{{name}}",
+        "emptySubtitle": "Отправьте первое сообщение, чтобы начать разговор",
+        "missingTitle": "Канал больше недоступен",
+        "missingSubtitle": "Этот канал был удалён с этого устройства",
+        "cloudPendingTitle": "Сообщений пока нет",
+        "cloudPendingSubtitle": "История облачных каналов появится со следующим обновлением бэкенда",
+        "cloudComposerDisabled": "Отправка сообщений в облачные каналы пока недоступна — в этот выпуск вошли только создание каналов и управление участниками. Отправка появится со следующим обновлением бэкенда",
+        "errorEmpty": "Сначала введите сообщение",
+        "errorTooLong": "Сообщение слишком длинное (максимум 4000 символов)",
+        "errorQuota": "В этом канале на этом устройстве достигнут лимит сообщений",
+        "errorGeneric": "Не удалось отправить сообщение. Попробуйте ещё раз.",
+        "dropSessionHint": "Отпустите, чтобы добавить эту сессию как ссылку",
+        "messageBodyLabel": "Сообщение канала",
+        "sessionCardMissing": "Недоступно на этом устройстве",
+        "sessionCardOpen": "Открыть сессию {{name}}",
+        "workItemCardMissing": "Недоступно на этом устройстве",
+        "workItemCardLoading": "Загрузка…",
+        "workItemCardOpen": "Открыть рабочую задачу {{name}}",
+        "githubCardOpen": "Открыть {{name}} на GitHub",
+        "githubIssue": "Issue",
+        "githubPullRequest": "Pull request",
+        "archivedComposerDisabled": "Этот канал в архиве. Разархивируйте его, чтобы писать.",
+        "errorPostForbidden": "Писать в этот канал могут только его менеджеры",
+        "errorArchived": "Канал архивирован, поэтому отправка отключена",
+        "errorChannelFull": "Канал достиг лимита сообщений, поэтому отправка отключена",
+        "errorChannelMissing": "Этот канал больше недоступен",
+        "errorMessageMissing": "Это сообщение больше недоступно",
+        "loadError": "Не удалось загрузить сообщения",
+        "loadingMessages": "Загрузка сообщений…",
+        "loadOlder": "Загрузить предыдущие сообщения",
+        "unknownAuthor": "Участник команды"
+      }
+    },
+    "backgroundUpload": {
+      "label": "Фоновая отправка",
+      "help": "Отправляет подходящие сессии участников в фоне согласно минимальному уровню общего доступа организации и настройкам сессии, даже когда организация неактивна.",
+      "on": "Вкл",
+      "off": "Выкл",
+      "memberNote": "Включено администратором — подходящие сессии отправляются в фоне без необходимости открывать эту организацию."
     }
   }
 }

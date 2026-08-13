@@ -20,12 +20,6 @@ interface CapturedButtonProps {
   onClick?: () => void | Promise<void>;
 }
 
-interface CapturedCheckboxProps {
-  children?: ReactNode;
-  checked?: boolean;
-  onChange?: (checked: boolean) => void;
-}
-
 interface CapturedModalProps {
   children?: ReactNode;
   footer?: ReactNode;
@@ -34,6 +28,7 @@ interface CapturedModalProps {
 
 const mocks = vi.hoisted(() => ({
   check: vi.fn(),
+  getBuildProvenance: vi.fn(),
   getVersion: vi.fn(),
   messageError: vi.fn(),
   messageInfo: vi.fn(),
@@ -45,10 +40,8 @@ const mocks = vi.hoisted(() => ({
   storeValues: new Map<unknown, unknown>(),
   useAtom: vi.fn(),
   useAtomValue: vi.fn(),
-  setAutoUpdateEnabled: vi.fn(),
   setInstallPromptVisible: vi.fn(),
   buttons: [] as CapturedButtonProps[],
-  checkbox: null as CapturedCheckboxProps | null,
   modal: null as CapturedModalProps | null,
 }));
 
@@ -66,7 +59,6 @@ vi.mock("react-i18next", () => ({
     t: (key: string, values?: { version?: string }) => {
       const labels: Record<string, string> = {
         "common:actions.later": "Later",
-        "update.autoDownloadUpdates": "Automatically download future updates",
         "update.installAndRestart": "Install and restart",
         "update.installConfirmDesc": `Version ${values?.version ?? ""} is ready.`,
         "update.installConfirmTitle": "Update ready to install",
@@ -94,16 +86,6 @@ vi.mock("@src/components/Button", async () => {
   };
 });
 
-vi.mock("@src/components/Checkbox", async () => {
-  const React = await import("react");
-  return {
-    default: (props: CapturedCheckboxProps) => {
-      mocks.checkbox = props;
-      return React.createElement("label", null, props.children);
-    },
-  };
-});
-
 vi.mock("@src/scaffold/ModalSystem", async () => {
   const React = await import("react");
   return {
@@ -125,6 +107,11 @@ vi.mock("@tauri-apps/api/app", () => ({
 
 vi.mock("./channelCheck", () => ({
   checkAppUpdateOnChannel: mocks.check,
+}));
+
+vi.mock("./buildProvenance", () => ({
+  getAppBuildProvenance: mocks.getBuildProvenance,
+  resetAppBuildProvenanceForTests: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/plugin-process", () => ({
@@ -172,7 +159,6 @@ describe("AppUpdater", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.buttons.length = 0;
-    mocks.checkbox = null;
     mocks.modal = null;
     mocks.storeValues.clear();
     mocks.storeGet.mockImplementation((target) =>
@@ -182,13 +168,17 @@ describe("AppUpdater", () => {
       mocks.storeValues.set(target, value);
     });
     mocks.getVersion.mockResolvedValue("1.1.21");
+    mocks.getBuildProvenance.mockResolvedValue({
+      kind: "release",
+      gitRef: "release/1.1.21",
+      gitSha: "test-release-sha",
+      installStrategy: "inPlace",
+    });
     resetAppUpdaterForTests();
   });
 
   function renderPreparedUpdate(update: Update): string {
-    mocks.useAtom
-      .mockReturnValueOnce([true, mocks.setAutoUpdateEnabled])
-      .mockReturnValueOnce([true, mocks.setInstallPromptVisible]);
+    mocks.useAtom.mockReturnValueOnce([true, mocks.setInstallPromptVisible]);
     mocks.useAtomValue
       .mockReturnValueOnce(update)
       .mockReturnValueOnce({ active: false })
@@ -217,6 +207,27 @@ describe("AppUpdater", () => {
         title: "Update available",
       })
     );
+  });
+
+  it("offers an update-now action on the available-update notice", async () => {
+    const update = createUpdate();
+    mocks.check.mockResolvedValue(update);
+
+    await checkForUpdatesManually();
+
+    const checkNotices = mocks.messageInfo.mock.calls
+      .filter(([message]) => message?.id === "app-update-check")
+      .map(([message]) => message);
+    const availableNotice = checkNotices[checkNotices.length - 1];
+
+    expect(availableNotice).toEqual(
+      expect.objectContaining({
+        title: "Update available",
+        content: "Version 1.1.22 is ready to install.",
+        action: expect.objectContaining({ label: "Update now" }),
+      })
+    );
+    expect(typeof availableNotice?.action?.onClick).toBe("function");
   });
 
   it("clears a stale available update after a failed manual check", async () => {
@@ -315,6 +326,13 @@ describe("AppUpdater", () => {
     await checkForUpdatesManually();
 
     const pendingDownload = installAvailableAppUpdate();
+    await vi.waitFor(() => {
+      expect(
+        mocks.messageInfo.mock.calls.some(
+          ([message]) => message.id === "app-update-progress"
+        )
+      ).toBe(true);
+    });
     const progressNotice = mocks.messageInfo.mock.calls.find(
       ([message]) => message.id === "app-update-progress"
     )?.[0];
@@ -347,7 +365,7 @@ describe("AppUpdater", () => {
     expect(mocks.relaunch).toHaveBeenCalledOnce();
   });
 
-  it("renders the update choices and wires later and automatic downloads", async () => {
+  it("renders the update choices without an automatic-download preference", async () => {
     const update = createUpdate();
     mocks.check.mockResolvedValue(update);
     await installAvailableAppUpdate();
@@ -358,13 +376,12 @@ describe("AppUpdater", () => {
     expect(markup).toContain("Skip this version");
     expect(markup).toContain("Later");
     expect(markup).toContain("Install and restart");
+    expect(markup).not.toContain("Automatically download future updates");
+    expect(markup).not.toContain("update.autoDownloadUpdates");
     expect(mocks.modal?.visible).toBe(true);
-    expect(mocks.checkbox?.checked).toBe(true);
 
-    mocks.checkbox?.onChange?.(false);
     capturedButton("Later").onClick?.();
 
-    expect(mocks.setAutoUpdateEnabled).toHaveBeenCalledWith(false);
     expect(mocks.setInstallPromptVisible).toHaveBeenCalledWith(false);
     expect(update.install).not.toHaveBeenCalled();
     expect(mocks.relaunch).not.toHaveBeenCalled();

@@ -10,7 +10,7 @@ import React, { type FC, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
-import DropdownItem from "@src/components/Dropdown/DropdownItem";
+import { DropdownItem, DropdownPanel } from "@src/components/Dropdown/exports";
 import {
   DROPDOWN_CLASSES,
   DROPDOWN_ITEM,
@@ -135,6 +135,7 @@ export const SessionFilterButton: FC<SessionFilterButtonProps> = React.memo(
           <div ref={triggerRef} className="inline-flex">
             <IconButton
               aria-label={t("sidebar.groupBy.title")}
+              data-testid="sidebar-session-filter-button"
               size="lg"
               variant="default"
               className={`!rounded-full ${
@@ -161,9 +162,10 @@ export const SessionFilterButton: FC<SessionFilterButtonProps> = React.memo(
         {isOpen &&
           isPositioned &&
           createPortal(
-            <div
+            <DropdownPanel
               ref={panelRef}
-              className={`${DROPDOWN_CLASSES.panelAnimated} ${DROPDOWN_WIDTHS.sidebarMenuClass} fixed`}
+              className={`${DROPDOWN_WIDTHS.sidebarMenuClass} fixed`}
+              maxHeight="none"
               style={{
                 top: panelPosition.top,
                 bottom: panelPosition.bottom,
@@ -179,6 +181,7 @@ export const SessionFilterButton: FC<SessionFilterButtonProps> = React.memo(
                   return (
                     <DropdownItem
                       key={mode}
+                      dataTestId={`sidebar-group-by-${mode}`}
                       selected={active}
                       onClick={() => handleSelect(mode)}
                     >
@@ -198,6 +201,7 @@ export const SessionFilterButton: FC<SessionFilterButtonProps> = React.memo(
                     <div className={DROPDOWN_CLASSES.menuSeparator} />
                     {onRefreshSessions && (
                       <DropdownItem
+                        dataTestId="sidebar-refresh-sessions"
                         icon={
                           <RefreshCw
                             size={DROPDOWN_ITEM.iconSize}
@@ -265,7 +269,7 @@ export const SessionFilterButton: FC<SessionFilterButtonProps> = React.memo(
                   </>
                 )}
               </div>
-            </div>,
+            </DropdownPanel>,
             document.body
           )}
       </>

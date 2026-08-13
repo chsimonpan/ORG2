@@ -1,3 +1,8 @@
+import {
+  isAgentOrgGroupChatUserMessage,
+  isAgentOrgInboxTranscriptEvent,
+  isCoordinatorHumanUserEvent,
+} from "../GroupChatView/groupChatPredicates";
 import { isAgentErrorEvent } from "../chatItemPipeline/classifiers";
 import { isAssistantMessageEvent } from "../chatItemPipeline/dedup";
 import type { OptimizedChatItem } from "../chatItemPipeline/types";
@@ -95,7 +100,9 @@ function isUnloadedTurnItem(item: OptimizedChatItem | undefined): boolean {
   return getUnloadedTurnMeta(item) !== null;
 }
 
-function isTurnPreviewItem(item: OptimizedChatItem | undefined): boolean {
+export function isTurnPreviewItem(
+  item: OptimizedChatItem | undefined
+): boolean {
   return item?.event?.args?.turnPreviewOnly === true;
 }
 
@@ -103,55 +110,22 @@ function isUserMessageItem(item: OptimizedChatItem | undefined): boolean {
   return item?.event?.source === "user" && Boolean(item.event.displayText);
 }
 
-function isAgentOrgInboxTranscriptEvent(item: OptimizedChatItem): boolean {
-  const event = item.event;
-  return Boolean(
-    event?.args?.agentOrgInboxTranscript === true ||
-    event?.result?.agentOrgInboxTranscript === true
-  );
-}
-
 function isAgentOrgGroupMessage(item: OptimizedChatItem): boolean {
-  const event = item.event;
-  return Boolean(
-    event?.args?.agentOrgGroupChatMessage === true ||
-    event?.result?.agentOrgGroupChatMessage === true
-  );
+  return Boolean(item.event && isAgentOrgGroupChatUserMessage(item.event));
 }
 
-const USER_TURN_FUNCTION_NAMES = new Set([
-  "user_message",
-  "user",
-  "user_input",
-  "raw_event",
-  "raw",
-]);
-
-const COORDINATOR_AGENT_MESSAGE_FUNCTION_NAMES = new Set([
-  "org_send_message",
-  "send_message",
-  "send_to_inbox",
-]);
+function isAgentOrgInboxTranscriptItem(item: OptimizedChatItem): boolean {
+  return Boolean(item.event && isAgentOrgInboxTranscriptEvent(item.event));
+}
 
 function isCoordinatorTurnHeader(
   item: OptimizedChatItem,
   coordinatorSessionId: string
 ): boolean {
   const event = item.event;
-  if (!event || event.sessionId !== coordinatorSessionId) return false;
-  if (event.source !== "user" || !event.displayText.trim()) return false;
-  if (isAgentOrgInboxTranscriptEvent(item)) return false;
-  if (isAgentOrgGroupMessage(item)) return true;
-
-  const functionName = event.functionName.toLowerCase();
-  if (COORDINATOR_AGENT_MESSAGE_FUNCTION_NAMES.has(functionName)) return false;
-  if (USER_TURN_FUNCTION_NAMES.has(functionName)) return true;
-  if (functionName.includes("user_response")) return true;
-  if (functionName.includes("user_input")) return true;
-
-  const result = event.result as Record<string, unknown> | undefined;
-  const resultMessage = result?.message as { role?: string } | undefined;
-  return result?.type === "user" || resultMessage?.role === "user";
+  return Boolean(
+    event && isCoordinatorHumanUserEvent(event, coordinatorSessionId)
+  );
 }
 
 function resolveTurnPredicates(options: UseChatGroupsOptions): {
@@ -176,7 +150,7 @@ function resolveTurnPredicates(options: UseChatGroupsOptions): {
 
   return {
     isHeader: (item) =>
-      isUserMessageItem(item) && !isAgentOrgInboxTranscriptEvent(item),
+      isUserMessageItem(item) && !isAgentOrgInboxTranscriptItem(item),
     isBoundary: () => false,
   };
 }
@@ -190,12 +164,14 @@ function isCompletedAssistantMessage(item: OptimizedChatItem): boolean {
   );
 }
 
-function isCollapsePinnedItem(item: OptimizedChatItem): boolean {
+function isAgentErrorItem(item: OptimizedChatItem): boolean {
   if (isUnloadedTurnItem(item) || !item.event) return false;
-  return (
-    isAgentErrorEvent(item.event) ||
-    item.event.uiCanonical === "context_compacted"
-  );
+  return isAgentErrorEvent(item.event);
+}
+
+function isCompactBoundaryItem(item: OptimizedChatItem): boolean {
+  if (isUnloadedTurnItem(item) || !item.event) return false;
+  return item.event.uiCanonical === "context_compacted";
 }
 
 function parseEpochMs(iso: string | undefined): number | null {
@@ -217,7 +193,12 @@ export function isTurnCollapseEligible(
 ): boolean {
   if (!meta || meta.turnId === null) return false;
   const bodyItemCount = meta.unloadedTurn?.bodyEventCount ?? meta.itemCount;
-  if (bodyItemCount <= 1) return false;
+  // Loaded turns render their items inline, so a trivial (≤1 item) body has
+  // nothing to collapse. An UNLOADED turn renders nothing inline — the
+  // collapse bar is its only expand affordance (and, with turn pagination
+  // off, the only way to fetch the body at all), so any nonzero count must
+  // show it. Zero means the source measured a genuinely bodyless round.
+  if (meta.unloadedTurn ? bodyItemCount < 1 : bodyItemCount <= 1) return false;
   if (options.forceCollapseAllTurns === true) return true;
   if (groupIndex < groupCount - 1) return true;
   if (options.collapseTailWhenIdle !== true) return false;
@@ -358,8 +339,14 @@ export function projectChatGroups(
       }
     }
     const pinnedIndices: number[] = [];
-    for (let i = Math.max(keepIndex + 1, 0); i < group.items.length; i++) {
-      if (isCollapsePinnedItem(group.items[i])) pinnedIndices.push(i);
+    for (let i = 0; i < group.items.length; i++) {
+      if (
+        isAgentErrorItem(group.items[i]) ||
+        (i >= Math.max(keepIndex + 1, 0) &&
+          isCompactBoundaryItem(group.items[i]))
+      ) {
+        pinnedIndices.push(i);
+      }
     }
 
     if (keepIndex === -1 && pinnedIndices.length > 0) {

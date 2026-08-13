@@ -5,6 +5,7 @@ import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 export type ActionCardVariant = "default" | "primary" | "secondary" | "subtle";
+export type ActionCardLayout = "inline" | "stacked";
 
 export interface ActionCardProps {
   /**
@@ -27,6 +28,13 @@ export interface ActionCardProps {
    * @default 'default'
    */
   variant?: ActionCardVariant;
+
+  /**
+   * Content arrangement. Stacked keeps badges and selection affordances out of
+   * the title row for wider choice cards.
+   * @default 'inline'
+   */
+  layout?: ActionCardLayout;
 
   /**
    * Icon component (Lucide icon).
@@ -122,7 +130,7 @@ export interface ActionCardProps {
   dataTestId?: string;
 
   /**
-   * Use compact vertical padding when the card has no leading icon.
+   * Render an inline card as a compact 36px segmented control.
    */
   compact?: boolean;
 

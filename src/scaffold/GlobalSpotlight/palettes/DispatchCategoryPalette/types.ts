@@ -16,6 +16,22 @@ export interface AgentSelection {
   agentIconId?: string;
 }
 
+export interface AgentOption {
+  id: string;
+  name: string;
+  desc: string;
+  iconId?: string;
+  category: DispatchCategory;
+  targetKind: SessionTargetKind;
+  agentDefinitionId?: string;
+  agentOrgId?: string;
+  cliAgentType?: CliAgentType;
+  isBuiltIn: boolean;
+  isCli: boolean;
+  isOrg: boolean;
+  rightContent?: React.ReactNode;
+}
+
 export interface DispatchCategoryPaletteProps extends BasePaletteProps {
   onSelect: (selection: AgentSelection) => void;
   currentCategory?: DispatchCategory;
@@ -27,6 +43,14 @@ export interface DispatchCategoryPaletteProps extends BasePaletteProps {
    * pickers inside a team panel where selecting another team makes no sense.
    */
   hideOrgs?: boolean;
+  /** Omit CLI agents from contexts that only support Rust-native sessions. */
+  hideCliAgents?: boolean;
+  /**
+   * When true only CLI agent entries are shown. Used by CLI-only picker surfaces.
+   */
+  cliOnly?: boolean;
+  /** Include the Human-session document target in session-creation pickers. */
+  includeHumanSession?: boolean;
   /**
    * When true only CLI agent entries are shown. Used by CLI-only picker surfaces.
    */

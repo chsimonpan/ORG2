@@ -142,7 +142,7 @@
     "timezoneAuto": "Auto (navigateur)",
     "timezoneSearchPlaceholder": "Rechercher des villes proches",
     "sendOnEnter": "Envoyer les messages avec Entrée",
-    "sendOnEnterDesc": "Lorsque cette option est activée, Entrée envoie et Shift+Entrée insère une nouvelle ligne. Sinon, Ctrl/Cmd+Entrée envoie",
+    "sendOnEnterDesc": "Lorsque cette option est activée, Entrée envoie ; Shift+Entrée et Ctrl/Cmd+Entrée insèrent une nouvelle ligne. Sinon, Ctrl/Cmd+Entrée envoie",
     "language": "Langue",
     "languageSearchPlaceholder": "Rechercher des langues...",
     "languageNames": {
@@ -227,7 +227,10 @@
     "presenceGuidanceOnlineDefault": "Je suis au clavier. Tu peux me poser des questions de clarification à tout moment et confirmer avec moi toute action destructive avant de l'exécuter",
     "presenceGuidanceInvisibleDefault": "Je suis disponible mais affiché hors ligne. Par défaut, travaille de façon autonome et préviens-moi seulement pour les actions à risque élevé ou les refactorisations importantes ; regroupe les autres questions dans un seul résumé au lieu de les poser une par une",
     "presenceGuidanceAwayDefault": "Je suis loin du clavier. Ne bloque pas en m'attendant ; prends la meilleure décision avec les informations disponibles, termine ce qui peut l'être et laisse un bref résumé de ce qui s'est passé avec les questions ouvertes pour mon retour",
-    "followSystem": "Suivre le système"
+    "followSystem": "Suivre le système",
+    "preferences": "Préférences",
+    "usePointerCursors": "Utiliser les curseurs en forme de pointeur",
+    "usePointerCursorsDesc": "Transformer le curseur en pointeur au survol des éléments interactifs"
   },
   "background": {
     "title": "Arrière-plan",
@@ -703,8 +706,34 @@
     "test": {
       "sent": "Notification de test envoyée",
       "permissionWarning": "Échec de l'envoi de la notification de test. Vérifiez les autorisations.",
-      "sendFailed": "Impossible d'envoyer la notification de test. Veuillez vérifier vos autorisations de notification et réessayer."
-    }
+      "sendFailed": "Impossible d'envoyer la notification de test. Veuillez vérifier vos autorisations de notification et réessayer.",
+      "soundFailed": "Impossible de lire le son de notification. Vérifiez le volume du système."
+    },
+    "teamInbox": "Boîte de réception de l’équipe",
+    "soundPreset": "Son de notification",
+    "soundPresetDesc": "Choisissez le son des notifications audibles",
+    "previewSound": "Écouter",
+    "soundPresets": {
+      "classic": "Classique",
+      "gentle": "Doux",
+      "ascending": "Ascendant",
+      "bell": "Cloche"
+    },
+    "criticalOnly": "Alertes critiques uniquement",
+    "criticalOnlyDesc": "Notifier uniquement lorsqu'une action doit être approuvée ou qu'une tâche échoue",
+    "quietHours": "Programmation Ne pas déranger",
+    "quietHoursDesc": "Couper les notifications de routine pendant une plage horaire quotidienne",
+    "quietHoursSchedule": "Heures silencieuses",
+    "quietHoursScheduleDesc": "Utilise l'heure locale de votre appareil. Des heures de début et de fin identiques désactivent la plage.",
+    "quietHoursStart": "De",
+    "quietHoursEnd": "À",
+    "allowCriticalDuringQuietHours": "Autoriser les alertes critiques",
+    "allowCriticalDuringQuietHoursDesc": "Les demandes d'approbation et les échecs peuvent afficher une notification système, mais n'émettent jamais de son",
+    "backgroundCompletionSummary": "Regrouper les tâches d'arrière-plan terminées",
+    "backgroundCompletionSummaryDesc": "Envoyer une seule alerte groupée à la fin des heures silencieuses",
+    "mutedSessions": "Sessions en sourdine",
+    "mutedSessionsDesc": "{{count}} Sessions sont en sourdine sur cet appareil",
+    "clearMutedSessions": "Tout effacer"
   },
   "editor": {
     "tabEditor": "Éditeur",
@@ -923,7 +952,24 @@
     "diskCategory_screenshots": "Captures d'écran du navigateur",
     "diskCategory_agentWorktrees": "Worktrees de Session Agent",
     "diskCategory_lspBin": "Binaires LSP Server",
-    "loadZeroRows": "Cliquez pour charger {{count}} éléments de plus"
+    "loadZeroRows": "Cliquez pour charger {{count}} éléments de plus",
+    "appMemory": "App memory",
+    "appBackend": "ORG2 backend",
+    "appWebviewHelpers": "Owned WebView helpers",
+    "rssMappedDiagnostic": "RSS / mapped memory (diagnostic)",
+    "measurement": "Measurement",
+    "measurementKinds": {
+      "native": "Native effective memory",
+      "compatibility": "Compatibility metric",
+      "mixed": "Mixed native / fallback metrics",
+      "rss_fallback": "RSS fallback",
+      "unavailable": "Unavailable"
+    },
+    "toolProcessDiagnostics": "Terminal, CLI & tool processes (RSS diagnostic)",
+    "excludedFromAppMemory": "excluded from App memory",
+    "noToolProcesses": "No terminal, CLI, MCP, or tool processes detected",
+    "categoryAgentCli": "CLI agent",
+    "categoryMcpOrTool": "MCP / tool process"
   },
   "storage": {
     "dataDirectory": "Répertoire de données",
@@ -942,7 +988,13 @@
     "tableSize": "Taille",
     "tablePercentage": "Pourc.",
     "scanFailed": "Échec de l'analyse du stockage",
-    "openFolderFailed": "Impossible d'ouvrir le dossier"
+    "openFolderFailed": "Impossible d'ouvrir le dossier",
+    "browserCache": "Cache du navigateur",
+    "browserCacheDesc": "{{used}} utilisés · {{cleanable}} peuvent être nettoyés en toute sécurité",
+    "cleanBrowserCache": "Nettoyer",
+    "browserCacheCleaned": "{{size}} de stockage du navigateur libérés",
+    "browserCacheAlreadyClean": "Le cache du navigateur est déjà propre",
+    "browserCacheCleanFailed": "Impossible de nettoyer le cache du navigateur"
   },
   "dependencies": {
     "systemDependencies": "Dependencies système",
@@ -991,7 +1043,7 @@
     "decryptEffect": "Effet Decrypt",
     "decryptEffectDesc": "Activer l'animation Decrypt pour les messages Agent",
     "sendOnEnter": "Envoyer les messages avec Entrée",
-    "sendOnEnterDesc": "Lorsque cette option est activée, Entrée envoie et Shift+Entrée insère une nouvelle ligne. Sinon, Ctrl/Cmd+Entrée envoie"
+    "sendOnEnterDesc": "Lorsque cette option est activée, Entrée envoie ; Shift+Entrée et Ctrl/Cmd+Entrée insèrent une nouvelle ligne. Sinon, Ctrl/Cmd+Entrée envoie"
   },
   "languageServers": {
     "languageServersDesc": "Gérer les serveurs LSP pour l'autocomplétion, les diagnostics et l'intelligence du code",

@@ -6,7 +6,6 @@
 use serde::{Deserialize, Serialize};
 
 use core_types::key_source::KeySource;
-use core_types::session::ParentSessionRelation;
 
 /// Valid values for [`UnifiedSessionRecord::session_type`].
 ///
@@ -28,6 +27,10 @@ pub mod session_type {
     /// inbound channel messages to OS/SDE downstream agents. Never exposed
     /// in the frontend session list (filtered out by `list_sessions`).
     pub const GATEWAY: &str = "gateway";
+    /// User-authored proof-of-work log. Human sessions share the canonical
+    /// session directory row, while their document and evidence live in
+    /// dedicated tables.
+    pub const HUMAN: &str = "human";
 }
 
 /// Database record for a unified session.
@@ -87,8 +90,6 @@ pub struct UnifiedSessionRecord {
     pub org_member_id: Option<String>,
 
     pub parent_session_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_session_relation: Option<ParentSessionRelation>,
     pub parent_event_id: Option<String>,
 
     /// — JSON-encoded `BTreeMap<PathBuf, AdditionalDirectory>`.
@@ -123,6 +124,15 @@ pub struct UnifiedSessionRecord {
     /// `code_sessions` doesn't carry the field at all).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_exec_mode: Option<String>,
+
+    /// Persistent product mode (`orgtrack/v1` §5.2): `build | plan | ask
+    /// | project`. The ONLY source of truth for whether this session may
+    /// mutate WorkItems/Routines — never inferred from exec mode, query
+    /// length or agent judgment. `None` = never resolved = `build`.
+    /// Resolver precedence (frozen decisions §1): launched from a
+    /// WorkItem/Routine → `project`; explicit user selection; else build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub product_mode: Option<String>,
 
     /// Per-session unsent draft text (P3). Whatever is currently sitting
     /// in the chat composer for this session, persisted across navigation
@@ -180,11 +190,11 @@ impl Default for UnifiedSessionRecord {
             agent_definition_id: None,
             org_member_id: None,
             parent_session_id: None,
-            parent_session_relation: None,
             parent_event_id: None,
             workspace_additional_json: default_workspace_additional_json(),
             key_source: KeySource::default(),
             agent_exec_mode: None,
+            product_mode: None,
             draft_text: None,
             reply_target_event_id: None,
             pinned: false,
@@ -202,7 +212,7 @@ impl Default for UnifiedSessionRecord {
 /// the `NOT NULL DEFAULT 'own_key'` schema. The row mapper then runs
 /// `KeySource::parse` on the resulting string and rejects any unknown
 /// value — fail-closed, same posture as the CLI side.
-pub(super) const UNIFIED_SESSION_SELECT: &str = r#"
+pub(in crate::core::session::persistence) const UNIFIED_SESSION_SELECT: &str = r#"
     SELECT
         s.session_id, s.name, s.status, s.model, s.account_id, s.user_input,
         COALESCE((SELECT total_tokens FROM orgtrack_core_session_usage WHERE session_id = s.session_id), 0),
@@ -211,33 +221,24 @@ pub(super) const UNIFIED_SESSION_SELECT: &str = r#"
         s.work_item_id, s.agent_role, s.worktree_path,
         s.worktree_branch, s.base_branch, s.merge_status,
         s.project_slug, s.agent_definition_id, s.org_member_id,
-        s.parent_session_id, s.parent_session_relation, s.parent_event_id,
+        s.parent_session_id, s.parent_event_id,
         s.workspace_additional_json,
         COALESCE(s.key_source, 'own_key'),
         s.agent_exec_mode,
         s.native_harness_type,
         s.draft_text,
         s.reply_target_event_id,
-        COALESCE(s.pinned, 0)
+        COALESCE(s.pinned, 0),
+        s.product_mode
     FROM agent_sessions s
 "#;
 
 /// Row mapper for unified session records. Must be kept in lock-step with
 /// [`UNIFIED_SESSION_SELECT`].
-pub(super) fn row_to_record(row: &rusqlite::Row) -> rusqlite::Result<UnifiedSessionRecord> {
-    let parent_session_relation = row
-        .get::<_, Option<String>>(26)?
-        .map(|value| {
-            ParentSessionRelation::parse(&value).ok_or_else(|| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    26,
-                    rusqlite::types::Type::Text,
-                    format!("unknown ParentSessionRelation value: {value:?}").into(),
-                )
-            })
-        })
-        .transpose()?;
-    let key_source_str: String = row.get(29)?;
+pub(in crate::core::session::persistence) fn row_to_record(
+    row: &rusqlite::Row,
+) -> rusqlite::Result<UnifiedSessionRecord> {
+    let key_source_str: String = row.get(28)?;
     // Fail-closed on unknown `key_source` values rather than silently
     // mapping to `OwnKey`: a bad value here means the row was written by
     // a build that doesn't agree with us about the enum, and treating it
@@ -245,7 +246,7 @@ pub(super) fn row_to_record(row: &rusqlite::Row) -> rusqlite::Result<UnifiedSess
     // affected. Same reasoning the CLI `row_to_session` uses.
     let key_source = KeySource::parse(&key_source_str).ok_or_else(|| {
         rusqlite::Error::FromSqlConversionFailure(
-            29,
+            28,
             rusqlite::types::Type::Text,
             format!("unknown KeySource value: {key_source_str:?}").into(),
         )
@@ -256,7 +257,7 @@ pub(super) fn row_to_record(row: &rusqlite::Row) -> rusqlite::Result<UnifiedSess
         status: row.get(2)?,
         model: row.get(3)?,
         account_id: row.get(4)?,
-        native_harness_type: row.get(31)?,
+        native_harness_type: row.get(30)?,
         user_input: row.get(5)?,
         total_tokens: row.get(6)?,
         created_at: row.get(7)?,
@@ -278,15 +279,15 @@ pub(super) fn row_to_record(row: &rusqlite::Row) -> rusqlite::Result<UnifiedSess
         agent_definition_id: row.get(23)?,
         org_member_id: row.get(24)?,
         parent_session_id: row.get(25)?,
-        parent_session_relation,
-        parent_event_id: row.get(27)?,
-        workspace_additional_json: row.get(28)?,
+        parent_event_id: row.get(26)?,
+        workspace_additional_json: row.get(27)?,
         key_source,
-        agent_exec_mode: row.get(30)?,
-        draft_text: row.get(32)?,
-        reply_target_event_id: row.get(33)?,
+        agent_exec_mode: row.get(29)?,
+        product_mode: row.get(34)?,
+        draft_text: row.get(31)?,
+        reply_target_event_id: row.get(32)?,
         pinned: {
-            let pinned_int: i64 = row.get(34)?;
+            let pinned_int: i64 = row.get(33)?;
             pinned_int != 0
         },
     })
@@ -306,14 +307,15 @@ mod tests {
             NULL, NULL, NULL,
             NULL, NULL, NULL,
             NULL, 'builtin:sde', NULL,
-            NULL, NULL, NULL,
+            NULL, NULL,
             '{}',
             'own_key',
             NULL,
             NULL,
             NULL,
             NULL,
-            0
+            0,
+            NULL
     "#;
 
     #[test]
@@ -330,26 +332,6 @@ mod tests {
     }
 
     #[test]
-    fn row_to_record_rejects_unknown_parent_session_relation() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        let err = conn
-            .query_row(
-                r#"
-                SELECT
-                    'sid', 'name', 'running', 'model', 'acct', NULL,
-                    0, '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z', 'sde',
-                    NULL, NULL, '/tmp/project', NULL, NULL, NULL,
-                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'builtin:sde', NULL,
-                    'parent', 'unknown_relation', NULL, '{}', 'own_key', NULL, NULL, NULL, NULL, 0
-                "#,
-                [],
-                row_to_record,
-            )
-            .expect_err("unknown parent relation must fail closed");
-        assert!(matches!(err, rusqlite::Error::FromSqlConversionFailure(_, _, _)));
-    }
-
-    #[test]
     fn row_to_record_reads_hosted_key() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         let record = conn
@@ -362,14 +344,15 @@ mod tests {
                     NULL, NULL, NULL,
                     NULL, NULL, NULL,
                     NULL, 'builtin:sde', NULL,
-                    NULL, NULL, NULL,
+                    NULL, NULL,
                     '{}',
                     'hosted_key',
                     'plan',
                     NULL,
                     'half-typed reply',
                     'evt-42',
-                    0
+                    0,
+                    'project'
                 "#,
                 [],
                 row_to_record,
@@ -377,6 +360,7 @@ mod tests {
             .unwrap();
         assert_eq!(record.key_source, KeySource::HostedKey);
         assert_eq!(record.agent_exec_mode.as_deref(), Some("plan"));
+        assert_eq!(record.product_mode.as_deref(), Some("project"));
         assert_eq!(record.draft_text.as_deref(), Some("half-typed reply"));
         assert_eq!(record.reply_target_event_id.as_deref(), Some("evt-42"));
     }
@@ -424,7 +408,7 @@ mod tests {
                     NULL, NULL, NULL,
                     NULL, NULL, NULL,
                     NULL, 'builtin:sde', NULL,
-                    NULL, NULL, NULL,
+                    NULL, NULL,
                     '{}',
                     'market',
                     NULL,
@@ -457,7 +441,7 @@ mod tests {
                     NULL, NULL, NULL,
                     NULL, NULL, NULL,
                     NULL, 'builtin:sde', NULL,
-                    NULL, NULL, NULL,
+                    NULL, NULL,
                     '{}',
                     'own_key',
                     NULL,
@@ -483,11 +467,9 @@ mod tests {
                 SELECT
                     'sid', 'name', 'running', 'model', 'acct', NULL,
                     0, '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z', 'sde',
-                    NULL, NULL, '/tmp/project', NULL, NULL, NULL,
-                    NULL, NULL, NULL, NULL, NULL, NULL,
-                    NULL, 'builtin:sde', NULL,
-                    NULL, NULL, NULL,
-                    zeroblob(1), 'own_key', NULL, NULL, NULL, NULL, 0
+                    NULL, NULL, '/tmp/project', NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                    'builtin:sde', NULL, NULL, NULL, NULL, 'own_key', NULL, NULL, NULL, NULL,
+                    0
                 "#,
                 [],
                 row_to_record,

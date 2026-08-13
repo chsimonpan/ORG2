@@ -20,11 +20,27 @@ import {
 
 const DRAG_THRESHOLD_PX = 6;
 
+function suppressClickAfterCompletedDrag(): void {
+  const suppressClick = (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  window.addEventListener("click", suppressClick, {
+    capture: true,
+    once: true,
+  });
+  window.setTimeout(() => {
+    window.removeEventListener("click", suppressClick, true);
+  }, 0);
+}
+
 export interface ReferencePillDragState {
   isDragging: boolean;
   dragX: number;
   dragY: number;
   dragLabel: string;
+  /** Second line for the ghost, so it reads as the row being carried. */
+  dragSubtitle?: string;
 }
 
 interface ReferencePillDragOptions<TElement extends HTMLElement> {
@@ -107,6 +123,7 @@ export function useReferencePillDrag<TElement extends HTMLElement>({
             dragX: moveEvent.clientX,
             dragY: moveEvent.clientY,
             dragLabel: initialPayload.name ?? initialPayload.path,
+            dragSubtitle: initialPayload.dragSubtitle,
           });
           return;
         }
@@ -133,6 +150,8 @@ export function useReferencePillDrag<TElement extends HTMLElement>({
         clearWorkstationTabDrag();
 
         if (!state?.thresholdMet) return;
+
+        suppressClickAfterCompletedDrag();
 
         const finalPayload = optionsRef.current.getPayload() ?? initialPayload;
         document.dispatchEvent(

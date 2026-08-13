@@ -1,6 +1,7 @@
 import { type MutableRefObject, useEffect } from "react";
 
 import { shortcutRegistry } from "@src/hooks/keyboard";
+import { toggleGlobalPreferencesPanel } from "@src/scaffold/GlobalPreferencesPanel";
 import { openAgentControlSpotlight } from "@src/scaffold/GlobalSpotlight/openSpotlight";
 import { WorkStationViewService } from "@src/services/workStation/WorkStationViewService";
 import { spotlightOpenAtom } from "@src/store/ui/uiAtom";
@@ -105,7 +106,6 @@ export function useShortcutRegistration(options: ShortcutRegistrationOptions) {
     handleInspectMoveDownLevel,
     handleInspectToggleLabels,
     handleInspectHideLabels,
-    handleZoomReset,
     openQuitConfirmation,
     closeQuitConfirmation,
     spotlightOpenRef,
@@ -129,6 +129,10 @@ export function useShortcutRegistration(options: ShortcutRegistrationOptions) {
       shortcutRegistry.on("zoom_in", handleZoomIn),
       shortcutRegistry.on("zoom_out", handleZoomOut),
       shortcutRegistry.on("zoom_reset", handleZoomReset),
+      shortcutRegistry.on(
+        "open_global_preferences",
+        toggleGlobalPreferencesPanel
+      ),
       shortcutRegistry.on("quit_app", openQuitConfirmation),
       shortcutRegistry.on("close_tab", handleCloseCurrentTab),
       shortcutRegistry.on("hide_window", handleHideWindow),
@@ -177,13 +181,6 @@ export function useShortcutRegistration(options: ShortcutRegistrationOptions) {
       }),
       shortcutRegistry.on("open_kanban", () => {
         void WorkStationViewService.openKanbanTab();
-      }),
-      shortcutRegistry.on("open_journey", () => {
-        window.dispatchEvent(
-          new CustomEvent("action-system-navigate", {
-            detail: { path: "/orgii/app/journey" },
-          })
-        );
       }),
       shortcutRegistry.on(
         "open_file_folder_tab",

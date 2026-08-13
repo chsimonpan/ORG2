@@ -1,9 +1,15 @@
 import { atom } from "jotai";
 import { atomFamily } from "jotai-family";
 
-import type { GitHubIssue, GitHubIssueComment } from "@src/api/tauri/github";
+import type {
+  GitHubIssue,
+  GitHubIssueTimelineItem,
+} from "@src/api/tauri/github";
 
-import { DEFAULT_WORKSTATION_REPO_SCOPE } from "./workstationPrAtom";
+import {
+  DEFAULT_WORKSTATION_REPO_SCOPE,
+  workstationRepoScopeKey,
+} from "./workstationPrAtom";
 
 export type IssueFilterState = "open" | "closed" | "all";
 
@@ -19,10 +25,12 @@ export interface WorkstationIssueListState {
 }
 
 export interface WorkstationSelectedIssueState {
+  /** Auth + repository + issue identity that owns this snapshot. */
+  resourceKey?: string | null;
   issue: GitHubIssue | null;
-  comments: GitHubIssueComment[];
+  timeline: GitHubIssueTimelineItem[];
   loading: boolean;
-  commentsLoading: boolean;
+  timelineLoading: boolean;
   error: string | null;
   submittingComment: boolean;
 }
@@ -39,10 +47,11 @@ const initialListState: WorkstationIssueListState = {
 };
 
 const initialSelectedState: WorkstationSelectedIssueState = {
+  resourceKey: null,
   issue: null,
-  comments: [],
+  timeline: [],
   loading: false,
-  commentsLoading: false,
+  timelineLoading: false,
   error: null,
   submittingComment: false,
 };
@@ -64,7 +73,7 @@ export const workstationSelectedIssueAtomFamily = atomFamily(
   (scopeKey: string) => {
     const scopedAtom = atom<WorkstationSelectedIssueState>({
       ...initialSelectedState,
-      comments: [],
+      timeline: [],
     });
     scopedAtom.debugLabel = `workstationSelectedIssueAtom(${scopeKey})`;
     return scopedAtom;
@@ -74,6 +83,13 @@ export const workstationSelectedIssueAtomFamily = atomFamily(
 export const workstationSelectedIssueAtom = workstationSelectedIssueAtomFamily(
   DEFAULT_WORKSTATION_REPO_SCOPE
 );
+
+export function workstationIssueDetailScopeKey(
+  repoPath: string,
+  issueNumber: number
+): string {
+  return `${workstationRepoScopeKey(undefined, repoPath)}:issue:${issueNumber}`;
+}
 
 export type WorkstationIssueCallbacks = {
   openNewIssueForm: (() => void) | null;
@@ -106,3 +122,40 @@ export const workstationIssueCallbackAtomFamily = atomFamily(
 export const workstationIssueCallbackAtom = workstationIssueCallbackAtomFamily(
   DEFAULT_WORKSTATION_REPO_SCOPE
 );
+
+const retainedIssueDetailScopes = new Map<string, number>();
+
+/**
+ * Retain an explicit issue-detail scope while a rendered consumer is mounted.
+ * The final release removes the atom-family entries immediately; bounded warm
+ * remount data belongs to the GitHub detail coordinator rather than this
+ * unbounded primitive-key atom family.
+ */
+export function retainWorkstationIssueDetailScope(
+  scopeKey: string,
+  options: { evictOnFinalRelease?: boolean } = {}
+): () => boolean {
+  retainedIssueDetailScopes.set(
+    scopeKey,
+    (retainedIssueDetailScopes.get(scopeKey) ?? 0) + 1
+  );
+  let released = false;
+  return () => {
+    if (released) return false;
+    released = true;
+    const remaining = (retainedIssueDetailScopes.get(scopeKey) ?? 1) - 1;
+    if (remaining > 0) {
+      retainedIssueDetailScopes.set(scopeKey, remaining);
+      return false;
+    }
+    retainedIssueDetailScopes.delete(scopeKey);
+    if (options.evictOnFinalRelease !== false) {
+      workstationSelectedIssueAtomFamily.remove(scopeKey);
+    }
+    return true;
+  };
+}
+
+export function getRetainedIssueDetailScopeCount(): number {
+  return retainedIssueDetailScopes.size;
+}

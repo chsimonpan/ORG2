@@ -38,6 +38,7 @@ const CodexSetup: React.FC<CodexSetupProps> = ({
   browserOpen,
   setBrowserOpen,
   browserCloseSignal,
+  autoStartLogin = false,
 }) => {
   const { t } = useTranslation("integrations");
 
@@ -104,6 +105,7 @@ const CodexSetup: React.FC<CodexSetupProps> = ({
               options={methodOptions}
               selected={selectedMethod}
               cardVariant="subtle"
+              compactCards
               onSelect={(key) => onChange({ setup_method: key })}
             />
           </SectionRow>
@@ -118,6 +120,7 @@ const CodexSetup: React.FC<CodexSetupProps> = ({
           onSessionCaptured={onSessionCaptured}
           onBrowserStateChange={setBrowserOpen}
           closeSignal={browserCloseSignal}
+          autoStart={autoStartLogin}
         />
       )}
 

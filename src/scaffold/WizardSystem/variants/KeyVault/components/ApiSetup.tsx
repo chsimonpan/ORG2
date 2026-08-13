@@ -48,6 +48,7 @@ const ApiSetup: React.FC<ApiSetupProps> = ({
   existingAccountNames,
   browserCloseSignal = 0,
   onBrowserStateChange,
+  autoStartCodexLogin = false,
 }) => {
   const { t } = useTranslation("integrations");
   const hook = useApiSetup({ data, onChange });
@@ -78,16 +79,31 @@ const ApiSetup: React.FC<ApiSetupProps> = ({
     onBrowserStateChange?.(hook.browserOpen);
   }, [hook.browserOpen, onBrowserStateChange]);
 
-  const parsedModelVariants = useMemo(
-    () =>
-      parseModelVariants(data.available_models ?? []).map((variant) => ({
+  const parsedModelVariants = useMemo(() => {
+    const variants = new Map(
+      (data.model_variants ?? []).map((variant) => [
+        variant.model,
+        {
+          model: variant.model,
+          base_model: variant.baseModel,
+          reasoning: variant.reasoning,
+          fast: variant.fast,
+          context_window: variant.contextWindow,
+        },
+      ])
+    );
+    for (const variant of parseModelVariants(data.available_models ?? [])) {
+      if (variants.has(variant.model)) continue;
+      variants.set(variant.model, {
         model: variant.model,
         base_model: variant.baseModel,
         reasoning: variant.reasoning,
         fast: variant.fast,
-      })),
-    [data.available_models]
-  );
+        context_window: data.model_context_lengths?.[variant.model],
+      });
+    }
+    return [...variants.values()];
+  }, [data.available_models, data.model_context_lengths, data.model_variants]);
 
   const hasAgent = !!data.agent_type;
 
@@ -344,6 +360,7 @@ const ApiSetup: React.FC<ApiSetupProps> = ({
                         options={complexMethodOptions}
                         selected={data.setup_method ?? null}
                         cardVariant="subtle"
+                        compactCards
                         onSelect={(key) => onChange({ setup_method: key })}
                       />
                     </SectionRow>
@@ -365,6 +382,7 @@ const ApiSetup: React.FC<ApiSetupProps> = ({
                         options={complexMethodOptions}
                         selected={data.setup_method ?? null}
                         cardVariant="subtle"
+                        compactCards
                         onSelect={(key) => onChange({ setup_method: key })}
                       />
                     </SectionRow>
@@ -403,6 +421,7 @@ const ApiSetup: React.FC<ApiSetupProps> = ({
               setTokenDetected={hook.setTokenDetected}
               detectingToken={hook.detectingToken}
               tokenError={hook.tokenError}
+              setTokenError={hook.setTokenError}
               clearTokenError={hook.clearTokenError}
               useGuidedSetup={hook.useGuidedSetup}
               setUseGuidedSetup={hook.setUseGuidedSetup}
@@ -413,6 +432,7 @@ const ApiSetup: React.FC<ApiSetupProps> = ({
               handleSessionTokenCaptured={hook.handleSessionTokenCaptured}
               handleUrlChange={hook.handleUrlChange}
               hasSessionToken={hook.hasSessionToken}
+              autoStartCodexLogin={autoStartCodexLogin}
             />
           )}
 

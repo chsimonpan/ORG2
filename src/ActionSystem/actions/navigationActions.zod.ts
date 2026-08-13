@@ -1,7 +1,7 @@
 /**
  * App Navigation Actions
  *
- * App-level routing and view mode switching.
+ * App-level routing.
  * Uses React Router navigate() under the hood via the global Jotai store.
  *
  * Category: "app"
@@ -19,7 +19,6 @@ import {
 import { ROUTES } from "@src/config/routes";
 import {
   activeSessionIdAtom,
-  jumpToSessionAtom,
   workstationActiveSessionIdAtom,
 } from "@src/store/session";
 import { getInstrumentedStore } from "@src/util/core/state/instrumentedStore";
@@ -83,7 +82,7 @@ const appNavigateAction = defineZodAction(
     examples: [
       "navigate to settings",
       "go to the market",
-      "open the start page",
+      "open the workstation",
     ],
   },
   async ({ path, replace }) => {
@@ -124,14 +123,6 @@ const appGoToChat = defineRouteNavigationAction(
   ["open chat", "switch to chat", "show chat"]
 );
 
-const appGoToStartPage = defineRouteNavigationAction(
-  ACTION_ID.APP_GO_TO_START_PAGE,
-  "Navigate to the Start Page",
-  ROUTES.app.home.start.path,
-  "Opened Start Page",
-  ["go home", "open start page"]
-);
-
 const appGoToMarket = defineRouteNavigationAction(
   ACTION_ID.APP_GO_TO_MARKET,
   "Open the Token Market page",
@@ -146,14 +137,6 @@ const appGoToProjects = defineRouteNavigationAction(
   ROUTES.workStation.project.path,
   "Switched to Project Manager",
   ["open projects", "open project manager"]
-);
-
-const appGoToChangelog = defineRouteNavigationAction(
-  ACTION_ID.APP_GO_TO_CHANGELOG,
-  "Open the Changelog",
-  ROUTES.app.home.changelog.path,
-  "Opened Changelog",
-  ["open changelog", "show changes"]
 );
 
 const appGoToKanban = defineZodAction(
@@ -178,7 +161,7 @@ const appGoToKanban = defineZodAction(
 const appGoToAgentOrgs = defineRouteNavigationAction(
   ACTION_ID.APP_GO_TO_AGENT_ORGS,
   "Open Agent Teams",
-  ROUTES.app.home.agentOrgs.path,
+  ROUTES.app.agentOrgs.path,
   "Opened Agent Teams",
   ["open agent teams", "show agents"]
 );
@@ -243,7 +226,8 @@ const appGoToSession = defineZodAction(
   async ({ sessionId }) => {
     const store = getInstrumentedStore();
     if (sessionId) {
-      store.set(jumpToSessionAtom, sessionId);
+      store.set(workstationActiveSessionIdAtom, sessionId);
+      store.set(activeSessionIdAtom, sessionId);
       appNavigate(ROUTES.workStation.base.path);
       return { success: true, message: `Opened session ${sessionId}` };
     }
@@ -265,9 +249,7 @@ export const appNavigationZodActions = [
   appGoToBrowser,
   appGoToChat,
   appGoToMarket,
-  appGoToStartPage,
   appGoToProjects,
-  appGoToChangelog,
   appGoToKanban,
   appGoToAgentOrgs,
   appGoToIntegrations,

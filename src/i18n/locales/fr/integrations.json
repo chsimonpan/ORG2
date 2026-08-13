@@ -1742,7 +1742,9 @@
           "rename": "Renommage",
           "search": "Recherche"
         }
-      }
+      },
+      "liveStatusToggle": "Statut des agents en direct",
+      "liveStatusToggleDesc": "Indique si les agents CLI actifs travaillent ou attendent. La désactivation conserve la capture de provenance."
     },
     "codexConfig": {
       "sectionTitle": "Configuration",

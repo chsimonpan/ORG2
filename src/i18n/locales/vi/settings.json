@@ -142,7 +142,7 @@
     "timezoneAuto": "Tự động (Trình duyệt)",
     "timezoneSearchPlaceholder": "Tìm kiếm thành phố gần nhất",
     "sendOnEnter": "Gửi tin nhắn bằng Enter",
-    "sendOnEnterDesc": "Khi bật, Enter gửi và Shift+Enter chèn dòng mới. Khi tắt, Ctrl/Cmd+Enter gửi",
+    "sendOnEnterDesc": "Khi bật, Enter gửi; Shift+Enter và Ctrl/Cmd+Enter chèn dòng mới. Khi tắt, Ctrl/Cmd+Enter gửi",
     "language": "Ngôn ngữ",
     "languageSearchPlaceholder": "Tìm kiếm ngôn ngữ...",
     "languageNames": {
@@ -227,7 +227,10 @@
     "presenceGuidanceOnlineDefault": "Tôi đang ở bàn phím. Bạn có thể hỏi tôi để làm rõ bất cứ lúc nào và xác nhận với tôi trước khi chạy bất kỳ hành động phá hủy nào",
     "presenceGuidanceInvisibleDefault": "Tôi đang ở gần nhưng hiển thị ngoại tuyến. Mặc định hãy tự chủ thực hiện và chỉ báo cho tôi khi có hành động rủi ro cao hoặc tái cấu trúc lớn; gom các câu hỏi khác vào một bản tóm tắt thay vì hỏi từng câu",
     "presenceGuidanceAwayDefault": "Tôi đang rời bàn phím. Đừng chờ tôi; hãy đưa ra quyết định tốt nhất với thông tin hiện có, hoàn thành những gì có thể và để lại bản tóm tắt ngắn gọn về những gì đã xảy ra cùng các câu hỏi còn mở khi tôi quay lại",
-    "followSystem": "Theo hệ thống"
+    "followSystem": "Theo hệ thống",
+    "preferences": "Tùy chọn",
+    "usePointerCursors": "Sử dụng con trỏ dạng bàn tay",
+    "usePointerCursorsDesc": "Đổi con trỏ sang dạng bàn tay khi di chuột qua các phần tử tương tác"
   },
   "background": {
     "title": "Hình nền",
@@ -703,8 +706,34 @@
     "test": {
       "sent": "Đã gửi thông báo thử nghiệm",
       "permissionWarning": "Không gửi được thông báo thử nghiệm. Kiểm tra quyền truy cập.",
-      "sendFailed": "Không thể gửi thông báo thử nghiệm. Vui lòng kiểm tra quyền thông báo và thử lại."
-    }
+      "sendFailed": "Không thể gửi thông báo thử nghiệm. Vui lòng kiểm tra quyền thông báo và thử lại.",
+      "soundFailed": "Không thể phát âm thanh thông báo. Hãy kiểm tra âm lượng hệ thống."
+    },
+    "teamInbox": "Hộp thư đến của nhóm",
+    "soundPreset": "Âm thanh thông báo",
+    "soundPresetDesc": "Chọn âm thanh cho các thông báo có tiếng",
+    "previewSound": "Nghe thử",
+    "soundPresets": {
+      "classic": "Cổ điển",
+      "gentle": "Nhẹ nhàng",
+      "ascending": "Tăng dần",
+      "bell": "Chuông"
+    },
+    "criticalOnly": "Chỉ thông báo quan trọng",
+    "criticalOnlyDesc": "Chỉ thông báo khi một hành động cần phê duyệt hoặc một nhiệm vụ thất bại",
+    "quietHours": "Lịch không làm phiền",
+    "quietHoursDesc": "Tắt tiếng thông báo thường lệ trong một khung giờ hằng ngày",
+    "quietHoursSchedule": "Giờ yên tĩnh",
+    "quietHoursScheduleDesc": "Dùng giờ địa phương của thiết bị. Giờ bắt đầu và kết thúc trùng nhau sẽ tắt khung giờ này.",
+    "quietHoursStart": "Từ",
+    "quietHoursEnd": "Đến",
+    "allowCriticalDuringQuietHours": "Cho phép thông báo quan trọng",
+    "allowCriticalDuringQuietHoursDesc": "Yêu cầu phê duyệt và lỗi có thể hiện thông báo hệ thống, nhưng không bao giờ phát âm thanh",
+    "backgroundCompletionSummary": "Tổng hợp các nhiệm vụ nền đã hoàn thành",
+    "backgroundCompletionSummaryDesc": "Gửi một thông báo tổng hợp khi hết giờ yên tĩnh",
+    "mutedSessions": "Session đã tắt tiếng",
+    "mutedSessionsDesc": "{{count}} Session đã tắt tiếng trên thiết bị này",
+    "clearMutedSessions": "Xóa tất cả"
   },
   "editor": {
     "tabEditor": "Editor",
@@ -923,7 +952,24 @@
     "diskCategory_screenshots": "Ảnh chụp trình duyệt",
     "diskCategory_agentWorktrees": "Agent Session Worktrees",
     "diskCategory_lspBin": "Nhị phân LSP Server",
-    "loadZeroRows": "Click to load {{count}} more"
+    "loadZeroRows": "Click to load {{count}} more",
+    "appMemory": "App memory",
+    "appBackend": "ORG2 backend",
+    "appWebviewHelpers": "Owned WebView helpers",
+    "rssMappedDiagnostic": "RSS / mapped memory (diagnostic)",
+    "measurement": "Measurement",
+    "measurementKinds": {
+      "native": "Native effective memory",
+      "compatibility": "Compatibility metric",
+      "mixed": "Mixed native / fallback metrics",
+      "rss_fallback": "RSS fallback",
+      "unavailable": "Unavailable"
+    },
+    "toolProcessDiagnostics": "Terminal, CLI & tool processes (RSS diagnostic)",
+    "excludedFromAppMemory": "excluded from App memory",
+    "noToolProcesses": "No terminal, CLI, MCP, or tool processes detected",
+    "categoryAgentCli": "CLI agent",
+    "categoryMcpOrTool": "MCP / tool process"
   },
   "storage": {
     "dataDirectory": "Thư mục dữ liệu",
@@ -942,7 +988,13 @@
     "tableSize": "Kích thước",
     "tablePercentage": "Tỷ lệ",
     "scanFailed": "Không quét được dung lượng",
-    "openFolderFailed": "Không mở được thư mục"
+    "openFolderFailed": "Không mở được thư mục",
+    "browserCache": "Bộ nhớ đệm trình duyệt",
+    "browserCacheDesc": "Đã dùng {{used}} · có thể dọn an toàn {{cleanable}}",
+    "cleanBrowserCache": "Dọn dẹp",
+    "browserCacheCleaned": "Đã giải phóng {{size}} bộ nhớ trình duyệt",
+    "browserCacheAlreadyClean": "Bộ nhớ đệm trình duyệt đã sạch",
+    "browserCacheCleanFailed": "Không thể dọn bộ nhớ đệm trình duyệt"
   },
   "dependencies": {
     "systemDependencies": "Dependencies hệ thống",
@@ -991,7 +1043,7 @@
     "decryptEffect": "Hiệu ứng Decrypt",
     "decryptEffectDesc": "Bật hiệu ứng Decrypt cho tin nhắn Agent",
     "sendOnEnter": "Gửi tin nhắn bằng Enter",
-    "sendOnEnterDesc": "Khi bật, Enter gửi và Shift+Enter chèn dòng mới. Khi tắt, Ctrl/Cmd+Enter gửi"
+    "sendOnEnterDesc": "Khi bật, Enter gửi; Shift+Enter và Ctrl/Cmd+Enter chèn dòng mới. Khi tắt, Ctrl/Cmd+Enter gửi"
   },
   "languageServers": {
     "languageServersDesc": "Quản lý máy chủ LSP cho tự động hoàn thành, chẩn đoán và trí tuệ mã",

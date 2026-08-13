@@ -47,20 +47,51 @@ export interface WorkItemExternalStatusConfig {
   onChangeStatusId: (statusId: string) => void | Promise<void>;
 }
 
+export interface WorkItemExternalAssigneeOption {
+  id: string;
+  label: string;
+  avatar?: string;
+}
+
+export interface WorkItemExternalAssigneeConfig {
+  currentAssigneeIds: string[];
+  options: WorkItemExternalAssigneeOption[];
+  loading?: boolean;
+  error?: string | null;
+  disabled?: boolean;
+  readonlyReason?: string;
+  onOpen?: () => void | Promise<void>;
+  onChangeAssigneeIds: (assigneeIds: string[]) => void | Promise<void>;
+}
+
 export interface WorkItemPropertiesProps {
   workItem: WorkItemExtended;
   onUpdate: (updates: Partial<WorkItemExtended>) => void;
   externalStatusConfig?: WorkItemExternalStatusConfig;
+  externalAssigneeConfig?: WorkItemExternalAssigneeConfig;
   availableProjects?: WorkItemProject[];
   availableMilestones?: WorkItemMilestone[];
   availableLabels?: WorkItemLabel[];
   availableMembers?: Person[];
   availableAgents?: AgentDefinition[];
   availableOrgs?: OrgMember[];
+  /** Brand integration icon for the selected project (for example, GitHub). */
+  projectIconType?: string;
+  /** Show the current project without allowing it to be changed or cleared. */
+  projectReadonly?: boolean;
+  /** Show the current assignee without offering a local-only picker. */
+  assigneeReadonly?: boolean;
   showTime?: boolean;
   fieldVariant?: FieldRowVariant;
+  /**
+   * Layout policy for pill fields. Inline create surfaces keep the compact
+   * single-row strip; constrained detail threads can opt into wrapping.
+   */
+  pillLayout?: "nowrap" | "wrap";
   visibleFields?: WorkItemPropertyFieldKey[];
   showMoreMenu?: boolean;
+  /** Row panels can use legacy cards or the shared Workstation trail layout. */
+  panelVariant?: "cards" | "workstation-trail";
 }
 
 export interface WorkItemPropertyHandlers {

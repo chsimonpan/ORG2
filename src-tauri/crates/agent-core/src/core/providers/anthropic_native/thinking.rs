@@ -162,7 +162,6 @@ mod tests {
             context_window: 200_000,
             thinking,
             omit_temperature_with_thinking: true,
-            text_only_wire: false,
         }
     }
 

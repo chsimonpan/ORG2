@@ -66,8 +66,8 @@ export interface ProjectDraft {
   name: string;
   summary: string;
   orgId: string;
-  /** Explicit Workspace preset association; undefined means unlinked. */
-  workspaceId?: string;
+  /** Follow the creator's default org until the user explicitly overrides it. */
+  orgSelectionMode: "auto" | "manual";
   /** Markdown description */
   description: string;
   status: string;
@@ -114,6 +114,7 @@ export function createDefaultProjectDraft(): ProjectDraft {
     name: "",
     summary: "",
     orgId: "personal-org",
+    orgSelectionMode: "auto",
     description: "",
     status: "backlog",
     priority: "none",

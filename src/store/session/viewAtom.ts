@@ -46,7 +46,6 @@ import {
   hasLiveSubagentJobs,
   subagentJobMapAtom,
 } from "@src/store/session/subagentJobAtom";
-import { chatPanelMaximizedAtom } from "@src/store/ui/chatPanelAtom";
 import { createZodJsonStorage } from "@src/util/core/storage/zodStorage";
 
 import type { SessionViewState } from "./types";
@@ -180,20 +179,16 @@ hasActiveSessionAtom.debugLabel = "hasActiveSessionAtom";
 export const openSessionAtom = atom(
   null,
   (
-    get,
+    _get,
     set,
     payload: { sessionId: string; sessionName?: string; repoPath?: string }
   ) => {
-    const previousSessionId = get(activeSessionIdAtom);
     set(sessionViewAtom, {
       activeSessionId: payload.sessionId,
       sessionName: payload.sessionName,
       repoPath: payload.repoPath,
     });
     set(activeSessionIdAtom, payload.sessionId);
-    if (previousSessionId !== payload.sessionId) {
-      set(chatPanelMaximizedAtom, true);
-    }
   }
 );
 openSessionAtom.debugLabel = "openSessionAtom";
@@ -251,6 +246,19 @@ export const claimPipelineSessionAtom = atom(
 claimPipelineSessionAtom.debugLabel = "claimPipelineSessionAtom";
 
 /**
+ * Release the transient session pipeline without forgetting the WorkStation's
+ * remembered session tab. Non-session Chat Panel tabs use this when they take
+ * over the visible surface so background sync, Presence, and replay snapshots
+ * do not keep treating the hidden session as rendered.
+ */
+export const releasePipelineSessionAtom = atom(null, (get, set) => {
+  if (!get(activeSessionIdAtom) && !get(sessionIdAtom)) return;
+  set(clearSessionAtom);
+  set(activeSessionIdAtom, null);
+});
+releasePipelineSessionAtom.debugLabel = "releasePipelineSessionAtom";
+
+/**
  * Unified action for switching sessions. Every navigation path
  * (sidebar, history panel, Chat tool tabs, control tower) MUST
  * use this atom to avoid state leaks and timestamp jumps.
@@ -294,11 +302,6 @@ export const jumpToSessionAtom = atom(
       repoPath: isRich ? payload.repoPath : current.repoPath,
     });
     set(activeSessionIdAtom, sessionId);
-    // A different session starts in the ChatPanel only. Explicit
-    // open-in-workstation actions clear this focused state themselves.
-    if (sessionId && previousPipelineSessionId !== sessionId) {
-      set(chatPanelMaximizedAtom, true);
-    }
     if (sessionId && previousPipelineSessionId === sessionId) {
       set(triggerSessionReloadAtom, sessionId);
     }

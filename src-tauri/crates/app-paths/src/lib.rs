@@ -12,6 +12,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 #[cfg(unix)]
@@ -20,6 +21,131 @@ use std::os::unix::fs::PermissionsExt;
 /// User home directory with a deterministic fallback to the system temp dir.
 pub fn home_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_else(std::env::temp_dir)
+}
+
+/// User-home root scanned for histories created by external agent apps.
+///
+/// Production falls back to the real user home. Multi-instance development
+/// launchers may set `ORGII_EXTERNAL_HISTORY_HOME` so a secondary profile
+/// does not discover and publish the primary profile's external histories
+/// under a different cloud identity.
+pub fn external_history_home_dir() -> PathBuf {
+    external_history_home_override().unwrap_or_else(home_dir)
+}
+
+fn external_history_home_override() -> Option<PathBuf> {
+    std::env::var_os("ORGII_EXTERNAL_HISTORY_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Roaming/application-data root used only for discovering external histories.
+///
+/// A secondary ORG2 identity redirects this beneath its isolated external
+/// history home instead of inheriting the primary user's `APPDATA`/XDG paths.
+pub fn external_history_data_dir() -> PathBuf {
+    if external_history_home_override().is_none() {
+        if let Some(path) = dirs::data_dir() {
+            return path;
+        }
+    }
+    let home = external_history_home_dir();
+    #[cfg(target_os = "windows")]
+    return home.join("AppData").join("Roaming");
+    #[cfg(target_os = "macos")]
+    return home.join("Library").join("Application Support");
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    return home.join(".local").join("share");
+}
+
+/// Machine-local application-data root used for external-history discovery.
+pub fn external_history_data_local_dir() -> PathBuf {
+    if external_history_home_override().is_none() {
+        if let Some(path) = dirs::data_local_dir() {
+            return path;
+        }
+    }
+    let home = external_history_home_dir();
+    #[cfg(target_os = "windows")]
+    return home.join("AppData").join("Local");
+    #[cfg(target_os = "macos")]
+    return home.join("Library").join("Application Support");
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    return home.join(".local").join("share");
+}
+
+/// Configuration root used for external-history discovery.
+pub fn external_history_config_dir() -> PathBuf {
+    if external_history_home_override().is_none() {
+        if let Some(path) = dirs::config_dir() {
+            return path;
+        }
+    }
+    let home = external_history_home_dir();
+    #[cfg(target_os = "windows")]
+    return home.join("AppData").join("Roaming");
+    #[cfg(target_os = "macos")]
+    return home.join("Library").join("Application Support");
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    return home.join(".config");
+}
+
+/// State root (`XDG_STATE_HOME` equivalent) used for external-history
+/// discovery.
+pub fn external_history_state_dir() -> PathBuf {
+    if external_history_home_override().is_none() {
+        if let Some(path) = dirs::state_dir() {
+            return path;
+        }
+    }
+    let home = external_history_home_dir();
+    #[cfg(target_os = "windows")]
+    return home.join("AppData").join("Local");
+    #[cfg(target_os = "macos")]
+    return home.join("Library").join("Application Support");
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    return home.join(".local").join("state");
+}
+
+/// Explicit `$XDG_CONFIG_HOME` probe used for external-history discovery.
+///
+/// `dirs::config_dir()` only honors XDG on Linux, but some providers (e.g.
+/// cursor-agent) honor an exported `$XDG_CONFIG_HOME` on macOS too, so
+/// callers add this as an extra candidate root alongside
+/// [`external_history_config_dir`].
+///
+/// Returns `None` when the env var is unset or blank, and — to keep identity
+/// isolation airtight — whenever `ORGII_EXTERNAL_HISTORY_HOME` is set: the
+/// real user's XDG environment must never leak into a secondary profile's
+/// discovery, and the override tree's deterministic XDG-default equivalent
+/// (`<override>/.config` on Linux) is already produced by
+/// [`external_history_config_dir`]'s fallback chain.
+pub fn external_history_xdg_config_dir() -> Option<PathBuf> {
+    external_history_xdg_dir("XDG_CONFIG_HOME")
+}
+
+/// Explicit `$XDG_STATE_HOME` probe used for external-history discovery.
+///
+/// `dirs::state_dir()` is `None` on macOS/Windows even when the user exports
+/// `XDG_STATE_HOME` for XDG-aware tools (e.g. Warp on Linux-style installs).
+/// Same isolation contract as [`external_history_xdg_config_dir`]: `None`
+/// whenever `ORGII_EXTERNAL_HISTORY_HOME` is set, since the isolated
+/// equivalent (`<override>/.local/state` on Linux) is already produced by
+/// [`external_history_state_dir`]'s fallback chain.
+pub fn external_history_xdg_state_dir() -> Option<PathBuf> {
+    external_history_xdg_dir("XDG_STATE_HOME")
+}
+
+fn external_history_xdg_dir(var: &str) -> Option<PathBuf> {
+    if external_history_home_override().is_some() {
+        return None;
+    }
+    let value = std::env::var(var).ok()?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(trimmed))
 }
 
 /// Application data root: `~/.orgii/`.
@@ -64,6 +190,15 @@ pub fn sessions_db() -> PathBuf {
     orgii_root().join("sessions.db")
 }
 
+/// Durable append-only shell replay artifacts: `~/.orgii/shell-replays/`.
+///
+/// Kept under the same `ORGII_HOME`-aware root as `sessions.db` so desktop,
+/// headless/API execution, range reads, tests, and session deletion always
+/// resolve the identical lifecycle-owned directory.
+pub fn shell_replays_dir() -> PathBuf {
+    orgii_root().join("shell-replays")
+}
+
 /// Privacy-filtered session-provenance hook inbox:
 /// `~/.orgii/session-provenance/inbox/`.
 ///
@@ -82,7 +217,9 @@ pub fn session_provenance_inbox_dir() -> PathBuf {
 /// sessions that outlive an Orgii restart reach the new server/token. Never
 /// deleted on shutdown — a dead server just refuses the TCP connect.
 pub fn agent_status_endpoint_path() -> PathBuf {
-    orgii_root().join("session-provenance").join("status-endpoint.json")
+    orgii_root()
+        .join("session-provenance")
+        .join("status-endpoint.json")
 }
 
 /// Live agent-status last-status cache:
@@ -92,7 +229,9 @@ pub fn agent_status_endpoint_path() -> PathBuf {
 /// (TTL-filtered) for UI continuity across restarts. Owner-only permissions;
 /// never mirrored into `sessions.db`.
 pub fn agent_status_cache_path() -> PathBuf {
-    orgii_root().join("session-provenance").join("last-status.json")
+    orgii_root()
+        .join("session-provenance")
+        .join("last-status.json")
 }
 
 /// Project & work-item SQLite database: `~/.orgii/projects/projects.db`.
@@ -208,11 +347,6 @@ pub fn merkle_root() -> PathBuf {
     orgii_root().join("merkle")
 }
 
-/// Code Map workspace graph indexes: `~/.orgii/code-map/`.
-pub fn code_map_root() -> PathBuf {
-    orgii_root().join("code-map")
-}
-
 /// Local embedding/model downloads: `~/.orgii/models/`.
 pub fn models_dir() -> PathBuf {
     orgii_root().join("models")
@@ -320,12 +454,30 @@ pub fn file_history_dir(session_id: &str) -> PathBuf {
     file_history_root().join(session_id)
 }
 
+// Git for Windows can take longer than 750 ms to cold-start while Defender or
+// a concurrent build is busy. Treating that transient delay as "Git missing"
+// blocks every repo-backed flow even though the executable is installed and
+// the real operation would have succeeded. Probe generously once, then reuse
+// the successful path for the lifetime of the process.
+#[cfg(windows)]
+const SYSTEM_GIT_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(not(windows))]
 const SYSTEM_GIT_PROBE_TIMEOUT: Duration = Duration::from_millis(750);
 
+static RESOLVED_SYSTEM_GIT: OnceLock<PathBuf> = OnceLock::new();
+
 pub fn system_git_executable() -> Option<PathBuf> {
-    system_git_candidate_paths()
+    if let Some(path) = RESOLVED_SYSTEM_GIT.get() {
+        return Some(path.clone());
+    }
+
+    let resolved = system_git_candidate_paths()
         .into_iter()
-        .find(|path| git_version_succeeds(path))
+        .find(|path| git_version_succeeds(path));
+    if let Some(path) = resolved.as_ref() {
+        let _ = RESOLVED_SYSTEM_GIT.set(path.clone());
+    }
+    resolved
 }
 
 pub fn system_git_candidate_paths() -> Vec<PathBuf> {
@@ -343,12 +495,44 @@ pub fn system_git_candidate_paths() -> Vec<PathBuf> {
         }
     }
 
+    #[cfg(windows)]
+    {
+        let program_files_roots = ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"]
+            .into_iter()
+            .filter_map(std::env::var_os)
+            .map(PathBuf::from)
+            .collect::<Vec<_>>();
+        let local_app_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+        paths.extend(windows_git_candidate_paths(
+            &program_files_roots,
+            local_app_data.as_deref(),
+        ));
+    }
+
     #[cfg(target_os = "macos")]
     {
         paths.push(PathBuf::from("/usr/bin/git"));
     }
 
     dedupe_paths(paths)
+}
+
+#[cfg(windows)]
+fn windows_git_candidate_paths(
+    program_files_roots: &[PathBuf],
+    local_app_data: Option<&Path>,
+) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for root in program_files_roots {
+        paths.push(root.join("Git").join("cmd").join("git.exe"));
+        paths.push(root.join("Git").join("bin").join("git.exe"));
+    }
+    if let Some(root) = local_app_data {
+        let git_root = root.join("Programs").join("Git");
+        paths.push(git_root.join("cmd").join("git.exe"));
+        paths.push(git_root.join("bin").join("git.exe"));
+    }
+    paths
 }
 
 fn git_binary_name() -> &'static str {
@@ -804,21 +988,20 @@ pub fn set_sensitive_file_permissions(path: &Path) -> std::io::Result<()> {
 
 #[cfg(windows)]
 fn current_windows_account_for_acl() -> Option<String> {
-    let whoami = std::process::Command::new("whoami")
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .ok()
-        .and_then(|output| {
-            if output.status.success() {
-                String::from_utf8(output.stdout)
-                    .ok()
-                    .map(|value| value.trim().to_string())
-                    .filter(|value| !value.is_empty())
-            } else {
-                None
-            }
-        });
+    let mut cmd = std::process::Command::new("whoami");
+    cmd.stdin(Stdio::null()).stderr(Stdio::null());
+    // Suppress console window on Windows.
+    app_platform::hide_console(&mut cmd);
+    let whoami = cmd.output().ok().and_then(|output| {
+        if output.status.success() {
+            String::from_utf8(output.stdout)
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        } else {
+            None
+        }
+    });
     if whoami.is_some() {
         return whoami;
     }
@@ -894,6 +1077,16 @@ pub fn codex_cli_profile_dir(account_id: &str) -> PathBuf {
     codex_cli_profile_root().join(sanitize_path_segment(account_id))
 }
 
+/// Session-scoped Codex CLI profile root for hosted-key sessions.
+pub fn codex_hosted_cli_profile_root() -> PathBuf {
+    orgii_root().join("codex-hosted-cli-profiles")
+}
+
+/// Session-scoped Codex CLI profile dir for one hosted-key session.
+pub fn codex_hosted_cli_profile_dir(session_id: &str) -> PathBuf {
+    codex_hosted_cli_profile_root().join(sanitize_path_segment(session_id))
+}
+
 /// Account-scoped Kiro CLI profile root: `~/.orgii/kiro-cli-profiles/`.
 pub fn kiro_cli_profile_root() -> PathBuf {
     orgii_root().join("kiro-cli-profiles")
@@ -966,6 +1159,108 @@ pub fn agent_worktrees_root() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    /// Serializes tests that mutate process environment variables. Env vars
+    /// are process-global, so parallel test threads would otherwise race.
+    fn env_lock() -> MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Sets or unsets one env var and restores the original value on drop.
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let original = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, original }
+        }
+
+        fn unset(key: &'static str) -> Self {
+            let original = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match self.original.take() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    #[test]
+    fn xdg_config_dir_reads_env_without_isolation_override() {
+        let _lock = env_lock();
+        let _isolation = EnvVarGuard::unset("ORGII_EXTERNAL_HISTORY_HOME");
+        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", "/home/tester/.config");
+
+        assert_eq!(
+            external_history_xdg_config_dir(),
+            Some(PathBuf::from("/home/tester/.config")),
+        );
+    }
+
+    #[test]
+    fn xdg_config_dir_is_none_under_isolation_override() {
+        let _lock = env_lock();
+        let _isolation = EnvVarGuard::set("ORGII_EXTERNAL_HISTORY_HOME", "/tmp/orgii-instance2");
+        let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", "/home/tester/.config");
+
+        assert_eq!(external_history_xdg_config_dir(), None);
+    }
+
+    #[test]
+    fn xdg_state_dir_reads_env_without_isolation_override() {
+        let _lock = env_lock();
+        let _isolation = EnvVarGuard::unset("ORGII_EXTERNAL_HISTORY_HOME");
+        let _xdg = EnvVarGuard::set("XDG_STATE_HOME", "/home/tester/.local/state");
+
+        assert_eq!(
+            external_history_xdg_state_dir(),
+            Some(PathBuf::from("/home/tester/.local/state")),
+        );
+    }
+
+    #[test]
+    fn xdg_state_dir_is_none_under_isolation_override() {
+        let _lock = env_lock();
+        let _isolation = EnvVarGuard::set("ORGII_EXTERNAL_HISTORY_HOME", "/tmp/orgii-instance2");
+        let _xdg = EnvVarGuard::set("XDG_STATE_HOME", "/home/tester/.local/state");
+
+        assert_eq!(external_history_xdg_state_dir(), None);
+    }
+
+    #[test]
+    fn xdg_dirs_ignore_unset_and_blank_env_values() {
+        let _lock = env_lock();
+        let _isolation = EnvVarGuard::unset("ORGII_EXTERNAL_HISTORY_HOME");
+
+        {
+            let _xdg = EnvVarGuard::unset("XDG_CONFIG_HOME");
+            assert_eq!(external_history_xdg_config_dir(), None);
+        }
+        {
+            let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", "   ");
+            assert_eq!(external_history_xdg_config_dir(), None);
+        }
+        {
+            let _xdg = EnvVarGuard::set("XDG_STATE_HOME", "  /home/tester/.local/state  ");
+            // Accidental surrounding whitespace is trimmed off.
+            assert_eq!(
+                external_history_xdg_state_dir(),
+                Some(PathBuf::from("/home/tester/.local/state")),
+            );
+        }
+    }
 
     #[test]
     fn orgii_temp_root_contains_orgii_segment() {
@@ -1016,5 +1311,23 @@ mod tests {
         assert!(dir.exists());
         assert!(dir.is_dir());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_git_candidates_do_not_depend_on_inherited_path() {
+        let candidates = windows_git_candidate_paths(
+            &[
+                PathBuf::from(r"C:\Program Files"),
+                PathBuf::from(r"C:\Program Files (x86)"),
+            ],
+            Some(Path::new(r"C:\Users\me\AppData\Local")),
+        );
+
+        assert!(candidates.contains(&PathBuf::from(r"C:\Program Files\Git\cmd\git.exe")));
+        assert!(candidates.contains(&PathBuf::from(r"C:\Program Files\Git\bin\git.exe")));
+        assert!(candidates.contains(&PathBuf::from(
+            r"C:\Users\me\AppData\Local\Programs\Git\cmd\git.exe"
+        )));
     }
 }

@@ -19,6 +19,14 @@ import type { SessionEventHandlerStateActions } from "@src/engines/SessionCore/s
 import { updateSessionStatus } from "@src/store/session";
 import { createInstrumentedStore } from "@src/util/core/state/instrumentedStore";
 
+const mocks = vi.hoisted(() => ({
+  getTurnIntentDispatch: vi.fn(),
+}));
+
+vi.mock("@src/engines/SessionCore/control/turnIntentDispatchLifecycle", () => ({
+  getTurnIntentDispatch: mocks.getTurnIntentDispatch,
+}));
+
 createInstrumentedStore();
 
 vi.mock("@src/engines/SessionCore/core/store/EventStoreProxy", () => ({
@@ -70,6 +78,7 @@ function createActions(): SessionEventHandlerStateActions & {
 describe("session sync state callbacks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getTurnIntentDispatch.mockReturnValue(undefined);
   });
 
   it("clears live streaming content before completed status can leave Stop UI stuck", () => {
@@ -144,7 +153,53 @@ describe("session sync state callbacks", () => {
       turnStatus: "completed",
     });
 
-    expect(markTurnTerminal).toHaveBeenCalledWith("session-1", "completed");
+    expect(markTurnTerminal).toHaveBeenCalledWith("session-1", "completed", {
+      generation: undefined,
+    });
+  });
+
+  it("passes the exact dispatched generation for an attributed terminal", () => {
+    mocks.getTurnIntentDispatch.mockReturnValue({
+      sessionId: "session-1",
+      generation: 17,
+    });
+    const callbacks = createSessionEventHandlerCallbacks(
+      "session-1",
+      createActions(),
+      vi.fn()
+    );
+
+    callbacks.onStatusChange?.("completed", undefined, {
+      turnIntentId: "intent-17",
+      turnStatus: "completed",
+    });
+
+    expect(mocks.getTurnIntentDispatch).toHaveBeenCalledWith("intent-17");
+    expect(markTurnTerminal).toHaveBeenCalledWith("session-1", "completed", {
+      generation: 17,
+    });
+  });
+
+  it("rejects a terminal intent attributed to another session", () => {
+    mocks.getTurnIntentDispatch.mockReturnValue({
+      sessionId: "session-other",
+      generation: 8,
+    });
+    const actions = createActions();
+    const callbacks = createSessionEventHandlerCallbacks(
+      "session-1",
+      actions,
+      vi.fn()
+    );
+
+    callbacks.onStatusChange?.("completed", undefined, {
+      turnIntentId: "cross-session-intent",
+    });
+
+    expect(markTurnTerminal).not.toHaveBeenCalled();
+    expect(actions.setSessionRuntimeStatus).not.toHaveBeenCalled();
+    expect(actions.setPendingCancel).not.toHaveBeenCalled();
+    expect(updateSessionStatus).not.toHaveBeenCalled();
   });
 
   it("does NOT mark the FSM terminal for intermediate status signals", () => {
@@ -184,7 +239,37 @@ describe("session sync state callbacks", () => {
     expect(updateSessionStatus).not.toHaveBeenCalled();
   });
 
-  it("opens the FSM turn on running status", () => {
+  it("opens the FSM turn on running and installing statuses", () => {
+    for (const status of ["running", "installing"] as const) {
+      const actions = createActions();
+      const callbacks = createSessionEventHandlerCallbacks(
+        "session-1",
+        actions,
+        vi.fn()
+      );
+
+      callbacks.onStatusChange?.(status);
+    }
+
+    expect(markTurnRunning).toHaveBeenCalledTimes(2);
+    expect(markTurnRunning).toHaveBeenNthCalledWith(1, "session-1");
+    expect(markTurnRunning).toHaveBeenNthCalledWith(2, "session-1");
+  });
+
+  it("calls dismissCanvasAtNewTurn with the session id when status is 'running'", () => {
+    const actions = createActions();
+    const callbacks = createSessionEventHandlerCallbacks(
+      "session-42",
+      actions,
+      vi.fn()
+    );
+
+    callbacks.onStatusChange?.("running");
+
+    expect(actions.dismissCanvasAtNewTurn).toHaveBeenCalledWith("session-42");
+  });
+
+  it("does not call dismissCanvasAtNewTurn for terminal statuses", () => {
     const actions = createActions();
     const callbacks = createSessionEventHandlerCallbacks(
       "session-1",
@@ -192,9 +277,11 @@ describe("session sync state callbacks", () => {
       vi.fn()
     );
 
-    callbacks.onStatusChange?.("running");
+    for (const status of ["completed", "failed", "cancelled"]) {
+      callbacks.onStatusChange?.(status);
+    }
 
-    expect(markTurnRunning).toHaveBeenCalledWith("session-1");
+    expect(actions.dismissCanvasAtNewTurn).not.toHaveBeenCalled();
   });
 
   it("calls dismissCanvasAtNewTurn with the session id when status is 'running'", () => {
@@ -242,6 +329,7 @@ describe("resetSessionSwitchState optimistic-running preservation", () => {
       setSessionRuntimeError: vi.fn(),
       setPendingCancel: vi.fn(),
       setStreamRetryStatus: vi.fn(),
+      clearCanvasPreviewOnSessionSwitch: vi.fn(),
     };
   }
 
@@ -263,6 +351,21 @@ describe("resetSessionSwitchState optimistic-running preservation", () => {
     expect(actions.setSessionContextTokens).toHaveBeenCalledWith(0);
     expect(actions.setSessionContextUsage).toHaveBeenCalledWith(null);
     expect(actions.setSessionContextBreakdown).toHaveBeenCalledWith(null);
+  });
+
+  it("clears canvas preview when switching between sessions", () => {
+    const actions = createSwitchActions();
+    resetSessionSwitchState(actions, "session-b", "session-a");
+    expect(actions.clearCanvasPreviewOnSessionSwitch).toHaveBeenCalledWith(
+      "session-a",
+      "session-b"
+    );
+  });
+
+  it("does not request a canvas clear without an entering session", () => {
+    const actions = createSwitchActions();
+    resetSessionSwitchState(actions);
+    expect(actions.clearCanvasPreviewOnSessionSwitch).not.toHaveBeenCalled();
   });
 
   it("preserves running for a session just optimistically started", () => {

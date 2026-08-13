@@ -11,10 +11,26 @@ const cursorLoaders = vi.hoisted(() => ({
   preview: vi.fn(),
   full: vi.fn(),
 }));
+const codexLoaders = vi.hoisted(() => ({
+  preview: vi.fn(),
+  full: vi.fn(),
+}));
+const genericLoaders = vi.hoisted(() => ({
+  preview: vi.fn(),
+}));
 
 vi.mock("../../cursorIde", () => ({
   cursorIdeInitialWindow: cursorLoaders.preview,
   cursorIdeChunks: cursorLoaders.full,
+}));
+
+vi.mock("../../sources/codexApp", () => ({
+  codexAppInitialWindow: codexLoaders.preview,
+  codexAppChunks: codexLoaders.full,
+}));
+
+vi.mock("../window", () => ({
+  importedHistoryInitialWindow: genericLoaders.preview,
 }));
 
 describe("imported history source registry", () => {
@@ -36,6 +52,41 @@ describe("imported history source registry", () => {
     expect(cursorLoaders.full).toHaveBeenCalledWith("cursoride-session-1");
   });
 
+  it("keeps Codex's bounded preview separate from cloud's full transcript", async () => {
+    codexLoaders.preview.mockResolvedValue({ chunks: [{ id: "preview" }] });
+    codexLoaders.full.mockResolvedValue([{ id: "full" }]);
+    const codex = getImportedHistorySourceBySessionId("codexapp-session-1");
+
+    await expect(
+      codex?.loadPreviewChunks("codexapp-session-1")
+    ).resolves.toEqual([{ id: "preview" }]);
+    await expect(
+      codex?.loadFullTranscriptChunks("codexapp-session-1")
+    ).resolves.toEqual([{ id: "full" }]);
+    expect(codexLoaders.preview).toHaveBeenCalledWith("codexapp-session-1");
+    expect(codexLoaders.full).toHaveBeenCalledWith("codexapp-session-1");
+  });
+
+  it("uses the bounded generic window without changing full cloud replay", async () => {
+    genericLoaders.preview.mockResolvedValue({
+      chunks: [{ id: "preview" }],
+    });
+    const claude = getImportedHistorySourceBySessionId(
+      "claudecodeapp-session-1"
+    );
+
+    await expect(
+      claude?.loadPreviewChunks("claudecodeapp-session-1")
+    ).resolves.toEqual([{ id: "preview" }]);
+    expect(genericLoaders.preview).toHaveBeenCalledWith({
+      sessionId: "claudecodeapp-session-1",
+      recentTurnCount: 1,
+    });
+    expect(claude?.loadFullTranscriptChunks).not.toBe(
+      claude?.loadPreviewChunks
+    );
+  });
+
   it("registers source-specific external history providers", () => {
     expect(IMPORTED_HISTORY_SOURCES.map((source) => source.sourceId)).toEqual([
       "cursor_ide",
@@ -50,6 +101,13 @@ describe("imported history source registry", () => {
       "warp",
       "zcode",
       "qoder",
+      "mimo_code",
+      "omp",
+      "pi",
+      "qoder_cli",
+      "qwen_code",
+      "copilot",
+      "kimi",
     ]);
     expect(
       IMPORTED_HISTORY_SOURCES.map((source) => source.listCategory)
@@ -66,11 +124,26 @@ describe("imported history source registry", () => {
       "external_history:warp",
       "external_history:zcode",
       "external_history:qoder",
+      "external_history:mimo_code",
+      "external_history:omp",
+      "external_history:pi",
+      "external_history:qoder_cli",
+      "external_history:qwen_code",
+      "external_history:copilot",
+      "external_history:kimi",
     ]);
     for (const source of IMPORTED_HISTORY_SOURCES) {
       expect(source.loadPreviewChunks).toBeTypeOf("function");
       expect(source.loadFullTranscriptChunks).toBeTypeOf("function");
+      expect(source.supportsWindowedReplay).toBe(true);
     }
+  });
+
+  it("enables bounded cloud replay only for providers with exact turn seeks", () => {
+    const capable = IMPORTED_HISTORY_SOURCES.filter(
+      (source) => source.loadCloudTurnIds && source.loadCloudTurnWindows
+    ).map((source) => source.sourceId);
+    expect(capable).toEqual(["cursor_ide", "codex_app", "claude_code"]);
   });
 
   it("resolves source metadata by session id prefix", () => {
@@ -95,6 +168,28 @@ describe("imported history source registry", () => {
     expect(
       getImportedHistorySourceBySessionId("warpapp-session-1")?.sourceId
     ).toBe("warp");
+    expect(
+      getImportedHistorySourceBySessionId("mimocodeapp-session-1")?.sourceId
+    ).toBe("mimo_code");
+    expect(
+      getImportedHistorySourceBySessionId("ompapp-session-1")?.sourceId
+    ).toBe("omp");
+    expect(
+      getImportedHistorySourceBySessionId("piapp-session-1")?.sourceId
+    ).toBe("pi");
+    expect(
+      getImportedHistorySourceBySessionId("qodercliapp-session-1")?.sourceId
+    ).toBe("qoder_cli");
+    expect(
+      getImportedHistorySourceBySessionId("qwencodeapp-session-1")?.sourceId
+    ).toBe("qwen_code");
+    expect(
+      getImportedHistorySourceBySessionId("kimihistoryapp-cli/group/session")
+        ?.sourceId
+    ).toBe("kimi");
+    expect(getImportedHistorySourceBySessionId("kimiapp-hook-session")).toBe(
+      undefined
+    );
   });
 
   it("resolves source metadata by list category", () => {
@@ -126,6 +221,9 @@ describe("imported history source registry", () => {
       getImportedHistorySourceByListCategory("external_history:warp")
         ?.groupLabel
     ).toBe("Warp");
+    expect(
+      getImportedHistorySourceByListCategory("external_history:pi")?.groupLabel
+    ).toBe("Pi");
   });
 
   it("narrows source-aware list categories", () => {
@@ -148,6 +246,7 @@ describe("imported history source registry", () => {
       true
     );
     expect(isImportedHistoryListCategory("external_history:warp")).toBe(true);
+    expect(isImportedHistoryListCategory("external_history:pi")).toBe(true);
     expect(isImportedHistoryListCategory("external_history")).toBe(false);
   });
 });

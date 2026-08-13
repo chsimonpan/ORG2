@@ -81,6 +81,12 @@ export interface ProjectSyncCycleResult {
   pushErrors: unknown[];
 }
 
+export interface ProjectSyncCycleOptions {
+  /** Realtime invalidations are pull-only. Outbox drains are driven by local
+   * data-change events and the periodic safety cycle. */
+  pushOutbox?: boolean;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -112,10 +118,17 @@ export class ProjectSyncChannel {
     return org.projectOrgId ?? org.id;
   }
 
-  /** One org cycle: apply the pulled delta, then drain → push → ack. */
-  async sync(input: ProjectSyncCycleInput): Promise<ProjectSyncCycleResult> {
+  /** One org cycle: apply the pulled delta and, when requested, drain → push
+   * → ack. Defaults to true for explicit/local cycles and existing callers. */
+  async sync(
+    input: ProjectSyncCycleInput,
+    options: ProjectSyncCycleOptions = {}
+  ): Promise<ProjectSyncCycleResult> {
     await this.applyPulledState(input);
-    return { pushErrors: await this.pushOutbox(input) };
+    return {
+      pushErrors:
+        options.pushOutbox === false ? [] : await this.pushOutbox(input),
+    };
   }
 
   private async applyPulledState(input: ProjectSyncCycleInput): Promise<void> {

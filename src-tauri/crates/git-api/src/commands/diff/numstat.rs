@@ -10,18 +10,20 @@ use std::time::{Duration, Instant};
 /// Cache TTL for combined numstat results. Prevents redundant libgit2 diff
 /// walks when the sidebar re-renders rapidly without any working-tree change.
 const NUMSTAT_CACHE_TTL: Duration = Duration::from_millis(500);
+const NUMSTAT_CACHE_MAX_ENTRIES: usize = 16;
 
 struct NumstatCacheEntry {
     cached_at: Instant,
     result: CombinedDiffNumstatResult,
 }
 
-/// `(repo_path_string, from_ref_string, head_sha)` → cached result.
-static NUMSTAT_CACHE: std::sync::OnceLock<
-    Mutex<HashMap<(String, String, String), NumstatCacheEntry>>,
-> = std::sync::OnceLock::new();
+type NumstatCacheKey = (String, String, String);
+type NumstatCache = Mutex<HashMap<NumstatCacheKey, NumstatCacheEntry>>;
 
-fn numstat_cache() -> &'static Mutex<HashMap<(String, String, String), NumstatCacheEntry>> {
+/// `(repo_path_string, from_ref_string, head_sha)` → cached result.
+static NUMSTAT_CACHE: std::sync::OnceLock<NumstatCache> = std::sync::OnceLock::new();
+
+fn numstat_cache() -> &'static NumstatCache {
     NUMSTAT_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -214,11 +216,10 @@ pub fn get_diff_numstat_combined(
     let head_sha_opt = read_head_sha_for_numstat(repo_path);
     if let Some(ref head_sha) = head_sha_opt {
         let cache_key = (repo_path_str.clone(), cache_ref.clone(), head_sha.clone());
-        if let Ok(cache) = numstat_cache().lock() {
+        if let Ok(mut cache) = numstat_cache().lock() {
+            cache.retain(|_, entry| entry.cached_at.elapsed() < NUMSTAT_CACHE_TTL);
             if let Some(entry) = cache.get(&cache_key) {
-                if entry.cached_at.elapsed() < NUMSTAT_CACHE_TTL {
-                    return Ok(entry.result.clone());
-                }
+                return Ok(entry.result.clone());
             }
         }
     }
@@ -271,6 +272,17 @@ pub fn get_diff_numstat_combined(
     if let Some(head_sha) = head_sha_opt {
         let cache_key = (repo_path_str, cache_ref, head_sha);
         if let Ok(mut cache) = numstat_cache().lock() {
+            cache.retain(|_, entry| entry.cached_at.elapsed() < NUMSTAT_CACHE_TTL);
+            while cache.len() >= NUMSTAT_CACHE_MAX_ENTRIES {
+                let oldest_key = cache
+                    .iter()
+                    .min_by_key(|(_, entry)| entry.cached_at)
+                    .map(|(key, _)| key.clone());
+                let Some(oldest_key) = oldest_key else {
+                    break;
+                };
+                cache.remove(&oldest_key);
+            }
             cache.insert(
                 cache_key,
                 NumstatCacheEntry {

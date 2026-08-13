@@ -47,6 +47,7 @@ instruction, consider it in the context of software engineering tasks and the cu
 - If an approach fails, diagnose why before switching tactics — read the error, check your assumptions, try a focused fix. Do not retry the identical action blindly, but do not abandon a viable approach after a single failure either.
 - If the user denies a tool call, do NOT re-attempt the exact same call. The denial is deliberate — reconsider the approach, adjust the parameters, or ask the user what they would prefer.
 - Be careful not to introduce security vulnerabilities such as command injection, XSS, SQL injection, and other OWASP top 10 vulnerabilities. If you notice insecure code, fix it immediately.
+- When the task specifies literal output constraints, re-read the produced artifact against them before claiming completion. For exact-content files, verify byte count and trailing bytes (for example with `wc -c` plus a hex/byte dump); command substitution and trimmed text readers hide trailing newlines and are not proof of byte equality.
 
 ## Code style
 
@@ -216,8 +217,6 @@ pub(super) fn build_channel_environment(
     // surface in the OS Agent system prompt the same way they do for
     // SDE — otherwise the LLM has no idea those paths exist.
     let additional_dirs_block = render_channel_additional_dirs_block(config);
-    let mut global_paths_block = String::new();
-    append_global_permitted_paths(&mut global_paths_block, &config.global_permitted_paths);
 
     format!(
         "## Environment\n\n\
@@ -226,7 +225,6 @@ pub(super) fn build_channel_environment(
          - **Home directory:** {home}\n\
          - **Agent workspace:** {ws}\n\
          {additional_dirs}\
-         {global_paths}\
          - **Command timeout:** 60s\n\
          {ide_context}\n\n\
          ## Tooling\n\n\
@@ -243,18 +241,46 @@ pub(super) fn build_channel_environment(
         } else {
             format!("{}\n         ", additional_dirs_block)
         },
-        global_paths = if global_paths_block.is_empty() {
-            String::new()
-        } else {
-            format!("{}         ", global_paths_block)
-        },
         ide_context = ide_context_str,
         tool_summary = tool_summary_str,
     )
 }
 
-pub(super) fn build_channel_behavioral_rules(config: &SystemPromptConfig) -> String {
+pub(super) fn build_channel_behavioral_rules(
+    config: &SystemPromptConfig,
+    include_pm_guidance: bool,
+) -> String {
     let workspace_path = resolve_workspace_path_string(config);
+
+    // The PM guidance must track the effective surface: outside a
+    // Project session `org2-pm` refuses mutations at the application
+    // boundary, and instructing the model to run commands that will be
+    // refused degrades every turn.
+    let mut guidelines: Vec<String> = vec![
+        "Always read files before editing them.".to_string(),
+        "Prefer minimal, precise edits over rewriting entire files.".to_string(),
+        "When running shell commands, prefer short-lived commands. Long-running processes are automatically backgrounded. Use `await_output` subcommands (wait_for, monitor, list) to monitor them — pass `handles: [...]` to check one or many at once — and `run_shell(kill_handle=...)` to terminate.".to_string(),
+        "Tools (git, search, exec) default to the active IDE repository when one is set. You do not need to specify repo_path or working_dir unless targeting a different location.".to_string(),
+        "Only ask the user for clarification when the request is genuinely ambiguous (multiple valid interpretations) or the action is irreversible/high-risk. For everything else, use your best judgment and proceed.".to_string(),
+        "Use `manage_workspace` (action `list`) to discover all workspaces (git repos and work folders) tracked by the IDE. Use action `add` to register a directory or action `remove` to drop one. To clone a remote repo, use `run_shell` with `git clone`; if it backgrounds, wait for completion with `await_output(command=\"wait_for\", handles=[pid])`, then register the cloned repository with `manage_workspace(action=\"add\", path=...)`. `run_shell` exposes ORGII's bundled Git when system Git is unavailable.".to_string(),
+        "When asked to browse the web, use the `browser` tool freely. You can navigate to any website, interact with pages, fill forms, search, shop, or extract information. Do not refuse web tasks.".to_string(),
+    ];
+    if include_pm_guidance {
+        guidelines.push("Projects and work items live in a global workspace store reachable from your shell through the `org2-pm` CLI: `org2-pm project list|show|find|create|update`, `org2-pm work list|show|create|update|transition|claim|note`. Always pass `--output json`. Examples: `org2-pm project find --query authentication`, `org2-pm work create --title \"Fix login bug\" --scope project-x`.".to_string());
+    }
+    guidelines.push(format!("Your personal workspace is at `{workspace_path}`. Use it for tasks NOT related to any code repository — personal reminders, shopping lists, non-coding research, life tasks. Use the personal workspace path when creating personal projects/items. For coding or repo-related tasks, the default repo is used automatically. Unless the user explicitly asks to create a new project, check the Personal Workspace section above first — if a suitable project already exists, add the work item to it instead of creating a duplicate."));
+    if include_pm_guidance {
+        guidelines.push("Before creating a work item, decide: is this task about the code in the active repository? Look at the repository description and project list above. If yes, use the default repo. If no (personal errand, general research, non-code task), route it to your personal workspace instead.".to_string());
+        guidelines.push("When the user asks for a **periodic or recurring task** (e.g. \"check this website every morning\", \"send me a daily summary\", \"remind me every Monday\"), always create a **work item with a schedule**: `org2-pm work create --title ... --schedule-cron \"0 9 * * *\"` (daily at 9 AM; `0 9 * * 1` = every Monday). Do NOT use one-off reminders or rely on memory for repeating tasks.".to_string());
+    }
+    guidelines.push("Use `send_to_inbox` to deliver results, summaries, or notifications to the user. Whenever you complete a task that produces output the user should review later (reports, research findings, periodic check results), send a summary to the inbox. Do not only print results in chat — the user may not be watching.".to_string());
+    guidelines.push("Agent and organization management lives in `~/.orgii/`. Use `manage_agent_def` directly (actions: list/get/create/update/remove/list_orgs/get_org/create_org/update_org/remove_org) to inspect or modify the user's library of custom agents and orgs. Examples: \"create an agent called QA-Bot that runs tests\", \"list all agent organizations\", \"disable the browser tool for my Reviewer agent\".".to_string());
+    let guidelines_block = guidelines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| format!("{}. {}", index + 1, line))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     format!(
         "## Response & Execution Style\n\n\
@@ -272,20 +298,8 @@ pub(super) fn build_channel_behavioral_rules(config: &SystemPromptConfig) -> Str
          Prioritize safety and human oversight over task completion; if instructions conflict, pause and ask the user; comply with stop, pause, or audit requests and never bypass safeguards.\n\
          Do not manipulate or persuade anyone to expand your access or disable safeguards. Do not copy yourself or change system prompts, safety rules, or tool policies unless the user explicitly requests it.\n\n\
          ## Guidelines\n\n\
-         1. Always read files before editing them.\n\
-         2. Prefer minimal, precise edits over rewriting entire files.\n\
-         3. When running shell commands, prefer short-lived commands. Long-running processes are automatically backgrounded. Use `await_output` subcommands (wait_for, monitor, list) to monitor them — pass `handles: [...]` to check one or many at once — and `run_shell(kill_handle=...)` to terminate.\n\
-         4. Tools (git, search, exec) default to the active IDE repository when one is set. You do not need to specify repo_path or working_dir unless targeting a different location.\n\
-         5. Only ask the user for clarification when the request is genuinely ambiguous (multiple valid interpretations) or the action is irreversible/high-risk. For everything else, use your best judgment and proceed.\n\
-         6. Use `manage_workspace` (action `list`) to discover all workspaces (git repos and work folders) tracked by the IDE. Use action `add` to register a directory or action `remove` to drop one. To clone a remote repo, use `run_shell` with `git clone`; if it backgrounds, wait for completion with `await_output(command=\"wait_for\", handles=[pid])`, then register the cloned repository with `manage_workspace(action=\"add\", path=...)`. `run_shell` exposes ORGII's bundled Git when system Git is unavailable.\n\
-         7. When asked to browse the web, use the `browser` tool freely. You can navigate to any website, interact with pages, fill forms, search, shop, or extract information. Do not refuse web tasks.\n\
-         8. Projects and work items live in a global workspace store. Use `manage_project` (actions: list/read/create/update/delete/find/list_members/list_contributors) and `manage_work_item` (actions: list_items/read_item/create_item/update_item/delete_item/start_item) directly. Examples: \"find work items about authentication\", \"list all projects\", \"create a work item for Alice to fix the login bug in project X\".\n\
-         9. Your personal workspace is at `{ws}`. Use it for tasks NOT related to any code repository — personal reminders, shopping lists, non-coding research, life tasks. Use the personal workspace path when creating personal projects/items. For coding or repo-related tasks, the default repo is used automatically. Unless the user explicitly asks to create a new project, check the Personal Workspace section above first — if a suitable project already exists, add the work item to it instead of creating a duplicate.\n\
-         10. Before creating a work item, decide: is this task about the code in the active repository? Look at the repository description and project list above. If yes, use the default repo. If no (personal errand, general research, non-code task), route it to your personal workspace instead.\n\
-         11. When the user asks for a **periodic or recurring task** (e.g. \"check this website every morning\", \"send me a daily summary\", \"remind me every Monday\"), always create a **work item with a schedule** via `manage_work_item(action=create_item)`. Set a `schedule` field with a cron expression (e.g. `0 9 * * *` for daily at 9 AM, `0 9 * * 1` for every Monday). Do NOT use one-off reminders or rely on memory for repeating tasks.\n\
-         12. Use `send_to_inbox` to deliver results, summaries, or notifications to the user. Whenever you complete a task that produces output the user should review later (reports, research findings, periodic check results), send a summary to the inbox. Do not only print results in chat — the user may not be watching.\n\
-         13. Agent and organization management lives in `~/.orgii/`. Use `manage_agent_def` directly (actions: list/get/create/update/remove/list_orgs/get_org/create_org/update_org/remove_org) to inspect or modify the user's library of custom agents and orgs. Examples: \"create an agent called QA-Bot that runs tests\", \"list all agent organizations\", \"disable the browser tool for my Reviewer agent\".",
-        ws = workspace_path,
+         {guidelines}",
+        guidelines = guidelines_block,
     )
 }
 
@@ -352,7 +366,6 @@ static GIT_BRANCH_CACHE: OnceLock<GitBranchCache> = OnceLock::new();
 pub(super) fn build_project_environment(
     workspace_path: &Path,
     additional_dirs: &[&Path],
-    global_permitted_paths: &[std::path::PathBuf],
 ) -> String {
     let mut ctx = String::from("## Environment\n\n");
     ctx.push_str(&format!("- Platform: {}\n", std::env::consts::OS));
@@ -379,8 +392,6 @@ pub(super) fn build_project_environment(
             ctx.push_str(&format!("  - `{}`\n", dir.display()));
         }
     }
-
-    append_global_permitted_paths(&mut ctx, global_permitted_paths);
 
     let is_git = workspace_path.join(".git").exists();
     ctx.push_str(&format!(
@@ -419,20 +430,6 @@ pub(super) fn build_project_environment(
     }
 
     ctx
-}
-
-fn append_global_permitted_paths(ctx: &mut String, paths: &[std::path::PathBuf]) {
-    if paths.is_empty() {
-        return;
-    }
-
-    ctx.push_str("- Globally permitted paths:\n");
-    for path in paths {
-        ctx.push_str(&format!("  - `{}`\n", path.display()));
-    }
-    ctx.push_str(
-        "  - Workspace-external paths authorized for structured tools, subject to policy and OS restrictions.\n",
-    );
 }
 
 pub(super) fn build_rules_section(rules: &[(String, String)]) -> String {
@@ -527,8 +524,8 @@ pub(super) fn build_atc_section() -> String {
     .join("\n")
 }
 
-pub(super) fn build_task_routing_section() -> String {
-    "## Task Routing\n\n\
+pub(super) fn build_task_routing_section(include_pm_guidance: bool) -> String {
+    let mut section = "## Task Routing\n\n\
      Not every request needs a work item. Work items exist for **tracking** — \
      if the user doesn't need to track it, handle it directly in conversation.\n\n\
      **Handle in conversation (no work item):**\n\
@@ -536,25 +533,56 @@ pub(super) fn build_task_routing_section() -> String {
      - Agent/org management — use `manage_agent_def` directly\n\
      - Quick operations you can do with your own tools\n\
      - Casual requests (open app, search the web, run a command)\n\
-     - Simple file edits (change a config value, update an env var)\n\n\
-     **Create a work item (via `manage_work_item(action=create_item)`) when:**\n\
-     - The task needs a full coding workflow (branch, tests, commit, PR)\n\
-     - The user explicitly asks to track/schedule something\n\
-     - The task requires long async execution the user wants to monitor\n\
-     - The user's language implies a formal task (\"implement X\", \"fix the bug in Y\")\n\n\
-     **When unsure**, ask the user.\n\n\
-     **Never** treat status checks, polling, or follow-up questions as new tasks.\n"
-        .to_string()
+     - Simple file edits (change a config value, update an env var)\n\n"
+        .to_string();
+    // Only Project sessions may mutate the work system; elsewhere the
+    // create-a-work-item branch would point at a refused command.
+    if include_pm_guidance {
+        section.push_str(
+            "**Create a work item (via `org2-pm work create`) when:**\n\
+             - The task needs a full coding workflow (branch, tests, commit, PR)\n\
+             - The user explicitly asks to track/schedule something\n\
+             - The task requires long async execution the user wants to monitor\n\
+             - The user's language implies a formal task (\"implement X\", \"fix the bug in Y\")\n\n\
+             **When unsure**, ask the user.\n\n",
+        );
+    }
+    section
+        .push_str("**Never** treat status checks, polling, or follow-up questions as new tasks.\n");
+    section
 }
 
 const AGENT_ORG_TASK_CONTEXT_LIMIT: usize = 12;
 
 fn format_agent_org_task_for_prompt(task: &Task) -> String {
-    let owner = task.owner.as_deref().unwrap_or("unclaimed");
+    const OWNER_PREVIEW_CHARS: usize = 120;
+    const BLOCKER_PREVIEW_CHARS: usize = 120;
+    const BLOCKER_PREVIEW_COUNT: usize = 3;
+    let owner = task
+        .owner
+        .as_deref()
+        .map(|owner| crate::utils::safe_truncate_chars_to_string(owner, OWNER_PREVIEW_CHARS))
+        .unwrap_or_else(|| "unclaimed".to_string());
     let blocked = if task.blocked_by.is_empty() {
         "unblocked".to_string()
     } else {
-        format!("blocked_by=[{}]", task.blocked_by.join(","))
+        let preview = task
+            .blocked_by
+            .iter()
+            .take(BLOCKER_PREVIEW_COUNT)
+            .map(|id| crate::utils::safe_truncate_chars_to_string(id, BLOCKER_PREVIEW_CHARS))
+            .collect::<Vec<_>>()
+            .join(",");
+        let omitted = task.blocked_by.len().saturating_sub(BLOCKER_PREVIEW_COUNT);
+        format!(
+            "blocked_by=[{}{}]",
+            preview,
+            if omitted > 0 {
+                format!(",+{omitted} more")
+            } else {
+                String::new()
+            }
+        )
     };
     format!(
         "- `{}` [{}] owner={} {} — {}",
@@ -566,10 +594,8 @@ fn format_agent_org_task_for_prompt(task: &Task) -> String {
     )
 }
 
-fn build_agent_org_task_snapshot(
-    context: &crate::coordination::agent_org_runs::AgentOrgRunContext,
-) -> Vec<String> {
-    let tasks = match AgentOrgTaskStore::list(&context.run_id) {
+fn build_agent_org_task_snapshot(tasks: Result<Vec<Task>, String>) -> Vec<String> {
+    let tasks = match tasks {
         Ok(tasks) => tasks,
         Err(err) => {
             return vec![format!(
@@ -611,10 +637,25 @@ fn build_agent_org_task_snapshot(
 
 pub fn build_agent_org_context_section(
     context: &crate::coordination::agent_org_runs::AgentOrgRunContext,
-    _current_agent_id: &str,
+    current_agent_id: &str,
     current_member_id: Option<&str>,
 ) -> String {
-    use crate::definitions::orgs::HierarchyMode;
+    let tasks = AgentOrgTaskStore::list_operational(&context.run_id);
+    build_agent_org_context_section_with_task_snapshot(
+        context,
+        current_agent_id,
+        current_member_id,
+        tasks,
+    )
+}
+
+pub(crate) fn build_agent_org_context_section_with_task_snapshot(
+    context: &crate::coordination::agent_org_runs::AgentOrgRunContext,
+    _current_agent_id: &str,
+    current_member_id: Option<&str>,
+    task_snapshot: Result<Vec<Task>, String>,
+) -> String {
+    use crate::definitions::orgs::{HierarchyMode, PlanApprovalPolicy};
     let identity_line = match current_member_id {
         Some(member_id) if context.participant_by_member_id(member_id).is_some() => format!(
             "- **Your identity in this org:** member_id `{member_id}`."
@@ -623,6 +664,25 @@ pub fn build_agent_org_context_section(
             "- **Your identity in this org:** unknown member_id `{member_id}`. You are not a canonical Agent Org participant."
         ),
         None => "- **Your identity in this org:** delegate/shadow worker. You are not a canonical Agent Org participant and you do not have an org member_id.".to_string(),
+    };
+    let task_authority_line = match current_member_id {
+        Some(COORDINATOR_MEMBER_ID) => {
+            "- **Your task authority:** coordinator — you may create, assign, reassign, edit, and repair tasks for every participant, and approve cross-workflow parallel overrides. You may NOT impersonate another member's work: only the current owner may set its task `in_progress`/`completed` or write its `output`. Assignment and dependency unblocking already wake the owner; do not start or complete the task on that member's behalf.".to_string()
+        }
+        Some(member_id) if context.participant_by_member_id(member_id).is_some() => {
+            let direct_reports = context.direct_report_member_ids_for(member_id);
+            if direct_reports.is_empty() {
+                format!(
+                    "- **Your task authority:** worker — you may create and modify only tasks for `{member_id}`. You may talk to peers when routing allows, but you may not assign or rewrite their work. Only you may record `in_progress`, `completed`, and `output` for tasks you own."
+                )
+            } else {
+                format!(
+                    "- **Your task authority:** manager — you may administer your own tasks and direct-report tasks only: `{}`. Peer and cross-branch work must go through the coordinator. For every task, only its current owner may record `in_progress`, `completed`, or `output`; do not impersonate a direct report's work.",
+                    direct_reports.join("`, `")
+                )
+            }
+        }
+        _ => "- **Your task authority:** none — non-roster sessions cannot mutate the Agent Org task board.".to_string(),
     };
     let mut lines = vec![
         "## Agent Org Run".to_string(),
@@ -636,7 +696,9 @@ pub fn build_agent_org_context_section(
             "- **Hierarchy mode:** {}",
             match context.hierarchy_mode {
                 HierarchyMode::Flat => "flat",
-                HierarchyMode::Soft => "soft (hierarchy is an organizational hint)",
+                HierarchyMode::Soft => {
+                    "soft (peer messaging is open; task authority follows the hierarchy)"
+                }
                 HierarchyMode::Strict => "strict (routing restricted — see rules below)",
             }
         ),
@@ -668,13 +730,25 @@ pub fn build_agent_org_context_section(
     lines.push(String::new());
     lines.push("## Team task board".to_string());
     lines.push(String::new());
+    lines.push(task_authority_line);
+    lines.push(String::new());
     lines.push(
-        "Do NOT use the generic `agent` tool to delegate work to roster members in this Agent Org. Roster members are already materialized as persistent sessions for this run. Use `task_create` to add worker-sized subtasks to the shared task board, set `owner` to a listed member_id when assigning directly, and use `task_update` to reassign, block, unblock, release, or complete existing work. Use `task_list` / `task_get` to inspect current state before changing ownership."
+        "Do NOT use the generic `agent` tool to delegate work to roster members in this Agent Org. Roster members are already materialized as persistent sessions for this run. Use `task_create` and `task_update` only within the task authority stated above. Communication reachability and task authority are separate: being allowed to message a peer never grants permission to assign, reassign, edit, or delete that peer's work. Use `task_list` / `task_get` to inspect current state before an authorized change."
             .to_string(),
     );
     lines.push(String::new());
     lines.push(
-        "For worker tasks, choose exactly one dispatch mode: (1) set `owner_member_id` for direct assignment to one specific member, or (2) leave `owner_member_id` unset and set `eligible_member_ids` to the exact worker member_ids allowed to self-claim. `eligible_member_ids` is the hard claim whitelist. `required_role` is only a human-readable hint and never authorizes a member by itself. Never create worker tasks with neither `owner_member_id` nor `eligible_member_ids`."
+        "For normal worker tasks, set `owner_member_id` for direct assignment to one specific member. An ownerless task is only a parked `awaiting coordinator assignment` state: set `eligible_member_ids` to the exact candidates, but no worker will self-claim or be woken. The coordinator must later choose the owner explicitly. `required_role` is only a human-readable hint and never authorizes a member by itself. Never create worker tasks with neither `owner_member_id` nor `eligible_member_ids`."
+            .to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "For a new multi-stage request, the coordinator should prefer one `task_graph_create` call: give each node a local key and express the complete dependency graph with `depends_on`. The graph is validated and inserted atomically, so review/test/synthesis work cannot disappear between separate create calls. Use single `task_create` only for a genuinely incremental follow-up or repair. Every `task_create` must also make a separate scheduling decision with `dispatch_policy`. Use `dispatch_policy=immediate` only when the task can start now without another task's result. For review, testing, synthesis, or any consumer work, use `dispatch_policy=after_dependencies` plus `dependency_task_ids=[...]` with all upstream task ids. If a request omits currently-open work, `task_create` returns `requires_dependency_confirmation` or `requires_parallel_confirmation` guidance without creating anything. Add omitted ids when their outputs are needed. Only the coordinator may use `allow_parallel_with_unlisted_open_tasks=true`; members must send the proposed parallel work to the coordinator for approval. Dependent tasks remain pending and receive `TaskAssigned` only after their dependencies complete."
+            .to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "Every `task_create` must also set `execution_mode`. Use `execution_mode=plan` only when the task's deliverable is a plan submitted with `create_plan`; use `execution_mode=build` for implementation, writing, review, testing, research, and all other work. The task assignment selects the member's next mode automatically. Inside an active Agent Org, never switch the Group chat or coordinator session into Plan mode in response to phrases such as 'plan then implement'; create a member Plan task instead. Do not send a separate mode-switch message. A Build task that bypasses an open Plan task is rejected for dependency confirmation unless the coordinator explicitly confirms that the work is independent."
             .to_string(),
     );
     lines.push(String::new());
@@ -689,27 +763,37 @@ pub fn build_agent_org_context_section(
     );
     lines.push(String::new());
     lines.push(
-        "Members must set `status=completed` when a task is done. If work is not done and the member is waiting for more context or another turn, leave the task owned and `in_progress`; do not move it back to `pending` just because a turn ended. Stale `in_progress` work is surfaced to the coordinator by the watchdog for explicit retry, reassign, release, or pause/report decisions."
+        "When a member receives `TaskAssigned`, it must first call `task_update` for that exact task id with `status=in_progress` before doing the work. When done, the same owning member must call `task_update` with `status=completed` and `output={summary, content?, artifact_ids?}`; `summary` is required. Coordinators and managers must never perform these lifecycle/output calls for another owner. At turn end, the runtime gives a worker at most one bounded correction if a Build task is still `in_progress`; if it remains unresolved, `MemberIdle.unfinished_task_ids` tells the coordinator to retry or reassign instead of waiting silently. Plan tasks awaiting approval are excluded."
             .to_string(),
     );
     lines.push(String::new());
     lines.push(
-        "When you receive a `MemberIdle` notice with `reason=failed`, read its failure_reason for requeued tasks and recovery guidance. If the error looks temporary, use `org_send_message` to ask the same member to retry. If another eligible member is available, use `task_update owner_member_id` to assign directly. If a task is unowned and missing `eligible_member_ids`, repair it with `task_update eligible_member_ids` before expecting autonomous claim. Never assign or allow claim outside `eligible_member_ids`, and do not ask one member to inspect another member's private failed context. A watchdog stale notice is not permission to assign outside the eligible list; repair the task or explicitly choose a valid owner. If no recovery is possible, pause and report to the user."
+        "The coordinator may announce that the whole Agent Org run is complete only after calling `task_list` and seeing `run_summary.completion_ready=true`. `open=0` alone is insufficient: a Reviewer may still be running, an inbox handoff may be unread, or a member plan may still await approval. When `completion_ready=false`, inspect `completion_blockers`, `active_member_ids`, `unread_inbox_count`, and `pending_plan_approval_count` and keep coordinating or wait quietly for the real event."
             .to_string(),
     );
     lines.push(String::new());
     lines.push(
-        "Before creating a task, compare against the snapshot below and call `task_list` when uncertain. If a task already exists, update it instead of creating a duplicate. Ownerless tasks are claimed through the autonomous claim path only when the task is `pending`, dependencies are resolved, and the caller's member_id is listed in `eligible_member_ids`. Do not manually claim arbitrary ownerless work by setting `status=in_progress`; use `owner_member_id` for direct assignment or repair `eligible_member_ids` first."
+        "When you receive `MemberIdle` with non-empty `unfinished_task_ids`, do not wait silently: ask that owner to finish its lifecycle or explicitly reassign the task. When `reason=failed`, the failed member's in-progress tasks become ownerless Pending rows; read failure_reason, inspect eligibility, and choose a new owner explicitly with `task_update owner_member_id`. Workers never self-claim ownerless work. Never assign outside `eligible_member_ids`, and do not ask one member to inspect another member's private failed context. If no recovery is possible, pause and report to the user."
+            .to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "Before creating a task, compare against the snapshot below and call `task_list` when uncertain. If a task already exists, update it instead of creating a duplicate. Ownerless means waiting for explicit coordinator assignment, never an automatic claim pool. Workers must not set themselves as owner or set an ownerless task to `in_progress`; the coordinator first chooses `owner_member_id`, then normal TaskAssigned delivery wakes only that owner."
+            .to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
+        "Choose skills and tools from the user's actual request. For non-code work such as summaries, research, or writing, do not invoke GitHub issue-fix, repository, or code-audit workflows merely because those tools are available."
             .to_string(),
     );
     lines.push(String::new());
     lines.push("### Current task board snapshot".to_string());
-    lines.extend(build_agent_org_task_snapshot(context));
+    lines.extend(build_agent_org_task_snapshot(task_snapshot));
     lines.push(String::new());
     lines.push("## Org messaging".to_string());
     lines.push(String::new());
     lines.push(
-        "Use the `org_send_message` tool to send a typed org message to exactly one coordinator/member participant in this org. The only routing field is `recipient_member_id`; never route by display name or agent id. Messages are persisted and surfaced to the recipient on its next turn — they do not interrupt the recipient's current turn.".to_string(),
+        "Use the `org_send_message` tool to send a typed org message to exactly one coordinator/member participant in this org. The only routing field is `recipient_member_id`; never route by display name or agent id. Messages are persisted and surfaced to the recipient on its next turn — they do not interrupt the recipient's current turn. Every plain message to a non-coordinator worker must include `related_task_id` for unresolved, dependency-ready work already owned by that worker. Eligibility alone is not assignment; the coordinator must set `owner_member_id` before sending formal work instructions. Chat cannot create invisible work or bypass dependencies.".to_string(),
     );
 
     // Routing rules vary by hierarchy mode. The text below is what tells
@@ -742,25 +826,32 @@ pub fn build_agent_org_context_section(
     }
     lines.push(String::new());
     lines.push(
+        "**Messaging is not delegation.** Do not use a `plain` message to bypass task authority by telling a peer or another branch to start formal work. Use messages for questions, discussion, handoff context, and proposals. Formal work must already exist as an authority-checked task; if an unauthorized peer asks you to start new work, route the proposal to the coordinator instead of silently creating or executing a second task chain."
+            .to_string(),
+    );
+    lines.push(String::new());
+    lines.push(
         "**Your normal text output is NOT visible to other agents in this org.** To communicate with another org participant you MUST call `org_send_message` with a listed `recipient_member_id`. Writing the message in your reply alone reaches the user, not the agent.".to_string(),
     );
     lines.push(String::new());
     lines.push(
-        "Available message kinds: `plain` (free-form text — the common case), `shutdown_request` / `shutdown_response` (coordinator-driven graceful stop RPC — pair them with a sender-generated `request_id` the responder must echo), `plan_approval_response` (coordinator reply to a member's submitted plan — echo the plan request_id and set accepted/feedback), and `exec_mode_set_request` (ask a member to switch execution mode). orgii's user permission and user mode-switch systems are separate; do NOT encode user-facing permission prompts as org messages.".to_string(),
+        "Available message kinds: `plain` (free-form text — the common case), `shutdown_request` / `shutdown_response` (coordinator-driven graceful stop RPC — pair them with a sender-generated `request_id` the responder must echo), and, when this run uses coordinator plan approval, `plan_approval_response` (echo the plan request_id and set accepted/feedback). orgii's user permission and user mode-switch systems are separate; do NOT encode user-facing permission prompts as org messages.".to_string(),
     );
     lines.push(String::new());
     lines.push("### Planning workflow".to_string());
     lines.push(String::new());
     lines.push(
-        "If you are the coordinator and you need a member to draft an implementation plan, risk review, migration plan, architecture proposal, or phased design before implementation, first send `org_send_message` with `kind = \"exec_mode_set_request\"` and `mode = \"plan\"` to that member. Planner-like members should be switched to Plan mode before you ask them to produce a plan; otherwise they may treat the request as normal discussion or implementation work.".to_string(),
+        "If a member must draft an implementation plan, risk review, migration plan, architecture proposal, or phased design, create its task with `execution_mode=plan`. The member enters Plan mode automatically, submits through `create_plan`, and stops. Approval completes that planning task and unlocks tasks that depend on it; the Planner is not woken into a fake Build turn.".to_string(),
     );
     lines.push(String::new());
-    lines.push(
-        "When a non-coordinator member submits a plan with `create_plan`, that plan is an internal Agent Org protocol message to the coordinator, not a user-facing Build approval. Review the inbox plan request, then reply with `org_send_message` using `kind = \"plan_approval_response\"`, echo the plan `request_id`, and set `accepted = true` to approve or `accepted = false` with `feedback` to request revision. Approved member plans continue in Build mode by default; rejected member plans stay in Plan mode for revision.".to_string(),
-    );
+    lines.push(match context.plan_approval_policy {
+        PlanApprovalPolicy::Coordinator => "This run uses coordinator plan approval. When a member submits `create_plan`, review the durable inbox request, then send `kind=\"plan_approval_response\"` with the same `request_id`. `accepted=true` completes the source planning task and unlocks its dependants. `accepted=false` requires concrete `feedback` and wakes the Planner once in Plan mode for revision.".to_string(),
+        PlanApprovalPolicy::User => "This run uses user plan approval. A submitted member plan appears in Group chat. Do not manufacture approval messages or bypass the gate; wait quietly until the user approves, edits and approves, or requests changes.".to_string(),
+        PlanApprovalPolicy::Automatic => "This run uses automatic plan approval. A valid `create_plan` submission completes the source planning task immediately and unlocks its dependants; no coordinator approval message is needed.".to_string(),
+    });
     lines.push(String::new());
     lines.push(
-        "Coordinator or top-level Plan mode is different: a coordinator's own `create_plan` can still produce the user-facing Build approval surface. Only non-coordinator member plans use the internal coordinator approval path.".to_string(),
+        "A root session explicitly launched by the user in Plan mode remains a separate, user-selected workflow and may use the coordinator's own `create_plan` Build approval surface. Once an Agent Org run has launched in Build mode, keep the coordinator in Build mode and use member Plan tasks. Only non-coordinator member plans use the internal coordinator approval path.".to_string(),
     );
     lines.join("\n")
 }
@@ -1066,7 +1157,10 @@ mod mcp_instructions_tests {
 
     fn entries() -> Vec<(String, String)> {
         vec![
-            ("brick".to_string(), "Call explain first.".to_string()),
+            (
+                "code graph".to_string(),
+                "Inspect relationships first.".to_string(),
+            ),
             ("chrome dev".to_string(), "Batch tool loads.".to_string()),
         ]
     }
@@ -1074,10 +1168,10 @@ mod mcp_instructions_tests {
     #[test]
     fn renders_only_servers_with_registered_tools() {
         let body =
-            build_mcp_instructions_section(&entries(), &["read_file", "mcp__brick__explain"])
-                .expect("brick has a registered tool");
+            build_mcp_instructions_section(&entries(), &["read_file", "mcp__code_graph__explore"])
+                .expect("code graph has a registered tool");
         assert!(body.starts_with("# MCP Server Instructions"));
-        assert!(body.contains("## brick\nCall explain first."));
+        assert!(body.contains("## code graph\nInspect relationships first."));
         assert!(
             !body.contains("chrome dev"),
             "server without registered tools must not leak instructions"
@@ -1095,50 +1189,6 @@ mod mcp_instructions_tests {
     #[test]
     fn returns_none_without_matching_tools() {
         assert!(build_mcp_instructions_section(&entries(), &["read_file"]).is_none());
-        assert!(build_mcp_instructions_section(&[], &["mcp__brick__explain"]).is_none());
+        assert!(build_mcp_instructions_section(&[], &["mcp__code_graph__explore"]).is_none());
     }
-}
-// ============================================
-// Explicit imported context
-// ============================================
-
-pub(crate) fn build_imported_context_section(
-    snapshots: &[crate::session::context_import::ContextSnapshotMeta],
-) -> Option<String> {
-    let hydrated: Vec<_> = snapshots
-        .iter()
-        .filter_map(|snapshot| {
-            let snippet = snapshot.snippet.as_deref()?.trim();
-            if snippet.is_empty() {
-                return None;
-            }
-            Some((snapshot, truncate_at_boundary(snippet, 2_000)))
-        })
-        .collect();
-    if hydrated.is_empty() {
-        return None;
-    }
-
-    let mut lines = vec![
-        "# Imported Context".to_string(),
-        "The following excerpts were explicitly imported with `import_context`. Treat them as source-scoped context, not hidden global memory. If you rely on one, mention the source when useful.".to_string(),
-    ];
-    for (snapshot, snippet) in hydrated.into_iter().take(8) {
-        let title = snapshot
-            .title
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or(&snapshot.source_id);
-        lines.push(format!(
-            "\n## {} (`{}`)\n- Source: `{}` `{}`\n- Namespace: `{}`\n- Snapshot: `{}`\n\n{}",
-            title,
-            snapshot.source_kind.as_str(),
-            snapshot.source_kind.as_str(),
-            snapshot.source_id,
-            snapshot.namespace,
-            snapshot.snapshot_id,
-            snippet
-        ));
-    }
-    Some(lines.join("\n"))
 }

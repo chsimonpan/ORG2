@@ -10,6 +10,7 @@ import React, { Suspense, memo, useMemo } from "react";
 import { AgentMessageBlock } from "@src/engines/ChatPanel/blocks";
 import MessageReferenceCards from "@src/engines/ChatPanel/blocks/MessageReferenceCards";
 import LlmUsageBadge from "@src/engines/ChatPanel/blocks/ToolCallBlock/LlmUsageBadge";
+import { ChatLoadingBlock } from "@src/engines/ChatPanel/blocks/primitives";
 import {
   LLM_USAGE_ARGS_KEY,
   type LlmUsageMetadata,
@@ -19,7 +20,7 @@ import {
 import {
   chatRequiresItemIndex,
   chatShowsStatusLine,
-  getChatLazyComponent,
+  getChatComponent,
 } from "@src/engines/SessionCore/rendering/registry/events";
 import { createLogger } from "@src/hooks/logger";
 import { getRegistryEventType } from "@src/lib/activityData/activityNormalizers";
@@ -32,7 +33,7 @@ import {
 import AgentChatItemDefault from "../ChatItems/AgentChatItemDefault";
 import AgentErrorChatItem from "../ChatItems/AgentErrorChatItem";
 import "./ActivityRouter.scss";
-import { isAgentErrorEvent } from "./chatItemPipeline/classifiers";
+import { getAgentErrorMessage } from "./chatItemPipeline/classifiers";
 import UserMessageContent from "./components/UserMessageContent";
 
 const log = createLogger("ActivityRouter");
@@ -58,6 +59,7 @@ const RESULT_COMPARE_KEYS = [
   "observation",
   "success",
   "error",
+  "error_message",
   "images",
   "call_id",
   "output",
@@ -142,10 +144,6 @@ function arePropsEqual(
 // ============================================
 // Loading Fallback
 // ============================================
-
-const ActivityLoadingFallback: React.FC = () => (
-  <div className="h-8 animate-pulse rounded bg-fill-2" />
-);
 
 /**
  * uiCanonical values that carry their own dedicated chat renderer AND are
@@ -265,14 +263,17 @@ const ActivityChatItem: React.FC<ActivityChatItemProps> = memo(
     }, [event.result]);
 
     const renderContent = () => {
+      if (event.id === "loading") {
+        return <ChatLoadingBlock />;
+      }
+
       const actionType = event.actionType;
       const functionName = event.functionName;
       const eventType = getRegistryEventType(event);
 
-      if (isAgentErrorEvent(event) && event.result?.observation) {
-        return (
-          <AgentErrorChatItem errorMessage={String(event.result.observation)} />
-        );
+      const agentErrorMessage = getAgentErrorMessage(event);
+      if (agentErrorMessage) {
+        return <AgentErrorChatItem errorMessage={agentErrorMessage} />;
       }
 
       if (
@@ -328,7 +329,7 @@ const ActivityChatItem: React.FC<ActivityChatItemProps> = memo(
         }
       }
 
-      const EventComponent = getChatLazyComponent(eventType);
+      const EventComponent = getChatComponent(eventType);
 
       if (EventComponent) {
         const extras: Record<string, unknown> = {};
@@ -340,7 +341,7 @@ const ActivityChatItem: React.FC<ActivityChatItemProps> = memo(
         }
         return (
           <ActivityErrorBoundary eventType={eventType}>
-            <Suspense fallback={<ActivityLoadingFallback />}>
+            <Suspense fallback={<ChatLoadingBlock />}>
               <EventComponent event={event} variant="chat" {...extras} />
             </Suspense>
           </ActivityErrorBoundary>

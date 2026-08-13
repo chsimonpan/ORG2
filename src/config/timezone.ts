@@ -40,6 +40,19 @@ export const getCurrentTimezone = (): TimezoneOption => {
 };
 
 /**
+ * The user's timezone preference as an `Intl` `timeZone` option.
+ *
+ * `undefined` means "auto" — let `Intl` use the system zone, which is also
+ * the right value to spread into options (an explicit `timeZone: undefined`
+ * behaves identically to omitting the key).
+ */
+export function resolveTimeZoneForIntl(): string | undefined {
+  const timezone = getCurrentTimezone();
+  if (timezone === "auto") return undefined;
+  return timezone === "utc" ? "UTC" : timezone;
+}
+
+/**
  * Get timezone offset information for a given timezone
  */
 export function getTimezoneOffset(tzValue: TimezoneOption): {

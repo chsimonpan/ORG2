@@ -13,7 +13,10 @@
  */
 // Direct leaf import to avoid pulling @src/store's barrel — which transitively
 // reaches workstation/codeEditor modules and creates a circular dependency.
-import { getCurrentTimezone } from "@src/config/timezone";
+import {
+  getCurrentTimezone,
+  resolveTimeZoneForIntl,
+} from "@src/config/timezone";
 
 import { parseApiDate } from "./dateCore";
 
@@ -98,12 +101,6 @@ export function toIntlLocaleTag(language: string | undefined): string {
   if (language === "ja") return "ja-JP";
   if (language === "ko") return "ko-KR";
   return language;
-}
-
-function resolveTimeZoneForIntl(): string | undefined {
-  const timezone = getCurrentTimezone();
-  if (timezone === "auto") return undefined;
-  return timezone === "utc" ? "UTC" : timezone;
 }
 
 function dateKeyInTimezone(date: Date, timeZone: string | undefined): string {

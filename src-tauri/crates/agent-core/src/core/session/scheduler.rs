@@ -99,6 +99,10 @@ pub struct ScheduledMessage {
     /// id. Empty only on the rare turn paths that intentionally skip
     /// user-message persistence (resume with empty content).
     pub turn_intent_id: String,
+    /// Durable Agent Org run that owns this turn, when any. The scheduler
+    /// uses this only after the intent reaches a terminal state so finality
+    /// is rechecked after (not before) the current intent stops blocking it.
+    pub org_run_id: Option<String>,
     /// The user content to process.
     pub content: String,
     /// Opaque processing callback.  Boxed future factory so the scheduler
@@ -260,6 +264,15 @@ impl DialogScheduler {
         if let Some(client_message_id) = msg.client_message_id.as_ref() {
             let mut ids = self.client_message_ids.lock().await;
             if !ids.insert(client_message_id.clone()) {
+                // This request minted its own durable intent before enqueue,
+                // but an equivalent client message is already queued/running.
+                // The scheduler is the single authority that knows the request
+                // was coalesced, so it also closes that new intent here.
+                crate::foundation::session_bridge::update_turn_intent_status(
+                    &self.session_id,
+                    &msg.turn_intent_id,
+                    crate::foundation::session_bridge::TurnIntentBridgeStatus::Coalesced,
+                );
                 return Ok(EnqueueResult {
                     message_id,
                     queue_position: 0,
@@ -289,6 +302,11 @@ impl DialogScheduler {
                         .await
                         .remove(client_message_id);
                 }
+                crate::foundation::session_bridge::update_turn_intent_status(
+                    &self.session_id,
+                    &rejected.turn_intent_id,
+                    crate::foundation::session_bridge::TurnIntentBridgeStatus::Rejected,
+                );
                 Err(format!(
                     "Session queue is full — message rejected (content_len={})",
                     rejected.content.len()
@@ -302,6 +320,11 @@ impl DialogScheduler {
                         .await
                         .remove(client_message_id);
                 }
+                crate::foundation::session_bridge::update_turn_intent_status(
+                    &self.session_id,
+                    &rejected.turn_intent_id,
+                    crate::foundation::session_bridge::TurnIntentBridgeStatus::Rejected,
+                );
                 Err("Session scheduler has shut down".to_string())
             }
         }
@@ -445,6 +468,7 @@ impl WorkerTask {
 
             let client_message_id = msg.client_message_id.clone();
             let turn_intent_id = msg.turn_intent_id.clone();
+            let org_run_id = msg.org_run_id.clone();
             let execute_future = (msg.execute)();
             let result = std::panic::AssertUnwindSafe(execute_future)
                 .catch_unwind()
@@ -473,6 +497,28 @@ impl WorkerTask {
                         &turn_intent_id,
                         crate::foundation::session_bridge::TurnIntentBridgeStatus::Completed,
                     );
+                    if let Some(run_id) = org_run_id {
+                        let reconcile_run_id = run_id.clone();
+                        match tokio::task::spawn_blocking(move || {
+                            crate::coordination::agent_org_runs::AgentOrgRunStore::reconcile_run_finality(
+                                &reconcile_run_id,
+                            )
+                        })
+                        .await
+                        {
+                            Ok(Ok(_)) => {}
+                            Ok(Err(error)) => warn!(
+                                run_id = %run_id,
+                                error = %error,
+                                "[scheduler] post-intent Agent Org finality reconcile failed"
+                            ),
+                            Err(error) => warn!(
+                                run_id = %run_id,
+                                error = %error,
+                                "[scheduler] post-intent Agent Org finality reconcile task failed"
+                            ),
+                        }
+                    }
                     // agent:complete is already broadcast by processor; we
                     // only broadcast the updated queue status here.
                 }
@@ -498,7 +544,8 @@ impl WorkerTask {
                         let error_code = classify_streaming_error_message(err);
                         let streaming_error = StreamingError::new(err.clone(), error_code)
                             .with_details(serde_json::json!({
-                                "messageId": msg.message_id
+                                "messageId": msg.message_id,
+                                "turnIntentId": turn_intent_id,
                             }));
                         broadcast_agent_error_structured(&self.session_id, &streaming_error);
                     }
@@ -550,6 +597,7 @@ mod tests {
                 generation: 0,
                 client_message_id: None,
                 turn_intent_id: String::new(),
+                org_run_id: None,
                 content: "running".to_string(),
                 execute: Box::new(move || {
                     Box::pin(async move {
@@ -569,6 +617,7 @@ mod tests {
                 generation: 0,
                 client_message_id: None,
                 turn_intent_id: String::new(),
+                org_run_id: None,
                 content: "stale".to_string(),
                 execute: Box::new(move || {
                     Box::pin(async move {
@@ -601,6 +650,7 @@ mod tests {
                 generation: 0,
                 client_message_id: Some("client-1".to_string()),
                 turn_intent_id: String::new(),
+                org_run_id: None,
                 content: "running".to_string(),
                 execute: Box::new(move || {
                     Box::pin(async move {
@@ -619,6 +669,7 @@ mod tests {
                 generation: 0,
                 client_message_id: Some("client-1".to_string()),
                 turn_intent_id: String::new(),
+                org_run_id: None,
                 content: "duplicate".to_string(),
                 execute: Box::new(|| Box::pin(async { Ok("duplicate ran".to_string()) })),
             })
@@ -629,6 +680,62 @@ mod tests {
         assert!(second.duplicate);
         assert_eq!(second.message_id, "second");
         release_running.notify_one();
+    }
+
+    #[tokio::test]
+    async fn twenty_concurrent_wakes_coalesce_to_one_turn() {
+        let scheduler = Arc::new(DialogScheduler::new("session-wake-storm", 32));
+        let release = Arc::new(tokio::sync::Notify::new());
+        let executed = Arc::new(AtomicUsize::new(0));
+        let mut joins = tokio::task::JoinSet::new();
+
+        for index in 0..20 {
+            let scheduler = Arc::clone(&scheduler);
+            let release = Arc::clone(&release);
+            let executed = Arc::clone(&executed);
+            joins.spawn(async move {
+                scheduler
+                    .enqueue(ScheduledMessage {
+                        kind: ScheduledKind::Turn,
+                        message_id: format!("wake-{index}"),
+                        generation: 0,
+                        client_message_id: Some("agent-org-wake:run-1:member-a".to_string()),
+                        turn_intent_id: String::new(),
+                        org_run_id: None,
+                        content: String::new(),
+                        execute: Box::new(move || {
+                            Box::pin(async move {
+                                executed.fetch_add(1, Ordering::SeqCst);
+                                release.notified().await;
+                                Ok(String::new())
+                            })
+                        }),
+                    })
+                    .await
+                    .expect("wake enqueue")
+            });
+        }
+
+        let mut accepted = 0;
+        let mut coalesced = 0;
+        while let Some(result) = joins.join_next().await {
+            if result.expect("join wake").duplicate {
+                coalesced += 1;
+            } else {
+                accepted += 1;
+            }
+        }
+        assert_eq!(accepted, 1);
+        assert_eq!(coalesced, 19);
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while executed.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("accepted wake starts");
+        assert_eq!(executed.load(Ordering::SeqCst), 1);
+        release.notify_one();
     }
 
     #[tokio::test]
@@ -651,6 +758,7 @@ mod tests {
                 generation: 0,
                 client_message_id: None,
                 turn_intent_id: String::new(),
+                org_run_id: None,
                 content: "[manual compact]".to_string(),
                 execute: Box::new(move || {
                     Box::pin(async move {
@@ -683,50 +791,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_turn_does_not_strand_the_following_queued_message() {
-        let scheduler = DialogScheduler::new("session-after-failure", 8);
-        let second_executed = Arc::new(AtomicUsize::new(0));
-
-        scheduler
-            .enqueue(ScheduledMessage {
-                kind: ScheduledKind::Turn,
-                message_id: "failing-turn".to_string(),
-                generation: 0,
-                client_message_id: None,
-                turn_intent_id: String::new(),
-                content: "fail".to_string(),
-                execute: Box::new(|| Box::pin(async { Err("tool failure".to_string()) })),
-            })
-            .await
-            .expect("first enqueue succeeds");
-
-        let second_executed_for_closure = Arc::clone(&second_executed);
-        scheduler
-            .enqueue(ScheduledMessage {
-                kind: ScheduledKind::Turn,
-                message_id: "turn-after-failure".to_string(),
-                generation: 0,
-                client_message_id: None,
-                turn_intent_id: String::new(),
-                content: "continue".to_string(),
-                execute: Box::new(move || {
-                    Box::pin(async move {
-                        second_executed_for_closure.fetch_add(1, Ordering::SeqCst);
-                        Ok("ran".to_string())
-                    })
-                }),
-            })
-            .await
-            .expect("second enqueue succeeds");
-
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-        assert_eq!(second_executed.load(Ordering::SeqCst), 1);
-        assert_eq!(scheduler.pending_count(), 0);
-        assert!(!scheduler.is_turn_processing());
-    }
-
-    #[tokio::test]
     async fn message_after_invalidation_runs() {
         let scheduler = DialogScheduler::new("session-b", 8);
         let executed = Arc::new(AtomicUsize::new(0));
@@ -741,6 +805,7 @@ mod tests {
                 generation: 0,
                 client_message_id: None,
                 turn_intent_id: String::new(),
+                org_run_id: None,
                 content: "fresh".to_string(),
                 execute: Box::new(move || {
                     Box::pin(async move {

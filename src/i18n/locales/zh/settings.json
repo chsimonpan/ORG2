@@ -142,7 +142,7 @@
     "timezoneAuto": "自动（浏览器）",
     "timezoneSearchPlaceholder": "搜索附近城市",
     "sendOnEnter": "Enter 发送消息",
-    "sendOnEnterDesc": "启用后 Enter 发送，Shift+Enter 换行；关闭后 Ctrl/Cmd+Enter 发送",
+    "sendOnEnterDesc": "启用后 Enter 发送，Shift+Enter 与 Ctrl/Cmd+Enter 换行；关闭后 Ctrl/Cmd+Enter 发送",
     "language": "语言",
     "languageSearchPlaceholder": "搜索语言...",
     "languageNames": {
@@ -227,7 +227,10 @@
     "presenceGuidanceOnlineDefault": "我在电脑前。你可以随时向我提出澄清问题，执行任何破坏性操作前请先让我确认",
     "presenceGuidanceInvisibleDefault": "我在附近但显示为离线。默认自主执行；只有高风险操作或重大重构才通知我，其他问题请汇总成一段摘要，不要逐个询问",
     "presenceGuidanceAwayDefault": "我暂时不在电脑前。不要等我回复；根据现有信息做出最佳判断，完成能完成的事项，并留下简明总结和待我回来处理的问题",
-    "followSystem": "跟随系统"
+    "followSystem": "跟随系统",
+    "preferences": "偏好设置",
+    "usePointerCursors": "使用指针光标",
+    "usePointerCursorsDesc": "悬停在交互元素上时将光标更改为指针"
   },
   "background": {
     "title": "背景",
@@ -703,8 +706,35 @@
     "test": {
       "sent": "测试通知已发送",
       "permissionWarning": "测试通知发送失败，请检查权限。",
-      "sendFailed": "无法发送测试通知。请检查通知权限后重试。"
-    }
+      "sendFailed": "无法发送测试通知。请检查通知权限后重试。",
+      "soundFailed": "无法播放通知音效，请检查系统音量。"
+    },
+    "soundPreset": "通知音效",
+    "soundPresetDesc": "选择通知提醒时播放的声音",
+    "previewSound": "试听",
+    "soundPresets": {
+      "classic": "经典双音",
+      "gentle": "轻柔和弦",
+      "ascending": "上扬三音",
+      "bell": "铃音"
+    },
+    "criticalOnly": "仅关键提醒",
+    "criticalOnlyDesc": "仅在操作需要批准或任务执行失败时提醒",
+    "quietHours": "免打扰时段",
+    "quietHoursDesc": "在每天指定的时间范围内静音普通通知",
+    "quietHoursSchedule": "静音时间",
+    "quietHoursScheduleDesc": "使用设备本地时间；开始与结束时间相同时不启用静音窗口。",
+    "quietHoursStart": "开始",
+    "quietHoursEnd": "结束",
+    "allowCriticalDuringQuietHours": "允许关键提醒",
+    "allowCriticalDuringQuietHoursDesc": "审批和失败可显示系统通知，但不会播放声音",
+    "backgroundCompletionSummary": "汇总后台任务完成提醒",
+    "backgroundCompletionSummaryDesc": "免打扰结束后只发送一条汇总提醒",
+    "mutedSessions": "已静音会话",
+    "mutedSessionsDesc": "此设备上已有 {{count}} 个会话静音",
+    "clearMutedSessions": "全部清除",
+    "teamInbox": "团队收件箱",
+    "teamInboxDesc": "来自队友的分配、提及和交接"
   },
   "editor": {
     "tabEditor": "编辑器",
@@ -811,10 +841,14 @@
     "installConfirmDesc": "版本 {{version}} 已下载。安装并重新启动 ORGII 前，请保存正在进行的工作。",
     "installAndRestart": "安装并重新启动",
     "autoDownloadUpdates": "以后自动下载更新",
-    "skipVersion": "跳过此版本"
+    "skipVersion": "跳过此版本",
+    "installOfficialConfirmTitle": "正式版已准备好安装",
+    "installOfficialConfirmDesc": "将正式版 {{version}} 安装到 /Applications/ORG2.app。当前本地构建会保持打开且不受影响。",
+    "installOfficial": "安装正式版 App",
+    "localBuild": "本地构建"
   },
   "monitor": {
-    "categoryTerminal": "终端/工具进程",
+    "categoryTerminal": "终端进程",
     "categoryWebview": "WebView 渲染器",
     "categoryGpu": "WebKit GPU",
     "categoryNetwork": "WebKit 网络",
@@ -943,7 +977,24 @@
     "diskCategory_agentWorktrees": "Agent Session Worktrees",
     "diskCategory_lspBin": "LSP Server 二进制",
     "diskCategory_sidecarBin": "下载的 Sidecar 二进制",
-    "loadZeroRows": "点击加载另外 {{count}} 项"
+    "loadZeroRows": "点击加载另外 {{count}} 项",
+    "appMemory": "应用内存",
+    "appBackend": "ORG2 后端",
+    "appWebviewHelpers": "已确认归属的 WebView 辅助进程",
+    "rssMappedDiagnostic": "RSS / 映射内存（诊断）",
+    "measurement": "统计口径",
+    "measurementKinds": {
+      "native": "系统原生有效内存",
+      "compatibility": "兼容口径",
+      "mixed": "原生与回退口径混合",
+      "rss_fallback": "RSS 回退口径",
+      "unavailable": "暂不可用"
+    },
+    "toolProcessDiagnostics": "终端、CLI 与工具进程（RSS 诊断）",
+    "excludedFromAppMemory": "不计入应用内存",
+    "noToolProcesses": "未检测到终端、CLI、MCP 或工具进程",
+    "categoryAgentCli": "CLI Agent",
+    "categoryMcpOrTool": "MCP / 工具进程"
   },
   "storage": {
     "dataDirectory": "数据目录",
@@ -962,7 +1013,13 @@
     "tableSize": "大小",
     "tablePercentage": "占比",
     "scanFailed": "扫描磁盘占用失败",
-    "openFolderFailed": "打开文件夹失败"
+    "openFolderFailed": "打开文件夹失败",
+    "browserCache": "浏览器缓存",
+    "browserCacheDesc": "已使用 {{used}} · 可安全清理 {{cleanable}}",
+    "cleanBrowserCache": "清理",
+    "browserCacheCleaned": "已释放 {{size}} 浏览器存储空间",
+    "browserCacheAlreadyClean": "浏览器缓存已是干净状态",
+    "browserCacheCleanFailed": "清理浏览器缓存失败"
   },
   "dependencies": {
     "systemDependencies": "系统 Dependencies",
@@ -1011,7 +1068,7 @@
     "decryptEffect": "打字机效果",
     "decryptEffectDesc": "Agent 消息逐字显示",
     "sendOnEnter": "Enter 发送消息",
-    "sendOnEnterDesc": "启用后 Enter 发送，Shift+Enter 换行；关闭后 Ctrl/Cmd+Enter 发送"
+    "sendOnEnterDesc": "启用后 Enter 发送，Shift+Enter 与 Ctrl/Cmd+Enter 换行；关闭后 Ctrl/Cmd+Enter 发送"
   },
   "languageServers": {
     "languageServersDesc": "管理用于自动补全、诊断和代码智能的 LSP 服务器",

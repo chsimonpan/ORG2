@@ -4,6 +4,7 @@ import {
   DROPDOWN_CLASSES,
   DROPDOWN_ITEM,
 } from "@src/components/Dropdown/tokens";
+import IntegrationIcon from "@src/components/IntegrationIcon";
 import { PropertyDropdownField } from "@src/components/PropertyField/PropertyDropdownField";
 import {
   FieldRow,
@@ -32,6 +33,8 @@ interface PlanningSectionProps {
   availableMilestones: WorkItemMilestone[];
   handlers: WorkItemPropertyHandlers;
   t: WorkItemPropertyTranslator;
+  projectIconType?: string;
+  projectReadonly?: boolean;
   fieldVariant?: FieldRowVariant;
   visibleFields?: Set<WorkItemPropertyFieldKey>;
 }
@@ -44,6 +47,8 @@ export function PlanningSection({
   availableMilestones,
   handlers,
   t,
+  projectIconType,
+  projectReadonly = false,
   fieldVariant = "row",
   visibleFields,
 }: PlanningSectionProps) {
@@ -59,19 +64,27 @@ export function PlanningSection({
           label={workItem.project?.name ?? t("workItems.properties.noProject")}
           icon={
             workItem.project ? (
-              <BookOpen size={DROPDOWN_ITEM.iconSize} />
+              projectIconType ? (
+                <IntegrationIcon
+                  type={projectIconType}
+                  size={DROPDOWN_ITEM.iconSize}
+                />
+              ) : (
+                <BookOpen size={DROPDOWN_ITEM.iconSize} />
+              )
             ) : (
               <BookDashed size={DROPDOWN_ITEM.iconSize} />
             )
           }
           iconColor={workItem.project?.color}
           options={[]}
-          placement={fieldVariant === "pill" ? "portal" : "inline"}
+          placement="portal"
           fieldVariant={fieldVariant}
           triggerVariant={fieldVariant}
           searchable
-          searchPlaceholder={t("workItems.properties.searchProjects")}
+          searchPlaceholder={t("common:actions.search")}
           selected={!!workItem.project}
+          readonly={projectReadonly}
           active={openPicker === "project"}
           onActiveChange={(active) => togglePicker(active ? "project" : null)}
           onClear={() => handlers.handleProjectChange(null)}
@@ -103,7 +116,17 @@ export function PlanningSection({
                 {filtered.map((projectItem) => (
                   <Option
                     key={projectItem.id}
-                    icon={<BookOpen size={DROPDOWN_ITEM.iconSize} />}
+                    icon={
+                      projectIconType &&
+                      projectItem.id === workItem.project?.id ? (
+                        <IntegrationIcon
+                          type={projectIconType}
+                          size={DROPDOWN_ITEM.iconSize}
+                        />
+                      ) : (
+                        <BookOpen size={DROPDOWN_ITEM.iconSize} />
+                      )
+                    }
                     iconColor={projectItem.color}
                     label={projectItem.name}
                     isSelected={workItem.project?.id === projectItem.id}
@@ -138,7 +161,7 @@ export function PlanningSection({
           />
           {openPicker === "milestone" && (
             <SearchableDropdown
-              placeholder={t("workItems.properties.searchMilestones")}
+              placeholder={t("common:actions.search")}
               widthMode={fieldVariant === "pill" ? "menu" : "match-parent"}
               align={fieldVariant === "pill" ? "auto" : "left"}
             >

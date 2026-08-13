@@ -119,6 +119,18 @@ pub struct EventHandlerConfig {
 
     /// Active IDE repository path for multi-root workspace tool rendering.
     pub active_repo_path: Option<String>,
+
+    /// Agent Org worker identity used by the bounded task-lifecycle stop gate.
+    /// Coordinators and non-org sessions leave this unset.
+    pub agent_org_task_lifecycle: Option<AgentOrgTaskLifecycleContext>,
+}
+
+/// Durable identity needed to verify that an Agent Org worker did not end a
+/// build turn while its owned task was still `in_progress`.
+#[derive(Clone, Debug)]
+pub struct AgentOrgTaskLifecycleContext {
+    pub run_id: String,
+    pub member_id: String,
 }
 
 /// Unified event handler for agent turns.
@@ -154,6 +166,10 @@ pub struct UnifiedEventHandler {
     /// Latest context-usage token count observed via `on_context_usage`.
     /// Feeds the Stop hook's `ORGII_TOTAL_TOKENS` env var.
     last_context_tokens: std::sync::atomic::AtomicI64,
+    /// The lifecycle gate may block completion at most once per logical turn.
+    /// A second miss is reported durably to the coordinator by `MemberIdle`
+    /// rather than looping the provider.
+    agent_org_lifecycle_correction_emitted: AtomicBool,
 }
 
 /// Accumulated state for one streaming `create_plan` call.
@@ -225,6 +241,7 @@ impl UnifiedEventHandler {
             retractable_stream_segments: Mutex::new(std::collections::HashMap::new()),
             plan_draft_streams: Mutex::new(std::collections::HashMap::new()),
             last_context_tokens: std::sync::atomic::AtomicI64::new(0),
+            agent_org_lifecycle_correction_emitted: AtomicBool::new(false),
         }
     }
 
@@ -784,6 +801,40 @@ impl TurnEventHandler for UnifiedEventHandler {
     }
 
     async fn on_turn_stop_check(&self, session_id: &str) -> Option<String> {
+        if !self
+            .agent_org_lifecycle_correction_emitted
+            .load(Ordering::SeqCst)
+        {
+            if let Some(context) = self.config.agent_org_task_lifecycle.clone() {
+                let feedback = tokio::task::spawn_blocking(move || {
+                    super::processor::member_idle::task_lifecycle_stop_feedback(
+                        &context.run_id,
+                        &context.member_id,
+                    )
+                })
+                .await
+                .ok()
+                .and_then(|result| match result {
+                    Ok(feedback) => feedback,
+                    Err(error) => {
+                        tracing::warn!(
+                            session_id = %session_id,
+                            error = %error,
+                            "failed to inspect Agent Org task lifecycle at turn stop"
+                        );
+                        None
+                    }
+                });
+                if feedback.is_some()
+                    && self
+                        .agent_org_lifecycle_correction_emitted
+                        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_ok()
+                {
+                    return feedback;
+                }
+            }
+        }
         hooks_dispatch::dispatch_stop_check(
             self.config.hook_executor.as_ref(),
             session_id,
@@ -799,10 +850,18 @@ impl TurnEventHandler for UnifiedEventHandler {
         session_id: &str,
         injection: &crate::turn_executor::SteeringInjection,
     ) {
+        // Consumption is the durable start of this steering intent. The
+        // turn-intent state machine intentionally rejects Queued -> terminal,
+        // so enter Running before either transcript outcome below.
+        crate::foundation::session_bridge::update_turn_intent_status(
+            session_id,
+            &injection.turn_intent_id,
+            crate::foundation::session_bridge::TurnIntentBridgeStatus::Running,
+        );
         // Persist the user message so the durable transcript (and the next
         // turn's reloaded history) contains it as a plain user row — the
         // in-memory <system-reminder> wrapper is a per-turn presentation.
-        let message_id = match crate::session::persistence::save_user_msg_and_assign_journey(
+        let message_id = match crate::session::persistence::save_user_msg(
             session_id,
             &injection.content,
             None,
@@ -814,11 +873,22 @@ impl TurnEventHandler for UnifiedEventHandler {
                     session_id,
                     err
                 );
+                // The injection has already been removed from the in-memory
+                // steering queue and is about to be presented to the model.
+                // Never leave its durable intent queued merely because the
+                // transcript write failed: that would block Agent Org
+                // finality forever. Failed is terminal and truthfully records
+                // that durable persistence did not complete.
+                crate::foundation::session_bridge::update_turn_intent_status(
+                    session_id,
+                    &injection.turn_intent_id,
+                    crate::foundation::session_bridge::TurnIntentBridgeStatus::Failed,
+                );
                 return;
             }
         };
         if let Some(handle) = self.config.app_handle.as_ref() {
-            crate::bus::event_pipeline_bridge::persist_user_message_event(
+            if let Err(err) = crate::bus::event_pipeline_bridge::persist_user_message_event(
                 handle,
                 session_id,
                 &message_id,
@@ -827,8 +897,13 @@ impl TurnEventHandler for UnifiedEventHandler {
                 None,
                 crate::bus::event_pipeline_bridge::PersistedUserMessageSource::User,
                 &injection.turn_intent_id,
-                self.config.turn_id.as_deref().unwrap_or_default(),
-            );
+            ) {
+                tracing::warn!(
+                    session_id,
+                    error = %err,
+                    "[unified_handler] failed to persist steering user-message event"
+                );
+            }
         }
         crate::foundation::session_bridge::update_turn_intent_status(
             session_id,
@@ -947,7 +1022,78 @@ impl TurnEventHandler for UnifiedEventHandler {
 mod tests {
     use std::sync::Arc;
 
-    use super::{should_push_assistant_event, EventHandlerConfig, UnifiedEventHandler};
+    use super::{
+        should_push_assistant_event, AgentOrgTaskLifecycleContext, EventHandlerConfig,
+        UnifiedEventHandler,
+    };
+    use crate::coordination::agent_org_tasks::{AgentOrgTaskStore, CreateTaskParams, TaskStatus};
+    use crate::turn_executor::TurnEventHandler;
+    use test_helpers::test_env;
+
+    #[tokio::test]
+    async fn agent_org_lifecycle_stop_gate_corrects_at_most_once_per_turn() {
+        let _sandbox = test_env::sandbox();
+        let conn = database::db::get_connection().expect("db");
+        crate::coordination::agent_org_runs::init_schema(&conn).expect("run schema");
+        crate::coordination::agent_org_tasks::init_schema(&conn).expect("task schema");
+        let run = crate::coordination::agent_org_runs::AgentOrgRunStore::create(
+            crate::coordination::agent_org_runs::CreateAgentOrgRunParams {
+                org_id: "org-stop-gate".to_string(),
+                coordinator_agent_id: "coordinator".to_string(),
+                root_session_id: None,
+                org_snapshot: crate::definitions::orgs::OrgDefinition {
+                    id: "org-stop-gate".to_string(),
+                    name: "Stop Gate Test Org".to_string(),
+                    role: "coordinator".to_string(),
+                    agent_id: "coordinator".to_string(),
+                    description: None,
+                    hierarchy_mode: Default::default(),
+                    plan_approval_policy: crate::definitions::orgs::PlanApprovalPolicy::Coordinator,
+                    children: vec![crate::definitions::orgs::OrgMember {
+                        id: "member-worker".to_string(),
+                        name: "Worker".to_string(),
+                        role: "builder".to_string(),
+                        agent_id: "worker-agent".to_string(),
+                        runtime_config: None,
+                        children: Vec::new(),
+                    }],
+                },
+                entry_mode:
+                    crate::coordination::agent_org_runs::AgentOrgRunEntryMode::StandaloneSession,
+                status: crate::coordination::agent_org_runs::AgentOrgRunStatus::Running,
+                work_item_id: None,
+                project_slug: None,
+                routine_fire_id: None,
+            },
+        )
+        .expect("seed canonical run");
+        AgentOrgTaskStore::create(CreateTaskParams {
+            id: "unfinished-build".to_string(),
+            org_run_id: run.id.clone(),
+            subject: "unfinished build".to_string(),
+            description: String::new(),
+            active_form: None,
+            owner: Some("member-worker".to_string()),
+            status: TaskStatus::InProgress,
+            blocks: Vec::new(),
+            blocked_by: Vec::new(),
+            metadata: None,
+        })
+        .expect("seed task");
+        let handler = UnifiedEventHandler::new(EventHandlerConfig {
+            agent_org_task_lifecycle: Some(AgentOrgTaskLifecycleContext {
+                run_id: run.id,
+                member_id: "member-worker".to_string(),
+            }),
+            ..Default::default()
+        });
+
+        let first = handler.on_turn_stop_check("member-session").await;
+        assert!(first
+            .as_deref()
+            .is_some_and(|feedback| feedback.contains("unfinished-build")));
+        assert_eq!(handler.on_turn_stop_check("member-session").await, None);
+    }
 
     #[test]
     fn current_turn_generation_rejects_stale_bound_turn() {

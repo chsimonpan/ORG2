@@ -16,6 +16,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import Button from "@src/components/Button";
+import { pillControlStateClass } from "@src/components/CompoundPill/config";
 import Textarea from "@src/components/Textarea";
 import {
   manualCompactInFlightSessionAtom,
@@ -24,20 +25,17 @@ import {
 import { useSessionId } from "@src/engines/SessionCore/hooks/session";
 import { useHousekeeperConfig } from "@src/hooks/housekeeper";
 import { useSetting } from "@src/hooks/settings/useSettings";
-import { isSessionActiveAtom } from "@src/store/session/cliSessionStatusAtom";
 
 import ContextBreakdownBar from "./ContextBreakdownBar";
 import ContextCategoryRow from "./ContextCategoryRow";
 import MiniCpmCompactCard from "./MiniCpmCompactCard";
 import ProgressRing from "./ProgressRing";
 import { type PanelCategory, ringToneForPercentage } from "./contextInfoTypes";
-import { useContextCacheSnapshot } from "./useContextCacheSnapshot";
 import { useContextPanel } from "./useContextPanel";
 import { formatTokenCount, useContextUsageInfo } from "./useContextUsageInfo";
 
 export interface ContextInfoButtonProps {
   repoPath?: string;
-  sessionId?: string;
   /**
    * "toolbar" - icon-only button (used in the right toolbar cluster).
    * "corner"  - icon + label pill anchored to the editor's bottom-right.
@@ -152,10 +150,9 @@ function applyCategoryPercents(
 }
 
 const ContextInfoButton: React.FC<ContextInfoButtonProps> = memo(
-  ({ sessionId: providedSessionId, variant = "toolbar", compact = false }) => {
+  ({ variant = "toolbar", compact = false }) => {
     const { t } = useTranslation();
-    const { sessionId: scopedSessionId } = useSessionId();
-    const sessionId = providedSessionId ?? scopedSessionId;
+    const { sessionId } = useSessionId();
     const [housekeeperEnabled] = useSetting("housekeeper.enabled");
     const [contextCompactEnabled] = useSetting(
       "housekeeper.features.contextCompact"
@@ -181,14 +178,6 @@ const ContextInfoButton: React.FC<ContextInfoButtonProps> = memo(
     // Shared in-flight state: covers compactions started from this popover
     // AND from the `/compact` slash command.
     const manualCompacting = compactingSessionId !== null;
-
-    // Same "session is working" signal the composer/git actions use, so the
-    // Compact button greys out predictively instead of bouncing off a busy
-    // toast from the backend.
-    const isSessionActive = useAtomValue(isSessionActiveAtom);
-    const { snapshot: contextCacheSnapshot, error: contextCacheError } =
-      useContextCacheSnapshot(sessionId, panelPos !== null);
-
 
     const ringTone = ringToneForPercentage(percentage);
     const displayPct = percentage > 100 ? 100 : percentage;
@@ -272,12 +261,6 @@ const ContextInfoButton: React.FC<ContextInfoButtonProps> = memo(
       return applyCategoryPercents(categories, totalTokens);
     }, [contextUsage, displayTokens, t]);
 
-    const latestCacheLayout = contextCacheSnapshot?.latestCacheLayout;
-    const embeddingState = contextCacheSnapshot?.embeddingState;
-    const importedSnapshots = contextCacheSnapshot?.snapshots ?? [];
-    const formatOptionalTokens = (value: number | undefined | null) =>
-      formatTokenCount(Math.max(0, value ?? 0));
-
     const handleMouseEnter = useCallback(
       (key: string) => () => setHoveredKey(key),
       []
@@ -321,7 +304,7 @@ const ContextInfoButton: React.FC<ContextInfoButtonProps> = memo(
           <button
             ref={triggerRef}
             data-testid="context-info-button"
-            className={`flex h-[28px] shrink-0 items-center gap-1.5 rounded-full text-text-3 transition-colors duration-200 hover:bg-fill-2 ${compact ? "w-[28px] justify-center px-0" : "px-2"}`}
+            className={`flex h-[28px] shrink-0 items-center gap-1.5 rounded-full text-text-3 transition-colors duration-200 ${pillControlStateClass(panelPos !== null)} ${compact ? "w-[28px] justify-center px-0" : "px-2"}`}
             onClick={toggle}
             aria-label={t("contextInfo.ariaLabel")}
             aria-expanded={panelPos !== null}
@@ -339,7 +322,7 @@ const ContextInfoButton: React.FC<ContextInfoButtonProps> = memo(
           <button
             ref={triggerRef}
             data-testid="context-info-button"
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-text-3 transition-colors duration-150 hover:bg-fill-2 hover:text-text-2"
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-text-3 transition-colors duration-150 hover:text-text-2 ${pillControlStateClass(panelPos !== null)}`}
             onClick={toggle}
             aria-label={t("contextInfo.ariaLabel")}
             aria-expanded={panelPos !== null}
@@ -433,7 +416,6 @@ const ContextInfoButton: React.FC<ContextInfoButtonProps> = memo(
                 </div>
               )}
 
-
               <div className="border-t border-border-2 bg-fill-1/30 px-3.5 py-2">
                 <button
                   type="button"
@@ -489,80 +471,6 @@ const ContextInfoButton: React.FC<ContextInfoButtonProps> = memo(
                         <ConfiguredMiniCpmCompactCard sessionId={sessionId} />
                       )}
                   </div>
-                )}
-              </div>
-
-              <div
-                className="border-t border-border-2 px-4 py-2.5"
-                data-testid="context-cache-debug-panel"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-text-4">
-                    Cache layout
-                  </span>
-                  {!contextCacheSnapshot && !contextCacheError && (
-                    <span className="text-text-5 text-[10px]">Loading…</span>
-                  )}
-                </div>
-                {contextCacheError ? (
-                  <p className="text-text-5 mt-1 text-[10.5px] leading-snug">
-                    Debug snapshot unavailable: {contextCacheError}
-                  </p>
-                ) : (
-                  <>
-                    <div className="mt-2 grid grid-cols-2 gap-1 text-[10.5px] text-text-4">
-                      <div className="rounded bg-fill-2 px-2 py-1">
-                        <span className="text-text-5 block">Stable prefix</span>
-                        <span className="font-mono text-text-2">
-                          {formatOptionalTokens(
-                            latestCacheLayout?.stablePrefixTokens
-                          )}
-                        </span>
-                      </div>
-                      <div className="rounded bg-fill-2 px-2 py-1">
-                        <span className="text-text-5 block">Volatile</span>
-                        <span className="font-mono text-text-2">
-                          {formatOptionalTokens(
-                            latestCacheLayout?.volatileContextTokens
-                          )}
-                        </span>
-                      </div>
-                      <div className="rounded bg-fill-2 px-2 py-1">
-                        <span className="text-text-5 block">Imported</span>
-                        <span className="font-mono text-text-2">
-                          {latestCacheLayout?.importedContextCount ??
-                            importedSnapshots.length}
-                        </span>
-                      </div>
-                      <div className="rounded bg-fill-2 px-2 py-1">
-                        <span className="text-text-5 block">
-                          Provider cache
-                        </span>
-                        <span className="font-mono text-text-2">
-                          {latestCacheLayout?.providerCacheHitRate != null
-                            ? `${Math.round(latestCacheLayout.providerCacheHitRate * 100)}%`
-                            : "—"}
-                        </span>
-                      </div>
-                    </div>
-                    {importedSnapshots.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {importedSnapshots.slice(0, 4).map((snapshot) => (
-                          <span
-                            key={snapshot.snapshotId}
-                            className="rounded bg-fill-3 px-1.5 py-0.5 font-mono text-[10px] text-text-4"
-                          >
-                            {snapshot.namespace}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {embeddingState && (
-                      <p className="mt-2 text-[10.5px] leading-snug text-text-4">
-                        Embedded through seq {embeddingState.lastEmbeddedSequence} · {embeddingState.namespace}
-                      </p>
-                    )}
-                  </>
                 )}
               </div>
             </div>,

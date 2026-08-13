@@ -9,16 +9,22 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
+import type { SpotlightItem } from "../../../types";
 import { APP_ACTIONS } from "../spotlightActionDefinitions";
 import { buildSearchModeItems } from "../spotlightSearchBuilder";
 
 const DETECT_UPDATE_ID = "detect-update";
+const BUILT_IN_TOOLS_DESTINATION_ID = "nav-integrations-nav-int-tools";
 
 // Translator stub: echo the key so label-based matching is deterministic and
 // independent of the loaded i18n bundle.
 const echoTranslate = (key: string) => key;
 
-function runSearch(searchQuery: string) {
+function runSearch(
+  searchQuery: string,
+  devModeEnabled = false,
+  sessionItems: SpotlightItem[] = []
+) {
   const onSelectStaticAction = vi.fn();
   const items = buildSearchModeItems({
     searchQuery,
@@ -29,15 +35,16 @@ function runSearch(searchQuery: string) {
     onSelectEditorAction: vi.fn(),
     onSelectPath: vi.fn(),
     translate: echoTranslate,
+    sessionItems,
+    devModeEnabled,
   });
   return { items, onSelectStaticAction };
 }
 
-describe("buildSearchModeItems — detect update command", () => {
-  it("exposes a single detect-update static action definition", () => {
-    expect(APP_ACTIONS).toHaveLength(1);
-    expect(APP_ACTIONS[0].id).toBe(DETECT_UPDATE_ID);
-    expect(APP_ACTIONS[0].closeOnSuccess).toBe(true);
+describe("buildSearchModeItems — app commands", () => {
+  it("exposes detect-update as an app action", () => {
+    expect(APP_ACTIONS.map((action) => action.id)).toEqual([DETECT_UPDATE_ID]);
+    expect(APP_ACTIONS.every((action) => action.closeOnSuccess)).toBe(true);
   });
 
   it.each(["Detect Update", "update", "check for update", "upgrade"])(
@@ -55,11 +62,42 @@ describe("buildSearchModeItems — detect update command", () => {
 
     item?.action?.();
     expect(onSelectStaticAction).toHaveBeenCalledTimes(1);
-    expect(onSelectStaticAction).toHaveBeenCalledWith(APP_ACTIONS[0]);
+    expect(onSelectStaticAction).toHaveBeenCalledWith(
+      APP_ACTIONS.find((action) => action.id === DETECT_UPDATE_ID)
+    );
   });
 
   it("does not surface the command for unrelated queries", () => {
     const { items } = runSearch("zzz-no-such-command");
     expect(items.some((item) => item.id === DETECT_UPDATE_ID)).toBe(false);
+  });
+
+  it("hides the Built-in Tools destination outside dev mode", () => {
+    expect(
+      runSearch("tools", false).items.some(
+        (item) => item.id === BUILT_IN_TOOLS_DESTINATION_ID
+      )
+    ).toBe(false);
+    expect(
+      runSearch("tools", true).items.some(
+        (item) => item.id === BUILT_IN_TOOLS_DESTINATION_ID
+      )
+    ).toBe(true);
+  });
+
+  it("groups general Spotlight session matches ahead of commands", () => {
+    const sessionItem = {
+      id: "general-session:session-1",
+      label: "Rollout notes",
+      type: "option" as const,
+    };
+    const { items } = runSearch("update", false, [sessionItem]);
+
+    expect(items.slice(0, 4).map((item) => item.id)).toEqual([
+      "section-search-sessions",
+      sessionItem.id,
+      "section-search-actions",
+      DETECT_UPDATE_ID,
+    ]);
   });
 });

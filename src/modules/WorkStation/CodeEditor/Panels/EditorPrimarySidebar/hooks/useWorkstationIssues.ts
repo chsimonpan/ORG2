@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getGitRemotes } from "@src/api/http/git/remotes";
 import { createLogger } from "@src/hooks/logger";
 import {
+  coalesceGitHubListRequest,
   getCachedIssues,
   isIssueCacheStale,
   updateCachedClosedIssues,
@@ -22,10 +23,11 @@ import {
   addIssueComment,
   closeIssue,
   createIssue,
-  fetchIssueComments,
+  fetchIssueTimeline,
   fetchIssues,
-  fetchRepoCollaborators,
+  fetchRepoAssignees,
   fetchRepoLabels,
+  issueCommentToTimelineItem,
   reopenIssue,
   updateIssue,
 } from "@src/services/git/operations/githubIssues";
@@ -42,7 +44,10 @@ import {
 import type { IssueFilterState } from "@src/store/workstation/codeEditor/workstationIssueAtom";
 import { workstationRepoScopeKey } from "@src/store/workstation/codeEditor/workstationPrAtom";
 
-import { filterIssuesByQuery } from "./workstationIssueHelpers";
+import {
+  type IssueSectionLoadState,
+  filterIssuesByQuery,
+} from "./workstationIssueHelpers";
 
 export type { IssueFilterState };
 
@@ -198,14 +203,12 @@ export function useWorkstationIssues({
 
   // ── Separate open / closed fetch state ───────────────────────────────────
 
-  type SectionLoadState = "idle" | "loading" | "ready" | "error";
-
   // Seed from cache immediately so the list shows on re-entry without a spinner
   const cached = getCachedIssues(repoKey);
-  const [openLoadState, setOpenLoadState] = useState<SectionLoadState>(
+  const [openLoadState, setOpenLoadState] = useState<IssueSectionLoadState>(
     cached ? "ready" : "idle"
   );
-  const [closedLoadState, setClosedLoadState] = useState<SectionLoadState>(
+  const [closedLoadState, setClosedLoadState] = useState<IssueSectionLoadState>(
     cached?.closedIssues.length && !isIssueCacheStale(repoKey, "closed")
       ? "ready"
       : "idle"
@@ -237,7 +240,7 @@ export function useWorkstationIssues({
     (
       error: string,
       setError: (e: string | null) => void,
-      setLoad: (s: SectionLoadState) => void
+      setLoad: (s: IssueSectionLoadState) => void
     ) => {
       const isReAuth =
         /ReAuthError/i.test(error) || /re-authorization required/i.test(error);
@@ -277,11 +280,15 @@ export function useWorkstationIssues({
     if (!resolvedRemoteUrl || !hasGitHubAuth) return;
     setClosedLoadState("loading");
     setClosedError(null);
-    const result = await fetchIssues(resolvedRemoteUrl, {
-      state: "closed",
-      page: 1,
-      perPage: ISSUE_PAGE_SIZE,
-    });
+    const result = await coalesceGitHubListRequest(
+      `workstation:issues:closed:${resolvedRemoteUrl}:${repoKey}`,
+      () =>
+        fetchIssues(resolvedRemoteUrl, {
+          state: "closed",
+          page: 1,
+          perPage: ISSUE_PAGE_SIZE,
+        })
+    );
     if (!mountedRef.current) return;
     if (result.error) {
       handleFetchError(result.error, setClosedError, setClosedLoadState);
@@ -375,10 +382,13 @@ export function useWorkstationIssues({
     return () => clearTimeout(timer);
   }, [resolvedRemoteUrl, hasGitHubAuth, fetchOpen, repoKey]);
 
-  const refresh = useCallback(() => {
-    void fetchOpen();
-    if (closedLoadState === "ready") void fetchClosed();
-  }, [fetchOpen, fetchClosed, closedLoadState]);
+  const refresh = useCallback(
+    (includeClosed = false) => {
+      void fetchOpen();
+      if (includeClosed && closedLoadState !== "loading") void fetchClosed();
+    },
+    [fetchOpen, fetchClosed, closedLoadState]
+  );
 
   // Keep the shared atom in sync (used by external consumers like agent callbacks)
   useEffect(() => {
@@ -408,7 +418,7 @@ export function useWorkstationIssues({
     void (async () => {
       const [labelsResult, collabResult] = await Promise.all([
         fetchRepoLabels(resolvedRemoteUrl),
-        fetchRepoCollaborators(resolvedRemoteUrl),
+        fetchRepoAssignees(resolvedRemoteUrl),
       ]);
       if (cancelled) return;
       if (labelsResult.data) setRepoLabels(labelsResult.data);
@@ -425,34 +435,46 @@ export function useWorkstationIssues({
   const selectIssue = useCallback(
     (issue: GitHubIssue | null) => {
       if (!issue) {
-        setSelectedState((prev) => ({ ...prev, issue: null, comments: [] }));
+        setSelectedState((prev) => ({ ...prev, issue: null, timeline: [] }));
         return;
       }
       setSelectedState((prev) => ({
         ...prev,
         issue,
-        comments: [],
-        commentsLoading: true,
+        timeline: [],
+        timelineLoading: true,
       }));
 
-      if (!resolvedRemoteUrl) return;
+      if (!resolvedRemoteUrl) {
+        setSelectedState((prev) =>
+          prev.issue?.number === issue.number
+            ? { ...prev, timelineLoading: false }
+            : prev
+        );
+        return;
+      }
       void (async () => {
-        const result = await fetchIssueComments({
+        const result = await fetchIssueTimeline({
           remoteUrl: resolvedRemoteUrl,
           issueNumber: issue.number,
         });
         if (!mountedRef.current) return;
         if (result.data) {
-          setSelectedState((prev) => ({
-            ...prev,
-            comments: result.data!,
-            commentsLoading: false,
-          }));
+          setSelectedState((prev) =>
+            prev.issue?.number === issue.number
+              ? {
+                  ...prev,
+                  timeline: result.data!,
+                  timelineLoading: false,
+                }
+              : prev
+          );
         } else {
-          setSelectedState((prev) => ({
-            ...prev,
-            commentsLoading: false,
-          }));
+          setSelectedState((prev) =>
+            prev.issue?.number === issue.number
+              ? { ...prev, timelineLoading: false }
+              : prev
+          );
         }
       })();
     },
@@ -565,7 +587,10 @@ export function useWorkstationIssues({
       if (result.data) {
         setSelectedState((prev) => ({
           ...prev,
-          comments: [...prev.comments, result.data!],
+          timeline: [
+            ...prev.timeline,
+            issueCommentToTimelineItem(result.data!),
+          ],
           submittingComment: false,
         }));
         setListState((prev) => ({
@@ -601,9 +626,9 @@ export function useWorkstationIssues({
       });
       setSelectedState({
         issue: null,
-        comments: [],
+        timeline: [],
         loading: false,
-        commentsLoading: false,
+        timelineLoading: false,
         error: null,
         submittingComment: false,
       });
@@ -663,8 +688,8 @@ export function useWorkstationIssues({
     setSearchQuery: handleSetSearchQuery,
     selectedIssue: selectedState.issue,
     selectIssue,
-    comments: selectedState.comments,
-    commentsLoading: selectedState.commentsLoading,
+    timeline: selectedState.timeline,
+    timelineLoading: selectedState.timelineLoading,
     submittingComment: selectedState.submittingComment,
     handleCreateIssue,
     handleUpdateIssue,

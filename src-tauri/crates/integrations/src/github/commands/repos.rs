@@ -29,6 +29,18 @@ pub struct Branch {
     pub protected: bool,
 }
 
+/// Repository-level capabilities normalized for frontend work-item controls.
+///
+/// GitHub's repository payload exposes role flags rather than per-action
+/// booleans. Keep that interpretation at the API boundary so every caller
+/// applies the same conservative permission rule.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct RepoPermissions {
+    pub role_name: Option<String>,
+    pub can_manage_issues: bool,
+    pub can_manage_pull_requests: bool,
+}
+
 pub(crate) fn parse_repo(v: &Value) -> Repo {
     Repo {
         id: v["id"].as_u64().unwrap_or(0),
@@ -49,6 +61,19 @@ pub(crate) fn parse_branch(v: &Value) -> Branch {
         name: v["name"].as_str().unwrap_or("").to_string(),
         sha: v["commit"]["sha"].as_str().unwrap_or("").to_string(),
         protected: v["protected"].as_bool().unwrap_or(false),
+    }
+}
+
+pub(crate) fn parse_repo_permissions(v: &Value) -> RepoPermissions {
+    let permissions = &v["permissions"];
+    let can_manage = permissions["admin"].as_bool().unwrap_or(false)
+        || permissions["maintain"].as_bool().unwrap_or(false)
+        || permissions["push"].as_bool().unwrap_or(false)
+        || permissions["triage"].as_bool().unwrap_or(false);
+    RepoPermissions {
+        role_name: v["role_name"].as_str().map(String::from),
+        can_manage_issues: can_manage,
+        can_manage_pull_requests: can_manage,
     }
 }
 
@@ -78,6 +103,44 @@ pub(crate) fn github_repo_full_name_from_remote(remote_url: &str) -> Option<Stri
         return clean_repo_path(rest);
     }
     None
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct RepoNetworkIdentity {
+    /// The repository GitHub resolved (canonical casing).
+    pub full_name: String,
+    /// Root repository shared by every member of the GitHub fork network.
+    pub source_full_name: String,
+}
+
+pub(crate) fn parse_repo_network_identity(v: &Value) -> Option<RepoNetworkIdentity> {
+    let full_name = v["full_name"].as_str()?.trim();
+    if full_name.is_empty() {
+        return None;
+    }
+    let source_full_name = v["source"]["full_name"]
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(full_name);
+    Some(RepoNetworkIdentity {
+        full_name: full_name.to_string(),
+        source_full_name: source_full_name.to_string(),
+    })
+}
+
+fn encoded_repo_api_path(repo_full_name: &str) -> Option<String> {
+    let mut parts = repo_full_name.trim().split('/');
+    let owner = parts.next()?.trim();
+    let repo = parts.next()?.trim().trim_end_matches(".git");
+    if owner.is_empty() || repo.is_empty() || parts.next().is_some() {
+        return None;
+    }
+    Some(format!(
+        "{}/{}",
+        urlencoding::encode(owner),
+        urlencoding::encode(repo)
+    ))
 }
 
 /// Result of `github_search_repos`. `authenticated` reports whether the
@@ -229,6 +292,63 @@ pub async fn github_search_repos(
     })
 }
 
+/// Resolve a GitHub repository to the root of its fork network.
+///
+/// A checkout's configured remotes are not a complete identity proof: two
+/// collaborators often clone different forks and neither adds the other's
+/// remote. GitHub's repository payload carries `source.full_name`, which is
+/// the stable common upstream for that network. Reuse the local credential
+/// when present (private fork networks), otherwise public repositories still
+/// work through the unauthenticated metadata endpoint.
+#[command]
+pub async fn github_resolve_repo_network_identity(
+    repo_full_name: String,
+) -> Result<RepoNetworkIdentity, String> {
+    let repo_path = encoded_repo_api_path(&repo_full_name)
+        .ok_or_else(|| "invalid GitHub repository name".to_string())?;
+    let token = find_https_credential().ok().flatten().map(|c| c.token);
+    let http = reqwest::Client::new();
+    let mut req = http
+        .get(format!("https://api.github.com/repos/{repo_path}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .header("User-Agent", "ORGII-Desktop/1.0");
+    if let Some(value) = token.as_deref() {
+        req = req.bearer_auth(value);
+    }
+    let response = req
+        .send()
+        .await
+        .map_err(|err| format!("GitHub repository request failed: {err}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| format!("Failed to read GitHub repository response: {err}"))?;
+    if !status.is_success() {
+        return Err(format!(
+            "GitHub repository lookup failed ({})",
+            status.as_u16()
+        ));
+    }
+    let payload: Value = serde_json::from_str(&body)
+        .map_err(|err| format!("Failed to parse GitHub repository JSON: {err}"))?;
+    parse_repo_network_identity(&payload)
+        .ok_or_else(|| "GitHub repository response was missing identity fields".to_string())
+}
+
+/// Return the current viewer's normalized work-item permissions for a repo.
+#[command]
+pub async fn github_get_repo_permissions(
+    repo_full_name: String,
+) -> Result<RepoPermissions, String> {
+    let repo_path = encoded_repo_api_path(&repo_full_name)
+        .ok_or_else(|| "invalid GitHub repository name".to_string())?;
+    let client = make_client()?;
+    let payload = client.get(&format!("/repos/{repo_path}")).await?;
+    Ok(parse_repo_permissions(&payload))
+}
+
 #[command]
 pub async fn github_list_repos(
     page: Option<u32>,
@@ -348,5 +468,50 @@ pub async fn github_get_content(
             is_binary: true,
             truncated: false,
         }),
+    }
+}
+
+#[cfg(test)]
+mod repo_permission_tests {
+    use serde_json::json;
+
+    use super::{parse_repo_permissions, RepoPermissions};
+
+    #[test]
+    fn normalizes_triage_as_work_item_management_permission() {
+        let permissions = parse_repo_permissions(&json!({
+            "role_name": "triage",
+            "permissions": {
+                "admin": false,
+                "maintain": false,
+                "push": false,
+                "triage": true,
+                "pull": true
+            }
+        }));
+
+        assert_eq!(
+            permissions,
+            RepoPermissions {
+                role_name: Some("triage".to_string()),
+                can_manage_issues: true,
+                can_manage_pull_requests: true,
+            }
+        );
+    }
+
+    #[test]
+    fn keeps_pull_only_and_missing_permissions_readonly() {
+        for payload in [
+            json!({
+                "role_name": "read",
+                "permissions": { "pull": true }
+            }),
+            json!({}),
+        ] {
+            let permissions = parse_repo_permissions(&payload);
+            assert!(!permissions.can_manage_issues);
+            assert!(!permissions.can_manage_pull_requests);
+        }
     }
 }

@@ -63,15 +63,6 @@ describe("toFrontendSession", () => {
     expect(result.is_active).toBe(false);
   });
 
-  it("preserves canonical project identity for project-tree membership", () => {
-    const result = toFrontendSession(
-      makeAggregateRecord({ projectId: "project-1", projectSlug: "alpha" })
-    );
-
-    expect(result.projectId).toBe("project-1");
-    expect(result.projectSlug).toBe("alpha");
-  });
-
   it("passes category and key source through", () => {
     const cliRecord = makeAggregateRecord({
       category: "cli_agent",
@@ -86,6 +77,20 @@ describe("toFrontendSession", () => {
     expect(toFrontendSession(rustRecord).category).toBe("rust_agent");
     expect(toFrontendSession(cliRecord).keySource).toBe("own_key");
     expect(toFrontendSession(rustRecord).keySource).toBe("hosted_key");
+  });
+
+  it("normalizes native Rust wire categories in production-shaped records", () => {
+    const wireRecord = (category: "cli" | "agent" | "os" | "human") =>
+      makeAggregateRecord({
+        category: category as SessionAggregateRecord["category"],
+      });
+
+    expect(toFrontendSession(wireRecord("cli")).category).toBe("cli_agent");
+    expect(toFrontendSession(wireRecord("agent")).category).toBe("rust_agent");
+    expect(toFrontendSession(wireRecord("os")).category).toBe("rust_agent");
+    expect(toFrontendSession(wireRecord("human")).category).toBe(
+      "human_session"
+    );
   });
 
   it("keeps imported app sessions distinct from launched CLI sessions", () => {

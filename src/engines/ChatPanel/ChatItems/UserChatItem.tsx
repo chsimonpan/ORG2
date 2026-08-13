@@ -18,7 +18,11 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ChatBubbleCopyButton } from "@src/components/ChatBubble";
+import Avatar from "@src/components/Avatar";
+import {
+  CHAT_BUBBLE_TOOLBAR_BUTTON_CLASS,
+  ChatBubbleCopyButton,
+} from "@src/components/ChatBubble";
 import ExpandOverlay from "@src/components/ExpandOverlay";
 import { readPillText } from "@src/config/pillTokens";
 import { REPO_SETUP_PROMPT_MARKER } from "@src/config/repoSetupMarker";
@@ -27,16 +31,19 @@ import {
   SessionLinkCard,
   type SessionLinkCardData,
 } from "@src/engines/ChatPanel/blocks/ToolCallBlock/cards";
-import { imageRefToRustPath } from "@src/engines/SessionCore/ingestion/agentMessageAdapters";
+import { createCollabAvatarIdentity } from "@src/store/collaboration/protocol";
 import {
   formatSmartDateTime,
   toIntlLocaleTag,
 } from "@src/util/data/formatters/date";
+import { imageRefToRustPath } from "@src/util/file/imageRefs";
 
 import UserMessageContent from "../ChatHistory/components/UserMessageContent";
 import InputArea from "../InputArea";
 import { stripExpandedPillContent } from "../InputArea/utils/pillContentParser";
+import { useSharedConversationSender } from "./SharedConversationSenderContext";
 import { normalizeUserMessageText } from "./normalizeUserMessageText";
+import { resolveUserMessageSide } from "./userMessageSide";
 
 const USER_MSG_MAX_LINES = 3;
 const USER_MSG_MAX_CHARS = 120;
@@ -95,6 +102,8 @@ function extractPrPillCards(text: string): SessionLinkCardData[] {
 interface UserChatItemProps {
   chatItem: OptimizedChatItem;
   onEditSubmit?: (newText: string, imageDataUrls?: string[]) => void;
+  /** Extra actions rendered in the message's copy / restore / edit toolbar. */
+  toolbarActions?: React.ReactNode;
   /**
    * Restore the session to this message's checkpoint WITHOUT re-sending it
    * (Cursor-style restore). When provided, a restore button is shown next to
@@ -173,9 +182,16 @@ CachedFileChip.displayName = "CachedFileChip";
 // Styles
 // ============================================
 
-/** Layout-only; border/hover/focus ring added per-row below */
+/**
+ * Layout-only; border/hover/focus ring added per-row below.
+ *
+ * The wrapping message row uses a NAMED group (`group/msg`) so the timestamp
+ * toolbar reveals only for its own message. An unnamed `group` would also
+ * match bare-group ancestors (e.g. the WorkStation AppShell), revealing every
+ * message toolbar whenever the mouse was anywhere in the pane.
+ */
 const DISPLAY_CONTAINER_BASE =
-  "group relative w-fit max-w-[min(600px,100%)] rounded-2xl bg-fill-2 px-3 py-2 transition-colors hover:bg-fill-3";
+  "relative w-fit max-w-[min(600px,100%)] rounded-2xl bg-fill-2 px-3 py-2";
 
 // ============================================
 // Component
@@ -184,9 +200,11 @@ const DISPLAY_CONTAINER_BASE =
 const UserChatItem = ({
   chatItem,
   onEditSubmit,
+  toolbarActions,
   onRestoreCheckpoint,
 }: UserChatItemProps) => {
   const { t, i18n } = useTranslation("sessions");
+  const sharedConversationSender = useSharedConversationSender();
   const [isEditing, setIsEditing] = useState(false);
 
   const [isExpanded, setIsExpanded] = useState(false);
@@ -210,12 +228,21 @@ const UserChatItem = ({
     return undefined;
   }, [event]);
 
+  const activityImages = useMemo((): string[] | undefined => {
+    const result = activityResult?.result as
+      | Record<string, unknown>
+      | undefined;
+    const images = result?.images;
+    if (!Array.isArray(images) || images.length === 0) return undefined;
+    return images.filter((image): image is string => typeof image === "string");
+  }, [activityResult]);
+
   const fullContent = useMemo(() => {
     // When display_text is present on the event it is the pill-format string
     // that the user originally typed (e.g. "create-rule [skill:/create-rule]").
     // Prefer it unconditionally — falling back to message.content would show the
     // expanded YAML/raw text instead of the pill badge.
-    if (editedText) return normalizeUserMessageText(editedText);
+    if (editedText) return normalizeUserMessageText(editedText, activityImages);
 
     // Legacy path: no display_text stored (old messages). Use message.content
     // stripped of any auto-expanded pill block.
@@ -224,10 +251,13 @@ const UserChatItem = ({
       | undefined;
     const content = message?.content;
     if (typeof content === "string") {
-      return normalizeUserMessageText(stripExpandedPillContent(content));
+      return normalizeUserMessageText(
+        stripExpandedPillContent(content),
+        activityImages
+      );
     }
     return "";
-  }, [activityResult, editedText]);
+  }, [activityImages, activityResult, editedText]);
 
   const isAgentOrgInboxTranscript = Boolean(
     event?.args?.agentOrgInboxTranscript === true ||
@@ -237,17 +267,7 @@ const UserChatItem = ({
   );
 
   // Extract images from activity result for display in chat history.
-  const messageImages = useMemo((): string[] | undefined => {
-    if (isAgentOrgInboxTranscript) return undefined;
-    const result = activityResult?.result as
-      | Record<string, unknown>
-      | undefined;
-    const images = result?.images;
-    if (Array.isArray(images) && images.length > 0) {
-      return images.filter((img): img is string => typeof img === "string");
-    }
-    return undefined;
-  }, [activityResult, isAgentOrgInboxTranscript]);
+  const messageImages = isAgentOrgInboxTranscript ? undefined : activityImages;
 
   const needsTruncation = useMemo(() => {
     const textToCheck = fullContent || editedText;
@@ -364,6 +384,11 @@ const UserChatItem = ({
   if (!hasDisplayContent) return null;
 
   const displayNeedsTruncation = needsTruncation;
+  const messageSide = resolveUserMessageSide(event);
+  const isRemoteSharedMessage = messageSide === "left";
+  const senderName =
+    sharedConversationSender?.displayName.trim() || "Shared user";
+  const senderAvatar = createCollabAvatarIdentity(senderName);
 
   const containerClass = `${DISPLAY_CONTAINER_BASE} ${isEditableDisplay ? "cursor-pointer outline-none" : ""}`;
 
@@ -375,44 +400,6 @@ const UserChatItem = ({
         data-testid="chat-message-user-editable"
         onClick={isEditableDisplay ? handleEditClick : undefined}
       >
-        {fullContent && (
-          <div className="absolute right-full top-1/2 z-10 mr-1 -translate-y-1/2 translate-x-2 opacity-0 transition-[opacity,transform] duration-150 ease-out focus-within:translate-x-0 focus-within:opacity-100 group-hover:translate-x-0 group-hover:opacity-100 motion-reduce:translate-x-0 motion-reduce:transition-none">
-            <div className="flex items-center gap-1 px-1 py-0.5">
-              <ChatBubbleCopyButton content={fullContent} placement="toolbar" />
-              {isEditableDisplay && onRestoreCheckpoint && (
-                <button
-                  type="button"
-                  data-testid="chat-message-restore-checkpoint"
-                  title={t(
-                    "chat.restoreCheckpoint",
-                    "Restore to here — removes subsequent conversation; choose whether to revert or keep file changes"
-                  )}
-                  className="flex cursor-pointer items-center justify-center rounded-md border-none bg-transparent p-0.5 text-text-3 hover:text-danger-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-6/30"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRestoreCheckpoint();
-                  }}
-                >
-                  <Undo2 size={15} strokeWidth={1.75} />
-                </button>
-              )}
-              {isEditableDisplay && (
-                <button
-                  type="button"
-                  data-testid="chat-message-user-edit-button"
-                  className="flex cursor-pointer items-center justify-center rounded-md border-none bg-transparent p-0.5 text-text-3 hover:text-text-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-6/30"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleEditClick();
-                  }}
-                >
-                  <PencilLine size={14} strokeWidth={1.75} />
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
         <div className="flex min-w-0 flex-1 flex-col gap-[6px]">
           {isRepoSetup ? (
             <div className="flex items-center gap-2 py-0.5">
@@ -496,8 +483,50 @@ const UserChatItem = ({
           )}
         </div>
       </div>
-      {timestampLabel && (
-        <div className="mt-1 px-1 text-[11px] leading-none text-text-3">
+      {(timestampLabel || fullContent || toolbarActions) && (
+        <div className="relative mt-1 flex min-h-6 items-center px-1 text-[11px] leading-none text-text-3">
+          {(fullContent || toolbarActions) && (
+            <div
+              className={`absolute top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 focus-within:opacity-100 group-hover/msg:opacity-100 ${
+                isRemoteSharedMessage ? "left-full ml-1" : "right-full mr-1"
+              }`}
+            >
+              {fullContent && (
+                <ChatBubbleCopyButton
+                  content={fullContent}
+                  placement="toolbar"
+                />
+              )}
+              {isEditableDisplay && onRestoreCheckpoint && (
+                <button
+                  type="button"
+                  data-testid="chat-message-restore-checkpoint"
+                  title={t("chat.restoreCheckpoint", "Restore checkpoint")}
+                  className={`${CHAT_BUBBLE_TOOLBAR_BUTTON_CLASS} text-text-3 hover:text-danger-6`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRestoreCheckpoint();
+                  }}
+                >
+                  <Undo2 size={15} strokeWidth={1.75} />
+                </button>
+              )}
+              {isEditableDisplay && (
+                <button
+                  type="button"
+                  data-testid="chat-message-user-edit-button"
+                  className={`${CHAT_BUBBLE_TOOLBAR_BUTTON_CLASS} text-text-3 hover:text-text-1`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleEditClick();
+                  }}
+                >
+                  <PencilLine size={14} strokeWidth={1.75} />
+                </button>
+              )}
+              {toolbarActions}
+            </div>
+          )}
           {timestampLabel}
         </div>
       )}
@@ -514,7 +543,36 @@ const UserChatItem = ({
     </>
   );
 
-  return <div className="flex w-full flex-col items-end pl-24">{display}</div>;
+  return (
+    <div
+      className={`group/msg flex w-full flex-col ${
+        isRemoteSharedMessage ? "items-start pr-24" : "items-end pl-24"
+      }`}
+      data-message-side={messageSide}
+    >
+      {isRemoteSharedMessage ? (
+        <div className="flex max-w-full items-start gap-2.5">
+          <span
+            className="mt-0.5 shrink-0"
+            title={senderName}
+            aria-label={senderName}
+            data-testid="shared-message-sender-avatar"
+          >
+            <Avatar
+              size={28}
+              src={sharedConversationSender?.avatarUrl}
+              style={{ backgroundColor: "var(--color-fill-2)" }}
+            >
+              {senderAvatar.initials}
+            </Avatar>
+          </span>
+          <div className="flex min-w-0 flex-col items-start">{display}</div>
+        </div>
+      ) : (
+        display
+      )}
+    </div>
+  );
 };
 
 export default memo(UserChatItem);

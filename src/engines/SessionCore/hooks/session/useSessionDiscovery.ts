@@ -13,12 +13,14 @@ import { useSetAtom } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentInfo, ProviderInfo } from "@src/api/http/config";
+import { loadAvailableAgents } from "@src/api/services/availableAgents";
 import { rpc } from "@src/api/tauri/rpc";
 import type {
   AvailableAgent,
   AvailableApiProvider,
   KeyInfo,
 } from "@src/api/tauri/rpc/schemas/validation";
+import { loadSharedLocalKeys } from "@src/hooks/keyVault/sharedLocalKeyStore";
 import { createLogger } from "@src/hooks/logger";
 import { agentRegistryAtom } from "@src/store/session/agentRegistryAtom";
 
@@ -211,8 +213,8 @@ export function useSessionDiscovery(
     try {
       const [apiProviders, rawAgents, allKeys] = await Promise.all([
         rpc.validation.getAvailableApiProviders(),
-        rpc.validation.getAvailableAgents(),
-        rpc.validation.listKeys(),
+        loadAvailableAgents(),
+        loadSharedLocalKeys(),
       ]);
 
       if (!mountedRef.current) return;

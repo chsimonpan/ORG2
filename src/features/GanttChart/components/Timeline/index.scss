@@ -55,6 +55,8 @@
 
   &__header-primary {
     display: flex;
+    position: relative;
+    flex-shrink: 0;
   }
 
   &__header-cell-label {
@@ -76,6 +78,7 @@
   &__header-cell {
     position: relative;
     display: flex;
+    height: 100%;
     align-items: center;
     justify-content: flex-start;
     font-size: 11px;
@@ -177,10 +180,6 @@
     display: flex;
     position: relative;
     border-bottom: 1px solid var(--color-border-1);
-
-    &:last-child {
-      border-bottom: none;
-    }
   }
 
   &__marker-row {

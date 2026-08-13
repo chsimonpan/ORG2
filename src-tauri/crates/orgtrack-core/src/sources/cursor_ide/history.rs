@@ -114,6 +114,8 @@ pub struct CursorIdeSessionRow {
     pub background: bool,
     pub is_active: bool,
     pub repo_path: Option<String>,
+    pub repo_root_path: Option<String>,
+    pub repo_remote_urls: Vec<String>,
     pub storage_path: Option<String>,
     pub repo_name: Option<String>,
     pub branch: Option<String>,
@@ -182,10 +184,61 @@ pub fn list_cursor_ide_sessions_paginated(
         cursor_db::list_for_sidebar_filtered(cache_conn, limit, offset, |row| {
             is_listable_cursor_session(row, cursor_conn.as_ref())
         })?;
-    let sessions = rows
+    cached_rows_to_session_page(cache_conn, rows, has_more)
+}
+
+/// Continuation-page ("Load more") variant of
+/// [`list_cursor_ide_sessions_paginated`]: reads the stable cache snapshot
+/// without re-running discovery, but applies the same
+/// `is_listable_cursor_session` filter. Page-zero offsets are positions in
+/// the *filtered* stream, so the generic unfiltered cache page would
+/// misalign the seam — duplicating rows already shown and surfacing
+/// composers page zero hides.
+pub fn list_cursor_ide_sessions_paginated_cached(
+    cache_conn: &mut Connection,
+    limit: usize,
+    offset: usize,
+) -> Result<CursorIdeSessionPage, String> {
+    let cursor_conn = open_cursor_db();
+    let (rows, has_more) =
+        cursor_db::list_for_sidebar_filtered_cached(cache_conn, limit, offset, |row| {
+            is_listable_cursor_session(row, cursor_conn.as_ref())
+        })?;
+    cached_rows_to_session_page(cache_conn, rows, has_more)
+}
+
+fn cached_rows_to_session_page(
+    #[cfg_attr(not(feature = "git"), allow(unused_variables))] cache_conn: &Connection,
+    rows: Vec<cursor_db::CursorSession>,
+    has_more: bool,
+) -> Result<CursorIdeSessionPage, String> {
+    let mut sessions = rows
         .into_iter()
         .map(cache_row_to_session_row)
         .collect::<Result<Vec<_>, _>>()?;
+    #[cfg(feature = "git")]
+    {
+        use std::collections::HashSet;
+
+        use crate::sources::imported_history::repo_identity::query_repo_identities_from_conn;
+
+        let repo_paths = sessions
+            .iter()
+            .filter_map(|session| session.repo_path.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let identities = query_repo_identities_from_conn(cache_conn, &repo_paths)?;
+        for session in &mut sessions {
+            let Some(repo_path) = session.repo_path.as_deref() else {
+                continue;
+            };
+            if let Some(identity) = identities.get(repo_path) {
+                session.repo_root_path = identity.repo_root_path.clone();
+                session.repo_remote_urls = identity.remote_urls.clone();
+            }
+        }
+    }
     Ok(CursorIdeSessionPage { sessions, has_more })
 }
 
@@ -196,16 +249,24 @@ pub fn list_cursor_ide_sessions_paginated(
 /// (`cursoride-{uuid}`); the prefix is stripped here before reading from
 /// Cursor's DB.
 ///
-/// Returns `Ok(vec![])` if Cursor's DB is missing or the composer is unknown
-/// — read-only history is best-effort by definition; we don't synthesize
-/// errors for missing data. Returns `Err` only on IO/SQL failures we cannot
-/// recover from.
+/// An unreadable source is an `Err`, never an empty transcript: this is the
+/// full-transcript loader behind cloud push and fork, and a locked/replaced
+/// `state.vscdb` or a composer row missing mid-rebuild reported as
+/// `Ok(vec![])` reads upstream as "this session has 0 events" — the exact
+/// hollow read that erased a session's cloud copy (301 → 0) before the push
+/// plane's hollow guard existed. Preview/listing paths keep their own
+/// best-effort behavior.
 pub fn load_history_for_session(session_id: &str) -> Result<Vec<ActivityChunk>, String> {
     let composer_id = strip_session_prefix(session_id);
 
     let cursor_conn = match open_cursor_db() {
         Some(conn) => conn,
-        None => return Ok(vec![]),
+        None => {
+            return Err(format!(
+                "Cursor state.vscdb is not readable right now; \
+                 refusing to report session {session_id} as empty"
+            ))
+        }
     };
 
     let composer = load_composer_for_order(&cursor_conn, composer_id)?;
@@ -216,7 +277,11 @@ pub fn load_history_for_session(session_id: &str) -> Result<Vec<ActivityChunk>, 
         &composer.full_conversation_headers_only,
     )?;
     if order.is_empty() {
-        return Ok(vec![]);
+        return Err(format!(
+            "Cursor composer {composer_id} has no readable bubbles \
+             (missing or mid-rebuild); refusing to report session \
+             {session_id} as empty"
+        ));
     }
 
     let bubbles = load_bubbles_by_id(&cursor_conn, composer_id, &order)?;
@@ -543,6 +608,24 @@ pub fn load_turn_window_for_session(
         next_user_bubble_id,
         loaded_bubble_count: turn_headers.len(),
     })
+}
+
+pub fn load_turn_ids_for_session(session_id: &str) -> Result<Vec<String>, String> {
+    let composer_id = strip_session_prefix(session_id);
+    let Some(cursor_conn) = open_cursor_db() else {
+        return Ok(Vec::new());
+    };
+    let composer = load_composer_for_order(&cursor_conn, composer_id)?;
+    let order = load_complete_bubble_order(
+        &cursor_conn,
+        composer_id,
+        &composer.full_conversation_headers_only,
+    )?;
+    Ok(order
+        .into_iter()
+        .filter(|header| header.bubble_type == CURSOR_BUBBLE_TYPE_USER)
+        .map(|header| header.bubble_id)
+        .collect())
 }
 
 #[cfg(test)]

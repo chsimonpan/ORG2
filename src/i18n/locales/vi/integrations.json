@@ -1742,7 +1742,9 @@
           "rename": "Đổi tên",
           "search": "Tìm kiếm"
         }
-      }
+      },
+      "liveStatusToggle": "Trạng thái tác nhân trực tiếp",
+      "liveStatusToggleDesc": "Cho biết tác nhân CLI đang chạy đang làm việc hay chờ. Tắt vẫn giữ ghi nhận nguồn gốc."
     },
     "codexConfig": {
       "sectionTitle": "Cấu hình",

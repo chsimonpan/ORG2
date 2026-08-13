@@ -97,6 +97,7 @@
 body {
   --color-bg-1: #f4f4f4;
   --color-bg-2: #ffffff;
+  --windows-native-chrome-opacity: 30%;
   --color-bg-3: #ffffff;
   --color-bg-4: #ffffff;
   --color-neutral-1: #f7f8fa;
@@ -111,7 +112,7 @@ body {
   --color-border-3: #c9cdd4;
   --color-fill-1: #f5f5f5;
   --color-fill-2: #efefef;
-  --color-fill-3: #eeeeee;
+  --color-fill-3: #e1e1e1;
   --color-fill-4: #d4d4d4;
   --sidebar-tab-pill-selected-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 
@@ -156,19 +157,14 @@ body {
   --color-pane-input: var(--color-chat-input);
   --color-button-hover: var(--color-fill-3);
 
-  /* Main App */
-  --color-surface-container: #f7f7f7;
+  /* Shared primary surfaces */
+  --color-primary-pane-bg: var(--color-bg-2);
+  --color-primary-container: #f7f7f7;
 
   /* Chat Panel */
-  /* `--color-chat-pane-base` holds the unmixed surface color so the chat
-   * panel root can rebind `--color-chat-pane` to a `color-mix()` of the
-   * -base value without creating a circular var reference (which would
-   * happen if the rebind read the same name). */
-  --color-chat-pane-base: var(--color-workstation-bg);
-  --color-chat-pane: var(--color-chat-pane-base);
+  --color-chat-pane: var(--color-primary-pane-bg);
   --color-chat-container: #f2f2f2;
   --color-chat-input: #ffffff;
-  --color-chat-panel-info-container: var(--color-chat-input);
   --color-event-block: #ffffff;
   --color-event-block-fade: var(--color-event-block);
   --color-diff-add: #e6ffed;
@@ -181,6 +177,17 @@ body {
   --color-primary-5: #45abfd;
   --color-primary-6: #1d8ffd;
   --color-primary-7: #126ed1;
+  --color-purple-1: #fbefff;
+  --color-purple-2: #ecd8ff;
+  --color-purple-3: #d8b9ff;
+  --color-purple-4: #c297ff;
+  --color-purple-5: #a475f9;
+  --color-purple-6: #8250df;
+  --color-purple-7: #6639ba;
+  --color-merged-button-bg: #8250df;
+  --color-merged-button-hover: #6639ba;
+  --color-merged-button-active: #553098;
+  --color-merged-button-contrast: #ffffff;
   --color-danger-1: #ffeae8;
   --color-danger-2: #ffcdc7;
   --color-danger-3: #ffa499;

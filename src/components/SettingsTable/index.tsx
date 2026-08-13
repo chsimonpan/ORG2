@@ -1,7 +1,6 @@
-import { Eraser, Filter, Info, Search } from "lucide-react";
+import { Filter, Info, Search } from "lucide-react";
 import React, {
   type ReactNode,
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -12,7 +11,7 @@ import { useTranslation } from "react-i18next";
 import Button from "@src/components/Button";
 import Input from "@src/components/Input";
 import Select from "@src/components/Select";
-import type { SelectOption } from "@src/components/Select";
+import type { SelectOption, SelectProps } from "@src/components/Select";
 import Table, { type TableColumn } from "@src/components/Table";
 import Tooltip from "@src/components/Tooltip";
 import { Placeholder } from "@src/modules/shared/layouts/blocks/Placeholder";
@@ -101,7 +100,7 @@ export interface SettingsTableColumn<RowData> {
   cellInfoTooltip?: (rowData: RowData) => string | undefined;
 }
 
-/** Ghost-select filter descriptor for the search bar area. */
+/** Select filter descriptor for the search bar area. */
 export interface SettingsTableSelectFilter {
   key: string;
   value: string | number;
@@ -110,6 +109,8 @@ export interface SettingsTableSelectFilter {
   options: SelectOption[];
   onChange: (value: string | number) => void;
   minWidth?: number;
+  /** Defaults to the compact toolbar's ghost appearance. */
+  appearance?: SelectProps["appearance"];
 }
 
 export interface SettingsTablePaginationContext {
@@ -123,10 +124,7 @@ export interface SettingsTablePaginationContext {
   onPageSizeChange: (pageSize: number) => void;
 }
 
-export type SettingsTableSurfaceVariant =
-  | "default"
-  | "chatPanel"
-  | "transparent";
+export type SettingsTableSurfaceVariant = "default" | "transparent";
 
 export interface SettingsTableProps<RowData> {
   columns: SettingsTableColumn<RowData>[];
@@ -179,7 +177,7 @@ export interface SettingsTableProps<RowData> {
   searchBar?: SearchSortBarProps;
   /** Extra classes for the sticky search/header wrapper. */
   searchHeaderClassName?: string;
-  /** Ghost-select filter row rendered below the search bar. Each entry becomes a mini ghost Select. */
+  /** Select filter row rendered below the search bar. Each entry uses the regular 32px Select size. */
   selectFilters?: SettingsTableSelectFilter[];
   /** Extra inline content rendered at the end of the {@link selectFilters} row
    *  (e.g. a scope TabPill). Renders only when this prop or `selectFilters`
@@ -227,19 +225,6 @@ function SettingsTableToolbar({
 }) {
   const { t } = useTranslation();
 
-  const hasActiveFilter =
-    selectFilters?.some((filter) => filter.value !== filter.defaultValue) ??
-    false;
-
-  const resetAllFilters = useCallback(() => {
-    if (!selectFilters) return;
-    for (const filter of selectFilters) {
-      if (filter.value !== filter.defaultValue) {
-        filter.onChange(filter.defaultValue);
-      }
-    }
-  }, [selectFilters]);
-
   const effectiveTabPills = searchBar?.filterConfig?.expanded
     ? searchBar.filterConfig.pills
     : searchBar?.tabPills;
@@ -271,17 +256,18 @@ function SettingsTableToolbar({
       title={filterConfig.title ?? t("labels.filter")}
     />
   ) : undefined;
+  const hasRightControls =
+    !!selectFiltersExtra ||
+    !!filterButton ||
+    !!showSort ||
+    !!hasInlineSearch ||
+    !!searchBar?.rightContent;
 
   return (
-    <div className="flex min-w-0 flex-col gap-2 pb-2 pt-2 @[640px]:flex-row @[640px]:items-center @[640px]:gap-8">
-      <div className="order-2 w-full min-w-0 overflow-x-auto overflow-y-hidden @[640px]:order-1 @[640px]:flex-1">
+    <div className="flex min-w-0 flex-col gap-2 pb-2 pt-2 @[640px]:flex-row @[640px]:items-center">
+      <div className="order-2 w-full min-w-0 overflow-x-auto overflow-y-hidden @[640px]:order-1 @[640px]:w-auto @[640px]:flex-none">
         <div className="flex w-max min-w-full items-center gap-2">
           {searchBar?.leftContent}
-          {effectiveTabPills ? (
-            <div className="flex min-w-0 shrink-0 items-center gap-2">
-              {effectiveTabPills}
-            </div>
-          ) : null}
           {selectFilters?.map((filter) => {
             const isActive = filter.value !== filter.defaultValue;
             return (
@@ -290,17 +276,34 @@ function SettingsTableToolbar({
                 value={filter.value}
                 options={filter.options}
                 onChange={(val) => filter.onChange(val as string | number)}
-                variant="ghost"
-                size="mini"
+                appearance={filter.appearance ?? "ghost"}
                 dropdownWidthMode="auto"
                 dropdownMinWidth={filter.minWidth ?? 120}
                 className={isActive ? "text-primary-6" : ""}
               />
             );
           })}
-          {selectFiltersExtra}
+          {effectiveTabPills ? (
+            <div className="flex min-w-0 shrink-0 items-center gap-2">
+              {effectiveTabPills}
+            </div>
+          ) : null}
+          {searchBar?.searchCountText ? (
+            <span className="text-[13px] font-semibold text-text-1">
+              {searchBar.searchCountText}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      {hasRightControls ? (
+        <div className="order-1 flex w-full min-w-0 items-center justify-end gap-2 @[640px]:order-2 @[640px]:flex-1">
+          {selectFiltersExtra ? (
+            <div className="flex shrink-0 items-center">
+              {selectFiltersExtra}
+            </div>
+          ) : null}
           {filterButton}
-          {showSort && searchBar && (
+          {showSort && searchBar ? (
             <div className={searchBar.sortWidthClassName ?? "w-[180px]"}>
               <Select
                 value={searchBar.sortValue}
@@ -308,37 +311,29 @@ function SettingsTableToolbar({
                 options={searchBar.sortOptions}
               />
             </div>
-          )}
-          {searchBar?.searchCountText ? (
-            <span className="text-[13px] font-semibold text-text-1">
-              {searchBar.searchCountText}
-            </span>
           ) : null}
-          {hasActiveFilter && (
-            <button
-              type="button"
-              onClick={resetAllFilters}
-              className="flex shrink-0 items-center rounded p-0.5 text-primary-6 hover:bg-fill-2 active:bg-fill-4"
-            >
-              <Eraser size={14} />
-            </button>
-          )}
-        </div>
-      </div>
-      {hasInlineSearch && searchBar ? (
-        <div className="order-1 flex w-full shrink-0 items-center gap-2 @[640px]:order-2 @[640px]:w-auto">
-          <Input
-            type="search"
-            size={searchBar.searchInputSize ?? "small"}
-            className="min-w-0 flex-1 @[640px]:w-52 @[640px]:flex-none"
-            value={searchBar.searchValue ?? ""}
-            placeholder={searchBar.searchPlaceholder}
-            prefix={<Search size={14} className="text-text-3" aria-hidden />}
-            onChange={(value) => searchBar.onSearchChange?.(value)}
-            allowClear={searchBar.allowSearchClear ?? true}
-            onClear={searchBar.onSearchClear}
-          />
-          {searchBar.rightContent}
+          {hasInlineSearch && searchBar ? (
+            <div className="min-w-0 flex-1">
+              <Input
+                type="search"
+                size={searchBar.searchInputSize ?? "default"}
+                className="w-full min-w-0"
+                value={searchBar.searchValue ?? ""}
+                placeholder={searchBar.searchPlaceholder}
+                prefix={
+                  <Search size={14} className="text-text-3" aria-hidden />
+                }
+                onChange={(value) => searchBar.onSearchChange?.(value)}
+                allowClear={searchBar.allowSearchClear ?? true}
+                onClear={searchBar.onSearchClear}
+              />
+            </div>
+          ) : null}
+          {searchBar?.rightContent ? (
+            <div className="flex shrink-0 items-center gap-2">
+              {searchBar.rightContent}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -354,18 +349,6 @@ function SelectFilterRow({
   extra?: ReactNode;
   hasSearchBarAbove: boolean;
 }) {
-  const hasActiveFilter = filters.some(
-    (filter) => filter.value !== filter.defaultValue
-  );
-
-  const resetAll = useCallback(() => {
-    for (const filter of filters) {
-      if (filter.value !== filter.defaultValue) {
-        filter.onChange(filter.defaultValue);
-      }
-    }
-  }, [filters]);
-
   return (
     <div
       className={`min-w-0 overflow-x-auto overflow-y-hidden px-1 pb-1 ${hasSearchBarAbove ? "" : "pt-1"}`}
@@ -379,23 +362,13 @@ function SelectFilterRow({
               value={filter.value}
               options={filter.options}
               onChange={(val) => filter.onChange(val as string | number)}
-              variant="ghost"
-              size="mini"
+              appearance={filter.appearance ?? "ghost"}
               dropdownWidthMode="auto"
               dropdownMinWidth={filter.minWidth ?? 120}
               className={isActive ? "text-primary-6" : ""}
             />
           );
         })}
-        {hasActiveFilter && (
-          <button
-            type="button"
-            onClick={resetAll}
-            className="flex shrink-0 items-center rounded p-0.5 text-primary-6 hover:bg-fill-2 active:bg-fill-4"
-          >
-            <Eraser size={14} />
-          </button>
-        )}
         {extra ? (
           <div className="flex shrink-0 items-center">{extra}</div>
         ) : null}
@@ -548,11 +521,9 @@ export default function SettingsTable<RowData>({
 
   const hasHeader = !!searchBar || hasSelectFilterRow;
   const surfaceClassName =
-    surfaceVariant === "chatPanel"
-      ? "settings-table-root-chat-panel bg-chat-panel-info-container"
-      : surfaceVariant === "transparent"
-        ? "settings-table-root-transparent"
-        : "settings-table-root-default bg-surface-container";
+    surfaceVariant === "transparent"
+      ? "settings-table-root-transparent"
+      : "settings-table-root-default bg-primary-container";
   // Standalone tables get an outer border. Tables flagged `noPx` are embedded
   // inside a SectionContainer that already draws the border — skip it there to
   // avoid a double border.
@@ -570,8 +541,8 @@ export default function SettingsTable<RowData>({
     surfaceVariant !== "transparent" && "rounded-xl",
     hasOuterBorder &&
       (stickyBordered
-        ? "border-x border-b border-border-2"
-        : "border border-border-2"),
+        ? "border-x border-b border-border-1"
+        : "border border-border-1"),
     fillHeight && "flex h-full min-h-0 flex-col overflow-hidden",
     maxHeight != null && "flex min-h-0 flex-col overflow-hidden",
     surfaceClassName,
@@ -593,10 +564,10 @@ export default function SettingsTable<RowData>({
       {hasHeader && (
         <div
           ref={searchRef}
-          className={`${containedScroll ? "shrink-0" : "sticky top-0 z-[21]"} ${stickyBordered ? "settings-table-sticky-mask bg-bg-2" : ""}`.trim()}
+          className={`${containedScroll ? "shrink-0" : "settings-table-sticky-toolbar"} ${stickyBordered ? "settings-table-sticky-mask bg-bg-2" : ""}`.trim()}
         >
           <div
-            className={`${stickyBordered ? "settings-table-sticky-surface -mx-px border-x border-t border-border-2" : ""} border-b border-border-2 px-4 ${surfaceVariant !== "transparent" ? "rounded-t-xl" : ""} ${surfaceClassName} ${searchHeaderClassName}`.trim()}
+            className={`${stickyBordered ? "settings-table-sticky-surface -mx-px border-x border-t border-border-1" : ""} border-b border-border-1 px-4 ${surfaceVariant !== "transparent" ? "rounded-t-xl" : ""} ${surfaceClassName} ${searchHeaderClassName}`.trim()}
           >
             {inlineHeaderToolbar ? (
               <SettingsTableToolbar

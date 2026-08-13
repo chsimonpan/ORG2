@@ -1,14 +1,15 @@
 /* global describe, before, it, process */
 import {
+  AGENT_ORG_COORDINATOR_MEMBER_ID,
+  AGENT_ORG_TASK_STATUS,
   API_AGENT_TYPE,
   BUILTIN_SDE_AGENT_ID,
   DEFAULT_AGENT_ORG_ID,
   DEFAULT_AGENT_ORG_MEMBER_IDS,
   RUN_ID,
   SHARED_CLI_AGENT_ID,
-  AGENT_ORG_COORDINATOR_MEMBER_ID,
-  AGENT_ORG_TASK_STATUS,
   assertCrashRecoveryBannerAbsent,
+  assertE2ERepoFixture,
   assertLongTaskRenderedCollapsed,
   assertNoCurrentPlanBuildSurface,
   assertNoFalseFinality,
@@ -18,12 +19,12 @@ import {
   assertRenderedInboxPinBarAbsent,
   clickGroupChatResumeButton,
   clickRenderedMemberSwitcher,
-  clickReturnToWorkAndWaitCleared,
   configureCreatorForAgentOrg,
   configureCreatorForDefaultAgentOrg,
   createLongTaskPrecondition,
   createRenderedStrictTwoMemberAgentOrg,
   ensureMemberHasSwitchableInbox,
+  execJS,
   executeCreatePlanAsMember,
   getApiAccount,
   invokeE2E,
@@ -40,13 +41,14 @@ import {
   selectRenderedExecMode,
   sendCoordinatorOrgMessage,
   sendFromRenderedCreator,
-  sendRenderedGroupChatMentionPrompt,
   sendRenderedChatPrompt,
+  sendRenderedGroupChatMentionPrompt,
   unwrap,
   waitForActiveSessionExecMode,
   waitForAgentOrgByName,
   waitForAgentOrgRunView,
   waitForAgentOrgRunViewByOrg,
+  waitForApp,
   waitForCoordinatorRuntimeStatus,
   waitForGroupChatPausedBanner,
   waitForGroupChatPendingTarget,
@@ -64,10 +66,7 @@ import {
   waitForRenderedReleasedTask,
   waitForSessionAggregateRow,
   waitForSessionOrgRuntimeSnapshot,
-  waitForApp,
-  assertE2ERepoFixture,
 } from "../../support/core/agentOrgUiDriver.mjs";
-
 
 describe("Agent Org recovery and intervention rendered UI", () => {
   before(async () => {
@@ -141,6 +140,9 @@ describe("Agent Org recovery and intervention rendered UI", () => {
           subject: releasedTaskSubject,
           description: `Task released after failed member model error ${RUN_ID}`,
           status: AGENT_ORG_TASK_STATUS.PENDING,
+          eligible_member_ids: [planner.memberId],
+          dispatch_policy: "immediate",
+          execution_mode: "build",
         }
       ),
       "debugAgentOrgExecuteToolAsAgent(task_create released recovery task)"
@@ -151,19 +153,23 @@ describe("Agent Org recovery and intervention rendered UI", () => {
       );
     }
 
+    await waitForInboxRow(
+      sessionId,
+      (row) => {
+        const payload = parseInboxPayload(row, "failed member idle row");
+        return (
+          row.payloadKind === "member_idle" &&
+          row.recipientMemberId === AGENT_ORG_COORDINATOR_MEMBER_ID &&
+          payload.member_id === planner.memberId &&
+          payload.reason === "failed" &&
+          payload.failure_reason === failureReason
+        );
+      },
+      "failed member idle row"
+    );
     await waitForAgentOrgRunView(
       sessionId,
       (view) => {
-        const failedIdleRow = (view?.inbox ?? []).some((row) => {
-          const payload = JSON.parse(String(row.payloadJson ?? "{}"));
-          return (
-            row.payloadKind === "member_idle" &&
-            row.recipientMemberId === AGENT_ORG_COORDINATOR_MEMBER_ID &&
-            payload.member_id === planner.memberId &&
-            payload.reason === "failed" &&
-            payload.failure_reason === failureReason
-          );
-        });
         const releasedTask = (view?.tasks ?? []).find(
           (task) => task.id === releasedTaskId
         );
@@ -172,7 +178,6 @@ describe("Agent Org recovery and intervention rendered UI", () => {
             task.status !== AGENT_ORG_TASK_STATUS.IN_PROGRESS || !!task.owner
         );
         return Boolean(
-          failedIdleRow &&
           releasedTask?.status === AGENT_ORG_TASK_STATUS.PENDING &&
           !releasedTask.owner &&
           noOwnerlessInProgress
@@ -219,10 +224,12 @@ describe("Agent Org recovery and intervention rendered UI", () => {
     let plannerSessionId = null;
     let plannerName = null;
     let coordinatorName = null;
+    let runPhase = null;
     await waitForAgentOrgRunView(
       sessionId,
       (view) => {
         runId = view?.context?.runId ?? null;
+        runPhase = view?.runPhase ?? null;
         coordinatorName = view?.context?.coordinatorName ?? null;
         const members = view?.members ?? [];
         const expectedMembers = Object.values(DEFAULT_AGENT_ORG_MEMBER_IDS);
@@ -242,6 +249,7 @@ describe("Agent Org recovery and intervention rendered UI", () => {
         return Boolean(
           view?.currentMemberId === AGENT_ORG_COORDINATOR_MEMBER_ID &&
           runId &&
+          runPhase &&
           plannerSessionId &&
           plannerName &&
           allMembersMaterialized
@@ -253,6 +261,36 @@ describe("Agent Org recovery and intervention rendered UI", () => {
     if (!plannerName || !coordinatorName || !runId) {
       throw new Error(
         `Agent Org names/run id were not materialized: ${JSON.stringify({ runId, plannerName, coordinatorName })}`
+      );
+    }
+    await openAgentOrgOverviewPanel("default Agent Org run phase");
+    const renderedRunPhase = await execJS(`
+      const phase = document.querySelector('[data-testid="agent-org-overview-run-phase"]');
+      return phase ? {
+        value: phase.getAttribute('data-run-phase'),
+        text: (phase.textContent || '').trim(),
+      } : null;
+    `);
+    const knownRunPhases = new Set([
+      "coordinating",
+      "dispatching",
+      "members_working",
+      "waiting",
+      "awaiting_plan_approval",
+      "finalizing",
+      "paused",
+      "completed",
+      "failed",
+      "cancelled",
+      "abandoned",
+    ]);
+    if (
+      !knownRunPhases.has(runPhase) ||
+      !knownRunPhases.has(renderedRunPhase?.value) ||
+      !renderedRunPhase?.text
+    ) {
+      throw new Error(
+        `Agent Org durable/rendered phase projection is invalid: ${JSON.stringify({ runPhase, renderedRunPhase })}`
       );
     }
     const routeSummary = `E2E planner to coordinator inbox route ${RUN_ID}`;
@@ -271,17 +309,15 @@ describe("Agent Org recovery and intervention rendered UI", () => {
       ),
       "debugAgentOrgExecuteToolAsAgent(planner -> coordinator)"
     );
-    await waitForAgentOrgRunView(
+    const plannerToCoordinatorRow = await waitForInboxRow(
       sessionId,
-      (view) =>
-        (view?.inbox ?? []).some(
-          (row) =>
-            row.senderMemberId === DEFAULT_AGENT_ORG_MEMBER_IDS.PLANNER &&
-            row.senderName === plannerName &&
-            row.recipientMemberId === AGENT_ORG_COORDINATOR_MEMBER_ID &&
-            row.recipientName === coordinatorName &&
-            String(row.payloadJson ?? "").includes(routeSummary)
-        ),
+      (row) =>
+        row.senderMemberId === DEFAULT_AGENT_ORG_MEMBER_IDS.PLANNER &&
+        row.senderName === plannerName &&
+        row.recipientMemberId === AGENT_ORG_COORDINATOR_MEMBER_ID &&
+        row.recipientName === coordinatorName &&
+        parseInboxPayload(row, "planner to coordinator route").summary ===
+          routeSummary,
       "planner to coordinator inbox row names"
     );
     await assertRenderedInboxPinBarAbsent(
@@ -298,29 +334,24 @@ describe("Agent Org recovery and intervention rendered UI", () => {
       "coordinator direct view before UI chat intervention"
     );
 
-    const coordinatorPrompt = `E2E direct coordinator user intervention ${RUN_ID}`;
+    const coordinatorPrompt = `E2E ordinary coordinator instruction ${RUN_ID}`;
     await sendRenderedChatPrompt(coordinatorPrompt);
-    const coordinatorIntervention = await waitForIntervention(
+    await assertNoMemberIntervention(
       sessionId,
-      AGENT_ORG_COORDINATOR_MEMBER_ID,
-      "coordinator direct UI chat"
+      "ordinary coordinator instruction"
     );
-    if (coordinatorIntervention.sessionId !== sessionId) {
-      throw new Error(
-        `coordinator intervention session mismatch: ${JSON.stringify(coordinatorIntervention)}`
-      );
-    }
-    await waitForRenderedInterventionPin(
-      AGENT_ORG_COORDINATOR_MEMBER_ID,
-      "coordinator direct UI chat"
-    );
-    await clickReturnToWorkAndWaitCleared(
+    await waitForInboxRowRead(
       sessionId,
-      "coordinator direct UI chat"
+      plannerToCoordinatorRow.id,
+      "ordinary coordinator turn drains worker inbox"
+    );
+    await assertNoMemberIntervention(
+      sessionId,
+      "coordinator after worker inbox drain"
     );
     await waitForRenderedGroupChatUserTurn({
       text: coordinatorPrompt,
-      label: "coordinator direct UI chat user turn",
+      label: "ordinary coordinator instruction user turn",
     });
 
     if (!plannerName) {
@@ -358,7 +389,11 @@ describe("Agent Org recovery and intervention rendered UI", () => {
     );
 
     const longTaskId = `true-positive-long-task-${RUN_ID}`;
-    const longSubject = `Long Agent Org task ${RUN_ID}: ${"rendered task text must stay collapsed until the user explicitly expands it ".repeat(8)}`;
+    const longSubject =
+      `Long Agent Org task ${RUN_ID}: ${"rendered task text must stay collapsed until the user explicitly expands it ".repeat(8)}`.slice(
+        0,
+        190
+      );
     await createLongTaskPrecondition(
       plannerSessionId,
       longTaskId,

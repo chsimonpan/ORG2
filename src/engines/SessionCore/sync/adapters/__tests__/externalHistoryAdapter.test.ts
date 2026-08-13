@@ -22,14 +22,32 @@ describe("external history initial window", () => {
     expect(selectExternalHistoryInitialWindow(chunks)).toBe(chunks);
   });
 
-  it("returns full histories for non-windowed sources", () => {
+  it("bounds legacy non-windowed sources at a user-turn boundary", () => {
+    const chunks = Array.from({ length: 250 }, (_, index) => {
+      const isUser = index === 40 || index === 100 || index === 200;
+      return chunk(
+        index,
+        isUser ? "raw" : "tool_call",
+        isUser ? "user_message" : "run_shell"
+      );
+    });
+
+    const window = selectExternalHistoryInitialWindow(chunks, {
+      supportsWindowedReplay: false,
+    });
+
+    expect(window[0].chunk_id).toBe("chunk-40");
+    expect(window).toHaveLength(210);
+  });
+
+  it("preserves source-level placeholders for windowed sources", () => {
     const chunks = Array.from({ length: 250 }, (_, index) =>
-      chunk(index, index === 0 ? "raw" : "tool_call", "user_message")
+      chunk(index, index % 2 === 0 ? "raw" : "tool_call", "user_message")
     );
 
     expect(
       selectExternalHistoryInitialWindow(chunks, {
-        supportsWindowedReplay: false,
+        supportsWindowedReplay: true,
       })
     ).toBe(chunks);
   });

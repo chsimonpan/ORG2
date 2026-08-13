@@ -1739,7 +1739,9 @@
           "rename": "Yeniden adlandırma",
           "search": "Arama"
         }
-      }
+      },
+      "liveStatusToggle": "Canlı ajan durumu",
+      "liveStatusToggleDesc": "Çalışan CLI ajanlarının çalıştığını veya beklediğini gösterir. Kapatılsa da kaynak izleme sürer."
     },
     "codexConfig": {
       "sectionTitle": "Yapılandırma",

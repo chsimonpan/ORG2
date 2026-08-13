@@ -38,6 +38,7 @@ import {
 import type { DropdownOption } from "@src/components/Dropdown/types";
 import { useDropdownKeyboard } from "@src/components/Dropdown/useDropdownKeyboard";
 import { SPINNER_TOKENS } from "@src/config/spinnerTokens";
+import { getDropdownPanelStyle } from "@src/hooks/dropdown/dropdownPanelStyle";
 import { useDropdownEngine } from "@src/hooks/dropdown/useDropdownEngine";
 import { useTauriSelectAllShortcut } from "@src/hooks/keyboard";
 import { useCurrentTheme } from "@src/util/ui/theme/themeUtils";
@@ -81,6 +82,7 @@ const Select = forwardRef<HTMLDivElement, SelectProps>(
       onFocus,
       onBlur,
       prefix,
+      showTriggerIcon = true,
       placement = SELECT_DEFAULTS.placement,
       dropdownAlign,
       dropdownMinWidth,
@@ -88,8 +90,9 @@ const Select = forwardRef<HTMLDivElement, SelectProps>(
       dropdownWidthMode = SELECT_DEFAULTS.dropdownWidthMode,
       panelZIndex,
       radius = SELECT_DEFAULTS.radius,
-      variant = "default",
+      appearance = "default",
       dataTestId,
+      ariaLabel,
     },
     ref
   ) => {
@@ -214,6 +217,17 @@ const Select = forwardRef<HTMLDivElement, SelectProps>(
       [resetHighlight, onSearch]
     );
 
+    // The search field lives in a portal that is a sibling of the trigger,
+    // so its key events cannot bubble to the trigger's navigation handler.
+    // Forward navigation keys explicitly while preserving Tauri's Cmd/Ctrl+A.
+    const handleSearchKeyDown = useCallback(
+      (event: React.KeyboardEvent<HTMLInputElement>) => {
+        tauriSelectAll(event);
+        if (!event.defaultPrevented) handleKeyDown(event);
+      },
+      [handleKeyDown, tauriSelectAll]
+    );
+
     // ---- Focus search input on open ----
     useEffect(() => {
       if (currentPopupVisible && showSearch) {
@@ -242,7 +256,7 @@ const Select = forwardRef<HTMLDivElement, SelectProps>(
                 {opt.label}
                 <X
                   size={DROPDOWN_ITEM.iconSize}
-                  onClick={(event: React.MouseEvent<SVGSVGElement>) => {
+                  onClick={(event) => {
                     event.stopPropagation();
                     handleOptionSelect(opt);
                   }}
@@ -263,7 +277,7 @@ const Select = forwardRef<HTMLDivElement, SelectProps>(
           );
         }
         const displayLabel = selected.triggerLabel ?? selected.label;
-        if (!selected.icon) {
+        if (!showTriggerIcon || !selected.icon) {
           return <span className="select-value">{displayLabel}</span>;
         }
         return (
@@ -288,7 +302,7 @@ const Select = forwardRef<HTMLDivElement, SelectProps>(
     const wrapperClasses = [
       "select-wrapper",
       `select-size-${size}`,
-      variant === "ghost" && "select-ghost",
+      appearance !== "default" && `select-${appearance}`,
       error && "select-error",
       disabled && "select-disabled",
       currentPopupVisible && "select-open",
@@ -311,27 +325,27 @@ const Select = forwardRef<HTMLDivElement, SelectProps>(
     }, [dropdownWidthMode, panelPosition.width]);
 
     // ---- Panel position style ----
-    const panelPositionStyle = useMemo(() => {
-      const pos = panelPosition;
-      return {
-        ...(pos.top !== undefined
-          ? { top: `${pos.top}px` }
-          : { bottom: `${pos.bottom}px` }),
-        ...(pos.right !== undefined
-          ? { right: `${pos.right}px` }
-          : { left: `${pos.left}px` }),
+    // The engine owns flip side, viewport clamping, and the available-height
+    // cap; width is layered on top because Select has its own width modes.
+    const panelPositionStyle = useMemo(
+      () => ({
+        ...getDropdownPanelStyle(panelPosition, {
+          widthMode: "none",
+          maxHeightCap: DROPDOWN_PANEL.maxHeight,
+        }),
         ...panelWidthStyle,
         ...(dropdownWidth ? { width: `${dropdownWidth}px` } : {}),
         ...(dropdownMinWidth ? { minWidth: `${dropdownMinWidth}px` } : {}),
         ...(panelZIndex !== undefined ? { zIndex: panelZIndex } : {}),
-      };
-    }, [
-      panelPosition,
-      panelWidthStyle,
-      dropdownWidth,
-      dropdownMinWidth,
-      panelZIndex,
-    ]);
+      }),
+      [
+        panelPosition,
+        panelWidthStyle,
+        dropdownWidth,
+        dropdownMinWidth,
+        panelZIndex,
+      ]
+    );
 
     return (
       <div ref={ref} style={style}>
@@ -339,6 +353,10 @@ const Select = forwardRef<HTMLDivElement, SelectProps>(
           ref={triggerRef}
           className={wrapperClasses}
           data-testid={dataTestId}
+          role="combobox"
+          aria-label={ariaLabel}
+          aria-haspopup="listbox"
+          aria-expanded={currentPopupVisible}
           onClick={toggle}
           onKeyDown={handleKeyDown}
           onFocus={onFocus}
@@ -347,7 +365,7 @@ const Select = forwardRef<HTMLDivElement, SelectProps>(
         >
           <div
             className={`select-selector ${radiusClass} ${
-              variant === "ghost"
+              appearance !== "default"
                 ? ""
                 : "border border-solid border-border-2 bg-bg-2"
             } ${selectorClassName}`}
@@ -369,9 +387,9 @@ const Select = forwardRef<HTMLDivElement, SelectProps>(
                 />
               )}
               <ChevronDown
-                size={variant === "ghost" ? 12 : 16}
+                size={appearance === "ghost" ? 12 : 16}
                 className={`select-arrow shrink-0 transition-transform ${
-                  variant === "ghost" ? "text-text-3" : ""
+                  appearance === "ghost" ? "text-text-3" : ""
                 } ${currentPopupVisible ? "rotate-180" : ""}`}
               />
             </div>
@@ -394,11 +412,11 @@ const Select = forwardRef<HTMLDivElement, SelectProps>(
                   <input
                     ref={searchInputRef}
                     type="text"
-                    placeholder={t("common:common.searchPlaceholder")}
+                    placeholder={t("common:actions.search")}
                     value={searchValue}
                     onChange={handleSearchChange}
                     onClick={(event) => event.stopPropagation()}
-                    onKeyDown={tauriSelectAll}
+                    onKeyDown={handleSearchKeyDown}
                     autoCorrect="off"
                     autoCapitalize="off"
                     spellCheck={false}

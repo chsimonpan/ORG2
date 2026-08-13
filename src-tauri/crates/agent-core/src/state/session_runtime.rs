@@ -134,12 +134,6 @@ pub struct AgentSession {
     /// tokenizer mismatch, sampling). `0` = unknown; reset after compaction
     /// mutates the message list so a stale reading can't re-trigger.
     pub last_context_tokens: Arc<AtomicI64>,
-    /// Cumulative weighted token spend since the last compaction
-    /// (uncached_input*1.0 + cache_read*0.1 + cache_write*1.25 + output*5.0,
-    /// stored x1000 to keep fractions in an integer atomic). Feeds the
-    /// cost-based compaction trigger (`CompactionConfig::weighted_token_threshold`);
-    /// reset to 0 after every successful compaction.
-    pub cumulative_weighted_tokens_milli: Arc<AtomicI64>,
     /// Wall-clock time of the last user interaction, used by the idle-cleanup task.
     pub last_active_at: tokio::sync::Mutex<Instant>,
 
@@ -172,7 +166,8 @@ pub struct AgentSession {
     pub last_non_plan_mode_cache: LastNonPlanModeCache,
     /// Coordinator-requested `AgentExecMode` override.
     /// Set by the inbox-drain side-effect path on
-    /// `AgentMessage::ExecModeSetRequest` from the org coordinator;
+    /// a historical `AgentMessage::ExecModeSetRequest` from an older build;
+    /// new Agent Org tasks carry execution mode on `TaskAssigned`;
     /// consumed by the next `resolve_agent_mode` call so the next turn
     /// starts in the requested mode without the LLM having to echo it.
     pub requested_exec_mode_cache: RequestedExecModeCache,
@@ -299,7 +294,6 @@ impl AgentSession {
             runtime: tokio::sync::RwLock::new(None),
             compaction: tokio::sync::Mutex::new(CompactionState::default()),
             last_context_tokens: Arc::new(AtomicI64::new(0)),
-            cumulative_weighted_tokens_milli: Arc::new(AtomicI64::new(0)),
             permission_manager,
             question_manager: Arc::new(QuestionManager::with_cancel_flag(Arc::clone(&cancel_flag))),
             secret_broker: Arc::new(SecretBroker::with_cancel_flag(Arc::clone(&cancel_flag))),
@@ -360,9 +354,6 @@ impl AgentSession {
             }
             PromptCacheInvalidationReason::LearningsChanged => {
                 self.learnings_prompt_cache.lock().await.clear();
-            }
-            PromptCacheInvalidationReason::GlobalPathExemptionsChanged => {
-                self.prompt_cache.lock().await.clear();
             }
             PromptCacheInvalidationReason::Compaction => {
                 self.prompt_cache_break_tracker.lock().await.clear();

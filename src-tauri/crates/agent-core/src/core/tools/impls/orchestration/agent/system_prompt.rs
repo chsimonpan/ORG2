@@ -25,7 +25,6 @@ impl AgentTool {
         agent_id: &str,
         delegation_config: &DelegationConfig,
         model: &str,
-        task_prompt: &str,
     ) -> Result<String, ToolError> {
         let base_prompt = agent
             .soul_content
@@ -34,19 +33,7 @@ impl AgentTool {
 
         let dynamic_context = self.build_context(delegation_config).await;
         let scope = format!("agent:{}", agent_id);
-        // Query-aware learnings: the worker's task text is the retrieval
-        // query, so we can run the cross-encoder rerank stage
-        // (`inject_learnings_into_prompt_reranked`) instead of the
-        // query-less salience ranking. Embedding and query-absence fallbacks
-        // remain; enabled rerank failures surface.
-        let learnings =
-            crate::memory::learnings::inject_learnings_into_prompt_reranked(&scope, task_prompt)
-                .await
-                .map_err(|err| {
-                    ToolError::ExecutionFailed(format!(
-                        "worker creation aborted because semantic-memory rerank failed: {err}"
-                    ))
-                })?;
+        let learnings = crate::memory::learnings::inject_learnings_into_prompt(&scope, None);
         let working_dir = self.resolve_repo_path().await;
 
         let mut extra_sections = Vec::new();

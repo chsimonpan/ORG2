@@ -10,6 +10,7 @@ import { useSetAtom } from "jotai";
 import { useCallback } from "react";
 
 import type { AgentExecMode } from "@src/config/sessionCreatorConfig";
+import { resolveSessionAgentExecMode } from "@src/config/sessionCreatorConfig";
 import {
   beginOptimisticTurn,
   failOptimisticTurn,
@@ -27,7 +28,6 @@ import {
   lastUserMessageAtom,
   setSessionRuntimeStatusAtom,
 } from "@src/store/session/cliSessionStatusAtom";
-import { creatorDefaultExecModeAtom } from "@src/store/session/creatorDefaultExecModeAtom";
 import {
   type LastModelSelection,
   creatorDefaultModelSelectionAtom,
@@ -38,27 +38,17 @@ import { resolveModelForMessage } from "@src/util/session/resolveModelForMessage
 import { selectionFromSession } from "@src/util/session/selectionFromSession";
 import { isCursorIdeSession } from "@src/util/session/sessionDispatch";
 
-interface UseMessageDispatchOptions {
-  getSessionId: () => string | null;
-}
-
-export function useMessageDispatch(options: UseMessageDispatchOptions) {
-  const { getSessionId } = options;
+export function useMessageDispatch() {
   const setSessionRuntimeStatus = useSetAtom(setSessionRuntimeStatusAtom);
   const setLastUserMessage = useSetAtom(lastUserMessageAtom);
 
   const addUserMessage = useCallback(
     async (
+      sessionId: string,
       content: string,
       imageDataUrls?: string[],
       turnIntentId?: string
-    ): Promise<void> => {
-      const sessionId = getSessionId();
-      if (!sessionId) {
-        throw new Error(
-          "[useMessageDispatch] addUserMessage: no active sessionId"
-        );
-      }
+    ): Promise<string> => {
       const userEvent = createSyntheticUserEvent(sessionId, content, {
         imageDataUrls,
         turnIntentId,
@@ -73,8 +63,9 @@ export function useMessageDispatch(options: UseMessageDispatchOptions) {
         displayContent: content,
         imageDataUrls,
       });
+      return userEvent.id;
     },
-    [getSessionId, setLastUserMessage]
+    [setLastUserMessage]
   );
 
   const dispatchMessageBySessionType = useCallback(
@@ -99,15 +90,13 @@ export function useMessageDispatch(options: UseMessageDispatchOptions) {
       const creatorDefaultSelection = store.get(
         creatorDefaultModelSelectionAtom
       );
-      const creatorDefaultMode = store.get(creatorDefaultExecModeAtom);
-
       const session = sessionMap.get(sessionId);
       const lastModelSelection: LastModelSelection | null =
         modelSelectionOverride ??
         selectionFromSession(session, creatorDefaultSelection);
-      const agentExecMode: AgentExecMode =
-        (session?.agentExecMode as AgentExecMode | undefined) ??
-        creatorDefaultMode;
+      const agentExecMode: AgentExecMode = resolveSessionAgentExecMode(
+        session?.agentExecMode
+      );
       const { model, accountId } = resolveModelForMessage(lastModelSelection);
 
       // Synchronous turn reserve: every dispatch funnels through here, so the
@@ -129,6 +118,8 @@ export function useMessageDispatch(options: UseMessageDispatchOptions) {
           imageDataUrls,
           clientMessageId,
           turnIntentId,
+          turnIntentSource: "user_submit",
+          directUserIntent: true,
         });
         // Backend accepted the message — the turn is running even if the
         // provider's running ack has not been observed yet.

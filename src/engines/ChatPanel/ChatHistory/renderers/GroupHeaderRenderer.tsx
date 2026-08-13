@@ -4,8 +4,12 @@ import React, { memo, useCallback } from "react";
 import { DETAIL_PANEL_TOKENS } from "@src/config/detailPanelTokens";
 import { CHAT_ITEM_PADDING_X } from "@src/engines/ChatPanel/blocks/primitives/config";
 import { sessionIdAtom } from "@src/engines/SessionCore/core/atoms";
-import { loadSessionTurnBodyIntoStore } from "@src/engines/SessionCore/turns";
+import {
+  loadSessionTurnBodyIntoStore,
+  pruneLoadedTurnBodies,
+} from "@src/engines/SessionCore/turns";
 import TurnCommentChrome from "@src/features/Org2Cloud/SessionComments/TurnCommentChrome";
+import { createLogger } from "@src/hooks/logger";
 
 import UserChatItem from "../../ChatItems/UserChatItem";
 import TurnCollapsePinBar from "../../InputArea/components/TurnCollapsePinBar";
@@ -15,6 +19,8 @@ import {
   type ChatGroupMeta,
   isTurnCollapseEligible,
 } from "../hooks/useChatGroups";
+
+const log = createLogger("GroupHeaderRenderer");
 
 function sameHeader(
   left: OptimizedChatItem | null | undefined,
@@ -174,10 +180,25 @@ export const GroupHeaderRenderer: React.FC<GroupHeaderRendererProps> = memo(
     const canExpandUnloadedTurn = Boolean(sessionId && unloadedTurnId);
     const handleExpandUnloadedTurn = useCallback(async () => {
       if (!sessionId || !unloadedTurnId) return;
-      await loadSessionTurnBodyIntoStore({
-        sessionId,
-        turnId: unloadedTurnId,
-      });
+      try {
+        await loadSessionTurnBodyIntoStore({
+          sessionId,
+          turnId: unloadedTurnId,
+        });
+        await pruneLoadedTurnBodies(sessionId, [unloadedTurnId]);
+      } catch (error) {
+        // Loading the turn body (or the follow-up eviction sweep) can fail
+        // for the same "the store no longer agrees with the registry"
+        // reasons pruneLoadedTurnBodies already tolerates internally. Never
+        // let this reject past the pin bar's click handler — an uncaught
+        // rejection here becomes a fatal, app-wide error screen instead of
+        // a merely-frustrating "expand didn't work" moment. Keep the bar
+        // interactive so the user can retry.
+        log.warn(
+          `Failed to expand unloaded turn ${unloadedTurnId} for session ${sessionId}:`,
+          error
+        );
+      }
     }, [sessionId, unloadedTurnId]);
     const handleEdit = useCallback(
       (newText: string, imageDataUrls?: string[]) => {
@@ -216,10 +237,24 @@ export const GroupHeaderRenderer: React.FC<GroupHeaderRendererProps> = memo(
 
     return (
       <div
-        className={`${CHAT_ITEM_PADDING_X} ${DETAIL_PANEL_TOKENS.contentWidth} bg-chat-pane ${headerPaddingBottomClass}`.trim()}
+        className={`group/turn ${CHAT_ITEM_PADDING_X} ${DETAIL_PANEL_TOKENS.contentWidth} ${headerPaddingBottomClass}`.trim()}
         style={roundGap > 0 ? { marginTop: roundGap } : undefined}
       >
-        {showUserPart && (
+        {showUserPart && header.event?.id ? (
+          <TurnCommentChrome
+            anchorEventId={header.event.id}
+            renderMessage={(toolbarAction) => (
+              <UserChatItem
+                chatItem={header}
+                onEditSubmit={onEditSubmit ? handleEdit : undefined}
+                toolbarActions={toolbarAction}
+                onRestoreCheckpoint={
+                  onRestoreCheckpoint ? handleRestoreCheckpoint : undefined
+                }
+              />
+            )}
+          />
+        ) : showUserPart ? (
           <UserChatItem
             chatItem={header}
             onEditSubmit={onEditSubmit ? handleEdit : undefined}
@@ -227,14 +262,7 @@ export const GroupHeaderRenderer: React.FC<GroupHeaderRendererProps> = memo(
               onRestoreCheckpoint ? handleRestoreCheckpoint : undefined
             }
           />
-        )}
-        {/* Session comments (cloud replay surfaces only): anchor = the
-            turn's leading user-message event id. The component consumes
-            SessionCommentsContext and renders NOTHING when the surface has
-            no cloud comment target, so ordinary sessions are untouched. */}
-        {showUserPart && header.event?.id && (
-          <TurnCommentChrome anchorEventId={header.event.id} />
-        )}
+        ) : null}
         {showCollapsePart && (
           <TurnCollapsePinBar
             turnId={turnId}

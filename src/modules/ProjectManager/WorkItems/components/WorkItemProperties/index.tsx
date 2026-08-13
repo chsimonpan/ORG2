@@ -1,4 +1,4 @@
-import { MoreHorizontal } from "lucide-react";
+import { ListChevronsUpDown } from "lucide-react";
 import React, {
   useCallback,
   useEffect,
@@ -9,7 +9,9 @@ import React, {
 import { useTranslation } from "react-i18next";
 
 import Button from "@src/components/Button";
+import { pillControlStateClass } from "@src/components/CompoundPill/config";
 import { DROPDOWN_ITEM } from "@src/components/Dropdown/tokens";
+import { usePropertyDropdownDirection } from "@src/components/PropertyField/PropertyDropdownDirection";
 import { DEFAULT_LABELS } from "@src/modules/ProjectManager/config/manage";
 import type { ContextMenuItem } from "@src/types/core/shared";
 import type {
@@ -36,18 +38,40 @@ import { useWorkItemPropertyHandlers } from "./useWorkItemPropertyHandlers";
 interface PropertyCardProps {
   title: string;
   children: React.ReactNode;
+  hideTitle?: boolean;
+  variant?: "cards" | "workstation-trail";
 }
 
-const PropertyCard: React.FC<PropertyCardProps> = ({ title, children }) => (
-  <section className="overflow-visible rounded-lg border border-solid border-border-2 bg-[var(--cm-editor-background,var(--color-bg-1))] shadow-[0_2px_6px_rgb(0_0_0_/_4%)]">
-    <div className="flex h-10 items-center px-4">
-      <span className="text-[13px] font-medium text-text-1">{title}</span>
-    </div>
-    <div className="flex w-full flex-col gap-0.5 pb-2 [&>*]:w-full">
-      {children}
-    </div>
-  </section>
-);
+const PropertyCard: React.FC<PropertyCardProps> = ({
+  title,
+  children,
+  hideTitle = false,
+  variant = "cards",
+}) => {
+  if (variant === "workstation-trail") {
+    return (
+      <section className="contents">
+        {!hideTitle ? (
+          <div className="mt-1 px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-text-3">
+            {title}
+          </div>
+        ) : null}
+        <div className="flex w-full flex-col [&>*]:w-full">{children}</div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="overflow-visible rounded-lg border border-solid border-border-2 bg-[var(--cm-editor-background,var(--color-bg-1))] shadow-[0_2px_6px_rgb(0_0_0_/_4%)]">
+      <div className="flex h-10 items-center px-4">
+        <span className="text-[13px] font-medium text-text-1">{title}</span>
+      </div>
+      <div className="flex w-full flex-col gap-0.5 pb-2 [&>*]:w-full">
+        {children}
+      </div>
+    </section>
+  );
+};
 
 export const WORK_ITEM_PROPERTY_ESSENTIAL_FIELDS: WorkItemPropertyFieldKey[] = [
   "project",
@@ -58,6 +82,21 @@ export const WORK_ITEM_PROPERTY_ESSENTIAL_FIELDS: WorkItemPropertyFieldKey[] = [
 export const WORK_ITEM_PROPERTY_INLINE_FIELDS: WorkItemPropertyFieldKey[] = [
   "status",
   "priority",
+];
+
+/**
+ * Canonical property summary for thread-style Work Item surfaces.
+ *
+ * Keep this list shared so opening the same Work Item from another surface
+ * does not silently change its visible metadata or ordering.
+ */
+export const WORK_ITEM_THREAD_PROPERTY_FIELDS: WorkItemPropertyFieldKey[] = [
+  "project",
+  "status",
+  "priority",
+  "assignee",
+  "reviewer",
+  "date",
 ];
 
 const DEFAULT_VISIBLE_FIELDS: WorkItemPropertyFieldKey[] = [
@@ -97,13 +136,20 @@ const WorkItemProperties: React.FC<WorkItemPropertiesProps> = ({
   availableMembers = [],
   availableAgents = [],
   availableOrgs = [],
+  projectIconType,
+  projectReadonly = false,
+  assigneeReadonly = false,
   showTime = true,
   externalStatusConfig,
+  externalAssigneeConfig,
   fieldVariant = "row",
+  pillLayout = "nowrap",
   visibleFields = DEFAULT_VISIBLE_FIELDS,
   showMoreMenu = false,
+  panelVariant = "cards",
 }) => {
   const { t } = useTranslation("projects");
+  const dropdownDirection = usePropertyDropdownDirection();
   const [openPicker, setOpenPicker] = useState<WorkItemPropertyPicker>(null);
   const [moreMenuPosition, setMoreMenuPosition] = useState<{
     x: number;
@@ -158,12 +204,18 @@ const WorkItemProperties: React.FC<WorkItemPropertiesProps> = ({
     t,
   });
 
-  const handleMoreClick = useCallback((event: React.MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const rect = event.currentTarget.getBoundingClientRect();
-    setMoreMenuPosition({ x: rect.left, y: rect.bottom + 6 });
-  }, []);
+  const handleMoreClick = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = event.currentTarget.getBoundingClientRect();
+      setMoreMenuPosition({
+        x: rect.left,
+        y: dropdownDirection === "up" ? rect.top - 6 : rect.bottom + 6,
+      });
+    },
+    [dropdownDirection]
+  );
 
   const handleMoreContextAction = useCallback(
     (action: string, value?: string) => {
@@ -250,8 +302,16 @@ const WorkItemProperties: React.FC<WorkItemPropertiesProps> = ({
 
   if (fieldVariant === "pill") {
     return (
-      <section ref={containerRef} className="overflow-visible">
-        <div className="flex flex-nowrap items-center gap-2">
+      <section ref={containerRef} className="min-w-0 overflow-visible">
+        <div
+          className={
+            pillLayout === "wrap"
+              ? "flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5"
+              : "flex min-w-0 flex-nowrap items-center gap-2"
+          }
+          data-testid="work-item-property-pills"
+          data-layout={pillLayout}
+        >
           <PlanningSection
             workItem={workItem}
             openPicker={openPicker}
@@ -260,6 +320,8 @@ const WorkItemProperties: React.FC<WorkItemPropertiesProps> = ({
             availableMilestones={availableMilestones}
             handlers={handlers}
             t={t}
+            projectIconType={projectIconType}
+            projectReadonly={projectReadonly}
             fieldVariant={fieldVariant}
             visibleFields={visibleFieldSet}
           />
@@ -284,6 +346,8 @@ const WorkItemProperties: React.FC<WorkItemPropertiesProps> = ({
             t={t}
             fieldVariant={fieldVariant}
             visibleFields={visibleFieldSet}
+            assigneeReadonly={assigneeReadonly}
+            externalAssigneeConfig={externalAssigneeConfig}
           />
           <DatesScheduleSection
             workItem={workItem}
@@ -312,10 +376,10 @@ const WorkItemProperties: React.FC<WorkItemPropertiesProps> = ({
               size="small"
               shape="circle"
               iconOnly
-              icon={<MoreHorizontal size={DROPDOWN_ITEM.iconSize} />}
+              icon={<ListChevronsUpDown size={DROPDOWN_ITEM.iconSize} />}
               onClick={handleMoreClick}
               aria-label={t("workItems.contextMenu.moreProperties")}
-              className="!h-7 !w-7 !min-w-7 !rounded-full !border !border-solid !border-border-2 !bg-bg-2 !p-0 !text-text-2 !shadow-none hover:!bg-surface-hover"
+              className={`!h-7 !w-7 !min-w-7 !rounded-full !border !border-solid !border-border-2 !p-0 !text-text-2 ${pillControlStateClass(Boolean(moreMenuPosition))}`}
             />
           )}
         </div>
@@ -324,8 +388,91 @@ const WorkItemProperties: React.FC<WorkItemPropertiesProps> = ({
             items={moreMenuItems}
             position={moreMenuPosition}
             onClose={() => setMoreMenuPosition(null)}
+            openDirection={dropdownDirection}
           />
         )}
+      </section>
+    );
+  }
+
+  const propertyGroups = (
+    <>
+      <PropertyCard
+        title={t("workItems.properties.propertiesSection")}
+        variant={panelVariant}
+        hideTitle={panelVariant === "workstation-trail"}
+      >
+        <PlanningSection
+          workItem={workItem}
+          openPicker={openPicker}
+          togglePicker={togglePicker}
+          availableProjects={availableProjects}
+          availableMilestones={availableMilestones}
+          handlers={handlers}
+          t={t}
+          projectIconType={projectIconType}
+          projectReadonly={projectReadonly}
+          visibleFields={visibleFieldSet}
+        />
+        <StatusPrioritySection
+          workItem={workItem}
+          openPicker={openPicker}
+          togglePicker={togglePicker}
+          handlers={handlers}
+          externalStatusConfig={externalStatusConfig}
+          t={t}
+        />
+        <DatesScheduleSection
+          workItem={workItem}
+          openPicker={openPicker}
+          togglePicker={togglePicker}
+          handlers={handlers}
+          showTime={showTime}
+          t={t}
+        />
+        <LabelsSection
+          workItem={workItem}
+          openPicker={openPicker}
+          togglePicker={togglePicker}
+          availableLabels={availableLabels}
+          handlers={handlers}
+          t={t}
+        />
+        <DelegationsSection workItem={workItem} t={t} />
+      </PropertyCard>
+      <PropertyCard
+        title={t("workItems.properties.assignment")}
+        variant={panelVariant}
+      >
+        <PeopleSection
+          workItem={workItem}
+          openPicker={openPicker}
+          togglePicker={togglePicker}
+          availableMembers={availableMembers}
+          availableAgents={availableAgents}
+          availableOrgs={availableOrgs}
+          handlers={handlers}
+          t={t}
+          assigneeReadonly={assigneeReadonly}
+          externalAssigneeConfig={externalAssigneeConfig}
+        />
+        {panelVariant === "cards" ? (
+          <div className="mx-4 my-2 h-px bg-border-1" />
+        ) : null}
+        <ScheduleEditor
+          schedule={workItem.schedule}
+          onChange={handlers.handleScheduleChange}
+          t={t}
+          compact={panelVariant === "workstation-trail"}
+        />
+      </PropertyCard>
+    </>
+  );
+
+  if (panelVariant === "workstation-trail") {
+    return (
+      <section ref={containerRef} className="min-w-0 overflow-visible">
+        <div className="flex flex-col">{propertyGroups}</div>
       </section>
     );
   }
@@ -336,63 +483,7 @@ const WorkItemProperties: React.FC<WorkItemPropertiesProps> = ({
       className="flex h-full flex-col overflow-hidden p-2"
     >
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-hide">
-        <div className="flex flex-col gap-2 pb-2">
-          <PropertyCard title={t("workItems.properties.propertiesSection")}>
-            <PlanningSection
-              workItem={workItem}
-              openPicker={openPicker}
-              togglePicker={togglePicker}
-              availableProjects={availableProjects}
-              availableMilestones={availableMilestones}
-              handlers={handlers}
-              t={t}
-              visibleFields={visibleFieldSet}
-            />
-            <StatusPrioritySection
-              workItem={workItem}
-              openPicker={openPicker}
-              togglePicker={togglePicker}
-              handlers={handlers}
-              externalStatusConfig={externalStatusConfig}
-              t={t}
-            />
-            <DatesScheduleSection
-              workItem={workItem}
-              openPicker={openPicker}
-              togglePicker={togglePicker}
-              handlers={handlers}
-              showTime={showTime}
-              t={t}
-            />
-            <LabelsSection
-              workItem={workItem}
-              openPicker={openPicker}
-              togglePicker={togglePicker}
-              availableLabels={availableLabels}
-              handlers={handlers}
-              t={t}
-            />
-            <DelegationsSection workItem={workItem} t={t} />
-          </PropertyCard>
-          <PropertyCard title={t("workItems.properties.assignment")}>
-            <PeopleSection
-              workItem={workItem}
-              openPicker={openPicker}
-              togglePicker={togglePicker}
-              availableMembers={availableMembers}
-              availableAgents={availableAgents}
-              availableOrgs={availableOrgs}
-              handlers={handlers}
-              t={t}
-            />
-            <div className="mx-4 my-2 h-px bg-border-1" />
-            <ScheduleEditor
-              schedule={workItem.schedule}
-              onChange={handlers.handleScheduleChange}
-              t={t}
-            />
-          </PropertyCard>
-        </div>
+        <div className="flex flex-col gap-2 pb-2">{propertyGroups}</div>
       </div>
     </section>
   );

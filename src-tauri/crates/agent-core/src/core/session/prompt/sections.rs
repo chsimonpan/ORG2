@@ -14,6 +14,7 @@ use super::registry::{order, AppliesDecision, PromptCtx, PromptSection, PromptSo
 use super::section_builders::*;
 
 pub use super::section_builders::build_agent_org_context_section;
+pub(crate) use super::section_builders::build_agent_org_context_section_with_task_snapshot;
 
 use crate::skills::loader::SkillsLoader;
 use crate::tools::names as tool_names;
@@ -130,7 +131,6 @@ impl PromptSection for EnvironmentSection {
         Some(build_project_environment(
             ws.working_dir(),
             &additional_dirs,
-            &ctx.config.global_permitted_paths,
         ))
     }
 }
@@ -290,7 +290,13 @@ impl PromptSection for BehavioralRulesSection {
     }
     fn render(&self, ctx: &PromptCtx) -> Option<String> {
         if ctx.is_channel_session {
-            Some(build_channel_behavioral_rules(ctx.config))
+            // Only Project sessions may mutate the work system through
+            // `org2-pm`; the guidance tracks that application-boundary
+            // gate rather than a tool surface.
+            Some(build_channel_behavioral_rules(
+                ctx.config,
+                ctx.config.product_mode.as_deref() == Some("project"),
+            ))
         } else if ctx.config.workspace.is_some() {
             Some(sde_behavioral_rules())
         } else {
@@ -526,39 +532,6 @@ impl PromptSection for LearningsSection {
 }
 
 // ---------------------------------------------------------------------
-// 102. Explicit user/workspace/project prompt presets
-// ---------------------------------------------------------------------
-
-pub struct ScopedPromptPresetsSection;
-
-impl PromptSection for ScopedPromptPresetsSection {
-    fn id(&self) -> &'static str {
-        "scoped_prompt_presets"
-    }
-    fn order_hint(&self) -> i32 {
-        order::SCOPE_PRESETS
-    }
-    fn applies(&self, _ctx: &PromptCtx) -> AppliesDecision {
-        AppliesDecision::Apply {
-            reason: "session_scope_projection",
-        }
-    }
-    fn source(&self) -> PromptSource {
-        PromptSource::Computed {
-            upstream: "session::prompt_scope_presets",
-        }
-    }
-    fn render(&self, ctx: &PromptCtx) -> Option<String> {
-        let conn = crate::foundation::db_bridge::get_connection().ok()?;
-        let body = crate::session::prompt_scope_presets::project_prompt_presets_for_session(
-            &conn,
-            ctx._session_id,
-        );
-        (!body.is_empty()).then_some(body)
-    }
-}
-
-// ---------------------------------------------------------------------
 // 105. Workspace memory protocol (location + save/access contract)
 // ---------------------------------------------------------------------
 
@@ -774,8 +747,10 @@ impl PromptSection for TaskRoutingSection {
     fn cache_policy(&self) -> PromptCachePolicy {
         PromptCachePolicy::StableUntilClear
     }
-    fn render(&self, _ctx: &PromptCtx) -> Option<String> {
-        Some(build_task_routing_section())
+    fn render(&self, ctx: &PromptCtx) -> Option<String> {
+        Some(build_task_routing_section(
+            ctx.config.product_mode.as_deref() == Some("project"),
+        ))
     }
 }
 

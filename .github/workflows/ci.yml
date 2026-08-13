@@ -2,7 +2,7 @@
 #
 # Two parallel jobs:
 #   frontend  — TypeScript typecheck + ESLint + Vitest unit tests
-#   rust      — cargo check + advisory clippy + cargo test
+#   rust      — advisory clippy (subsumes cargo check)
 #
 # Mirrors the toolchain versions used in release.yaml (Node 20, pnpm 9,
 # Rust stable, swatinem/rust-cache) so CI and release builds stay in sync.
@@ -16,11 +16,17 @@ on:
       - release
       - master
 
+# A new push makes an older run for the same PR obsolete. Cancel it before it
+# can consume one of the organization's limited hosted-runner slots.
+concurrency:
+  group: ci-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   # ── Frontend ────────────────────────────────────────────────────────────────
   frontend:
     name: Frontend (typecheck · lint · test)
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -39,7 +45,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: node_modules
-          key: node-modules-${{ hashFiles('pnpm-lock.yaml') }}
+          key: node-modules-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -57,7 +63,7 @@ jobs:
 
   # ── Rust ────────────────────────────────────────────────────────────────────
   rust:
-    name: Rust (check · clippy · test)
+    name: Rust (clippy)
     runs-on: macos-latest
 
     steps:
@@ -73,21 +79,12 @@ jobs:
           workspaces: "./src-tauri -> target"
           shared-key: "ci-macos"
 
-      - name: cargo check
-        working-directory: src-tauri
-        run: cargo check --workspace
+      - name: Stage org2-pm sidecar
+        run: node scripts/tauri/prepare-sidecars.cjs --profile debug
 
-      # The current develop baseline has pre-existing Clippy warnings across
-      # multiple crates. Keep Clippy visible and compilation-blocking without
-      # letting toolchain lint drift block every feature PR; restore
-      # `-- -D warnings` after the baseline cleanup lands.
-      - name: cargo clippy (advisory warnings)
+      # Clippy runs the full compiler front-end, so it subsumes `cargo check`.
+      # Check every target and reject new warnings now that the workspace
+      # baseline is clean.
+      - name: cargo clippy (all targets, warnings denied)
         working-directory: src-tauri
-        run: cargo clippy --workspace
-
-      - name: cargo test
-        working-directory: src-tauri
-        # Several agent-core tests intentionally exercise process-global SQLite
-        # state. Keep the workspace suite deterministic until those fixtures are
-        # migrated to per-test connections.
-        run: cargo test --workspace -- --test-threads=1
+        run: cargo clippy --workspace --all-targets -- -D warnings

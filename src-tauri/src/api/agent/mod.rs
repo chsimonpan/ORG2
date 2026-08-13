@@ -695,12 +695,24 @@ pub fn create_routes() -> Router {
             post(test::agent_org::test_agent_org_drain_inbox),
         )
         .route(
+            "/test/agent-org/session-return-to-work",
+            post(test::agent_org::test_agent_org_session_return_to_work),
+        )
+        .route(
             "/test/agent-org/post-member-idle",
             post(test::agent_org::test_agent_org_post_member_idle),
         )
         .route(
             "/test/agent-org/tasks/seed",
             post(test::agent_org::test_agent_org_tasks_seed),
+        )
+        .route(
+            "/test/agent-org/run/seed",
+            post(test::agent_org::test_agent_org_run_seed),
+        )
+        .route(
+            "/test/agent-org/run/cleanup",
+            post(test::agent_org::test_agent_org_run_cleanup),
         )
         .route(
             "/test/agent-org/tasks/list",
@@ -711,12 +723,12 @@ pub fn create_routes() -> Router {
             post(test::agent_org::test_agent_org_seed_stale_worker_run),
         )
         .route(
-            "/test/agent-org/stale-workers/seed-cli-member",
-            post(test::agent_org::test_agent_org_seed_cli_member_run),
+            "/test/agent-org/session-delete/snapshot",
+            post(test::agent_org::test_agent_org_session_delete_snapshot),
         )
         .route(
-            "/test/agent-org/stale-workers/release-tasks",
-            post(test::agent_org::test_agent_org_release_stale_worker_tasks),
+            "/test/agent-org/stale-workers/seed-cli-member",
+            post(test::agent_org::test_agent_org_seed_cli_member_run),
         )
         .route(
             "/test/agent-org/find-worker-session",

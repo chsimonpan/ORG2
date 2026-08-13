@@ -12,6 +12,7 @@ export type { HintWithInfoProps } from "./HintWithInfo";
 export type { SessionGroupPageProps } from "./SessionGroupPage";
 export type {
   SessionTableColumnKey,
+  SessionTableColumnOverrides,
   SessionTableItem,
   SessionTableProps,
 } from "./SessionTable";
@@ -21,6 +22,13 @@ export {
 } from "./sessionTableItem";
 export type { BrowseCardProps } from "./BrowseCard";
 
+export {
+  CREATOR_BOTTOM_DOCK_PADDING_CLASS,
+  CREATOR_MIDDLE_POSITION_STYLE,
+  default as CreatorContentLayout,
+} from "./CreatorContentLayout";
+export type { CreatorContentLayoutProps } from "./CreatorContentLayout";
+
 export { default as CollapsibleSection } from "./CollapsibleSection";
 export type { CollapsibleSectionProps } from "./CollapsibleSection";
 export { default as CollapsibleTableSection } from "./CollapsibleTableSection";
@@ -28,6 +36,26 @@ export type { CollapsibleTableSectionProps } from "./CollapsibleTableSection";
 
 export { default as DetailPanelContainer } from "./DetailPanelContainer";
 export type { DetailPanelContainerProps } from "./DetailPanelContainer";
+export { default as DetailHeaderTabs } from "./DetailHeaderTabs";
+export type { DetailHeaderTabsProps } from "./DetailHeaderTabs";
+export { default as DetailTabStrip } from "./DetailTabStrip";
+export type { DetailTabStripItem, DetailTabStripProps } from "./DetailTabStrip";
+export { default as PersistentDetailTabPanel } from "./PersistentDetailTabPanel";
+export type { PersistentDetailTabPanelProps } from "./PersistentDetailTabPanel";
+export {
+  default as WorkstationTrailSurface,
+  WorkstationTrailBody,
+  WorkstationTrailHeader,
+  WorkstationTrailIconButton,
+  FOCUSED_CHAT_WORKSTATION_TRAIL_RAIL_PADDING_CLASS,
+  WORKSTATION_TRAIL_ICON_BUTTON_CLASS,
+  WORKSTATION_TRAIL_RAIL_PADDING_CLASS,
+  WORKSTATION_TRAIL_SURFACE_CLASS,
+} from "./WorkstationTrailSurface";
+export type {
+  WorkstationTrailHeaderProps,
+  WorkstationTrailSurfaceProps,
+} from "./WorkstationTrailSurface";
 
 export {
   CARD_ROW_TOKENS,
@@ -39,6 +67,22 @@ export {
 export { SESSION_HISTORY_LIST_TOKENS } from "./sessionHistoryListTokens";
 export { default as ScrollFadeContainer } from "./ScrollFadeContainer";
 export { default as ScrollPreservation } from "./ScrollPreservation";
+export {
+  default as ScrollTrail,
+  MAX_SCROLL_TRAIL_MARKERS,
+  SCROLL_TRAIL_TARGET_SELECTOR,
+  ScrollTrailTarget,
+  getScrollTrailMarkerWidthClass,
+  normalizeScrollTrailLabel,
+  resolveActiveScrollTrailIndex,
+  sampleScrollTrailIndices,
+} from "./ScrollTrail";
+export type {
+  ScrollTrailAlignment,
+  ScrollTrailPlacement,
+  ScrollTrailProps,
+  ScrollTrailTargetProps,
+} from "./ScrollTrail";
 export type { ScrollPreservationProps } from "./ScrollPreservation";
 export type { ScrollFadeContainerProps } from "./ScrollFadeContainer";
 export { SCROLL_FADE_TOKENS } from "../tokens/scrollFadeTokens";
@@ -127,6 +171,9 @@ export type { ListPanelTabPillRowProps } from "./ListPanelTabPillRow";
 
 export { default as ListPanelScrollArea } from "./ListPanelScrollArea";
 export type { ListPanelScrollAreaProps } from "./ListPanelScrollArea";
+
+export { default as LoadingBar } from "./LoadingBar";
+export type { LoadingBarProps } from "./LoadingBar";
 
 export { Placeholder, PLACEHOLDER_TOKENS } from "./Placeholder";
 export type {

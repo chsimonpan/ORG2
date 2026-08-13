@@ -5,6 +5,7 @@ import {
   parseUnifiedDiffToOldNew,
 } from "@src/engines/SessionCore/rendering/props/propsDataExtractors";
 import { normalizeEventProps } from "@src/engines/SessionCore/rendering/props/propsNormalizer";
+import { shouldTrustDiffStartLines } from "@src/util/diff/startLines";
 import { normalizeDiffFilePath } from "@src/util/file/pathUtils";
 
 import type { DiffFileSectionData } from "../DiffFileSection";

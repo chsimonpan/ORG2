@@ -99,8 +99,6 @@ pub struct ModelCapabilities {
     /// When true, requests that enable thinking must omit `temperature`
     /// (Anthropic rejects sending both).
     pub omit_temperature_with_thinking: bool,
-    /// DeepSeek chat-completions variants reject multimodal `image_url` blocks.
-    pub text_only_wire: bool,
 }
 
 impl ModelCapabilities {
@@ -112,7 +110,6 @@ impl ModelCapabilities {
             context_window: 200_000,
             thinking: ThinkingSupport::Optional,
             omit_temperature_with_thinking: true,
-            text_only_wire: false,
         }
     }
 }
@@ -248,6 +245,11 @@ const FAMILY_RULES: &[FamilyRule] = &[
         thinking: ThinkingSupport::AlwaysOn,
     },
     // ── OpenAI ──
+    FamilyRule {
+        pattern: "gpt-5.6",
+        context_window: 1_050_000,
+        thinking: ThinkingSupport::AlwaysOn,
+    },
     FamilyRule {
         pattern: "gpt-5.5",
         context_window: 1_050_000,
@@ -559,9 +561,15 @@ const FAMILY_RULES: &[FamilyRule] = &[
 /// Resolve capabilities for `model`, optionally consulting the KeyVault
 /// entry for `account_id`.
 ///
-/// Resolution chain for provider capabilities: a provider-reported
-/// `ModelVariant.context_window` beats the static family table. User runtime
-/// overrides are deliberately handled only by [`resolve_effective_context_window`].
+/// Resolution chain for the context window:
+/// 1. **Static family table** ([`FAMILY_RULES`]) — the model's nominal
+///    capability (e.g. opus-4.6 = 1M).
+/// 2. **KeyVault override** — if the provider's `/v1/models` reported a
+///    `context_length` for this model on this account (stored as
+///    `ModelVariant.context_window`), it overrides the static value. This is
+///    what makes a proxy that caps a 1M model at 256K show the *real* limit
+///    instead of the nominal one. Absent (official OpenAI/Anthropic, which
+///    don't expose `context_length`) → keep the static value.
 ///
 /// Thinking support is upgraded only (a KeyVault `reasoning` row beats the
 /// family guess); context window can be either raised or lowered by the
@@ -586,40 +594,10 @@ pub fn resolve_effective_context_window(
     account_id: Option<&str>,
     explicit_context_window: Option<u64>,
 ) -> usize {
-    let variants = account_id
-        .and_then(|account_id| KEY_SERVICE.get_key_by_id(account_id))
-        .map(|key| key.model_variants)
-        .unwrap_or_default();
-    resolve_effective_context_window_from_variants(model, explicit_context_window, &variants)
-}
-
-/// Exact runtime precedence, after an AgentDefinition's explicit positive
-/// setting has been considered by the caller: Key Vault user override,
-/// provider-reported context, then the family/default table.
-fn resolve_effective_context_window_from_variants(
-    model: &str,
-    explicit_context_window: Option<u64>,
-    variants: &[ModelVariant],
-) -> usize {
-    if let Some(context_window) =
-        explicit_context_window.filter(|context_window| *context_window > 0)
-    {
-        return context_window as usize;
-    }
-    let parsed = crate::providers::thinking_mode::parse_model_variant(model);
-    let variant = variants
-        .iter()
-        .find(|variant| variant.model == model)
-        .or_else(|| {
-            variants.iter().find(|variant| {
-                variant.model == parsed.base_model || variant.base_model == parsed.base_model
-            })
-        });
-    variant
-        .and_then(|variant| variant.context_window_override.filter(|ctx| *ctx > 0))
-        .or_else(|| variant.and_then(|variant| variant.context_window.filter(|ctx| *ctx > 0)))
-        .map(|context_window| context_window as usize)
-        .unwrap_or_else(|| resolve_from_family_table(&parsed.base_model).context_window)
+    explicit_context_window
+        .filter(|ctx| *ctx > 0)
+        .map(|ctx| ctx as usize)
+        .unwrap_or_else(|| resolve(model, account_id).context_window)
 }
 
 fn apply_keyvault_overrides(caps: &mut ModelCapabilities, model: &str, variants: &[ModelVariant]) {
@@ -652,7 +630,6 @@ fn resolve_from_family_table(model: &str) -> ModelCapabilities {
                 context_window: rule.context_window,
                 thinking: rule.thinking,
                 omit_temperature_with_thinking: true,
-                text_only_wire: rule.pattern.starts_with("deepseek"),
             };
         }
     }

@@ -14,8 +14,6 @@ fn invokable_canonical_tool_names() -> BTreeSet<&'static str> {
         names::RUN_SHELL,
         names::AWAIT_OUTPUT,
         names::CODE_SEARCH,
-        names::USE_CODE_MAP,
-        names::MANAGE_CODE_MAP,
         names::MANAGE_WORKSPACE,
         names::EDIT_FILE,
         names::DELETE_FILE,
@@ -38,8 +36,6 @@ fn invokable_canonical_tool_names() -> BTreeSet<&'static str> {
         names::SPOTLIGHT,
         names::REPLY_SESSION_COMMENT,
         names::AGENT,
-        names::MANAGE_PROJECT,
-        names::MANAGE_WORK_ITEM,
         names::MANAGE_AGENT_DEF,
         names::MANAGE_NODES,
         names::ASK_USER_QUESTIONS,
@@ -51,9 +47,12 @@ fn invokable_canonical_tool_names() -> BTreeSet<&'static str> {
         names::TOOL_SEARCH,
         names::ORG_SEND_MESSAGE,
         names::TASK_CREATE,
+        names::TASK_GRAPH_CREATE,
         names::TASK_UPDATE,
         names::TASK_LIST,
         names::TASK_GET,
+        names::ORG_RUN_COMPLETE,
+        names::ORG_INBOX_REPAIR,
     ])
 }
 
@@ -157,7 +156,6 @@ fn every_visible_or_invokable_builtin_tool_has_status_labels() {
 fn every_renderable_tool_has_non_default_chat_block() {
     let exempt_fallback_tools = HashSet::from([
         names::MANAGE_WORKSPACE,
-        names::MANAGE_CODE_MAP,
         names::MANAGE_LSP,
         names::MANAGE_FILE_HISTORY,
         names::SETUP_REPO,
@@ -171,8 +169,6 @@ fn every_renderable_tool_has_non_default_chat_block() {
         names::CONTROL_ORGII,
         names::SPOTLIGHT,
         names::REPLY_SESSION_COMMENT,
-        names::MANAGE_PROJECT,
-        names::MANAGE_WORK_ITEM,
         names::MANAGE_AGENT_DEF,
         names::MANAGE_NODES,
         names::ASK_USER_QUESTIONS,
@@ -222,24 +218,6 @@ fn every_builtin_tool_has_detail_text() {
             tool.name,
             detail
         );
-    }
-}
-
-#[test]
-fn project_tools_route_to_project_manager() {
-    let tools = builtin_tool_entries("builtin".into());
-    for tool_name in [names::MANAGE_PROJECT, names::MANAGE_WORK_ITEM] {
-        let tool = tools
-            .iter()
-            .find(|entry| entry.name == tool_name)
-            .unwrap_or_else(|| panic!("missing project tool metadata for {tool_name}"));
-
-        assert_eq!(
-            tool.simulator_app,
-            SimulatorApp::ProjectManager,
-            "{tool_name}"
-        );
-        assert_eq!(tool.app_subtool, AppSubtool::Project, "{tool_name}");
     }
 }
 

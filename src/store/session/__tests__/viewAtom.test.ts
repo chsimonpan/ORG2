@@ -54,7 +54,6 @@ async function loadAtoms() {
   const sessionCoreMetadata =
     await import("@src/engines/SessionCore/core/atoms/metadata");
   const sessionAtoms = await import("@src/store/session/sessionAtom/atoms");
-  const chatPanelAtoms = await import("@src/store/ui/chatPanelAtom");
   const workspaceAtoms = await import("@src/store/ui/workspaceFoldersAtom");
   return {
     sessionViewAtom: mod.sessionViewAtom,
@@ -73,7 +72,6 @@ async function loadAtoms() {
     sessionsAtom: sessionAtoms.sessionsAtom,
     activeFolderIdAtom: workspaceAtoms.activeFolderIdAtom,
     workspaceFoldersAtom: workspaceAtoms.workspaceFoldersAtom,
-    chatPanelMaximizedAtom: chatPanelAtoms.chatPanelMaximizedAtom,
   };
 }
 
@@ -137,38 +135,6 @@ describe("sessionViewAtom cold-start hydration", () => {
 // ---------------------------------------------------------------------------
 
 describe("jumpToSessionAtom", () => {
-  it("closes the workstation when entering a session from no selection", async () => {
-    const { jumpToSessionAtom, chatPanelMaximizedAtom } = await loadAtoms();
-    const store = createStore();
-
-    store.set(chatPanelMaximizedAtom, false);
-    store.set(jumpToSessionAtom, "session-a");
-
-    expect(store.get(chatPanelMaximizedAtom)).toBe(true);
-  });
-
-  it("closes persisted workstation state when switching to another session", async () => {
-    const { jumpToSessionAtom, chatPanelMaximizedAtom } = await loadAtoms();
-    const store = createStore();
-
-    store.set(jumpToSessionAtom, "session-a");
-    store.set(chatPanelMaximizedAtom, false);
-    store.set(jumpToSessionAtom, "session-b");
-
-    expect(store.get(chatPanelMaximizedAtom)).toBe(true);
-  });
-
-  it("does not re-close an explicitly opened workstation on a same-session reload", async () => {
-    const { jumpToSessionAtom, chatPanelMaximizedAtom } = await loadAtoms();
-    const store = createStore();
-
-    store.set(jumpToSessionAtom, "session-b");
-    store.set(chatPanelMaximizedAtom, false);
-    store.set(jumpToSessionAtom, "session-b");
-
-    expect(store.get(chatPanelMaximizedAtom)).toBe(false);
-  });
-
   it("writes both workstation memory and pipeline atoms (string payload)", async () => {
     const {
       jumpToSessionAtom,

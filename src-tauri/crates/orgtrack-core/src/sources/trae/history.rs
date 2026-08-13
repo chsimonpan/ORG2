@@ -131,7 +131,14 @@ fn sync_trae_history_cache(conn: &mut Connection) -> Result<(), String> {
     };
     let mut inputs = Vec::new();
     for record in changed {
-        if let Some(meta) = parse_trae_session_meta(record, &session_index)? {
+        let Some(parsed) = imported_history::skip_unparsable_record(
+            SOURCE_TRAE,
+            &record.source_session_id,
+            parse_trae_session_meta(record, &session_index),
+        ) else {
+            continue;
+        };
+        if let Some(meta) = parsed {
             inputs.push(session_meta_to_cache_input(meta));
         }
     }
@@ -337,6 +344,8 @@ fn session_meta_to_cache_input(meta: TraeHistoryMeta) -> ImportedHistoryCacheInp
         model: meta.model,
         input_tokens: 0,
         output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
         repo_path: meta.repo_path,
         branch: None,
         impact: ImportedHistoryImpactStats::default(),
@@ -474,19 +483,18 @@ fn decode_project_path(slug: &str) -> Option<String> {
     }
     // Home-anchored decode: strip the home dir's slug prefix (which may itself
     // contain literal dashes) and decode only the remainder under it.
-    if let Some(home) = dirs::home_dir() {
-        let home_str = home.to_string_lossy();
-        let home_prefix = home_str.replace('/', "-");
-        if let Some(rest) = cleaned.strip_prefix(home_prefix.trim_start_matches('-')) {
-            let rest = rest.trim_start_matches('-');
-            let candidate = if rest.is_empty() {
-                home_str.to_string()
-            } else {
-                format!("{home_str}/{}", rest.replace('-', "/"))
-            };
-            if Path::new(&candidate).is_dir() {
-                return Some(candidate);
-            }
+    let home = app_paths::external_history_home_dir();
+    let home_str = home.to_string_lossy();
+    let home_prefix = home_str.replace('/', "-");
+    if let Some(rest) = cleaned.strip_prefix(home_prefix.trim_start_matches('-')) {
+        let rest = rest.trim_start_matches('-');
+        let candidate = if rest.is_empty() {
+            home_str.to_string()
+        } else {
+            format!("{home_str}/{}", rest.replace('-', "/"))
+        };
+        if Path::new(&candidate).is_dir() {
+            return Some(candidate);
         }
     }
     // Fallback: naive decode (correct when no path segment contains `-`).
@@ -516,7 +524,7 @@ fn parse_trae_time_ms(value: &str) -> Option<i64> {
 
 fn trae_time_to_iso(value: &str) -> String {
     parse_trae_time_ms(value)
-        .and_then(|ms| chrono::DateTime::from_timestamp_millis(ms))
+        .and_then(chrono::DateTime::from_timestamp_millis)
         .map(|dt| dt.to_rfc3339())
         .unwrap_or_else(|| chrono::Utc::now().to_rfc3339())
 }
@@ -563,7 +571,7 @@ fn resolve_trae_session_path(
 }
 
 fn trae_projects_dirs() -> Result<Vec<PathBuf>, String> {
-    let home = dirs::home_dir().ok_or_else(|| "Home directory not found".to_string())?;
+    let home = app_paths::external_history_home_dir();
     Ok(trae_projects_dir_candidates(&home))
 }
 

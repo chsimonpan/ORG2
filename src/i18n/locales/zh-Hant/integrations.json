@@ -1742,7 +1742,9 @@
           "rename": "重新命名",
           "search": "搜尋"
         }
-      }
+      },
+      "liveStatusToggle": "即時 Agent 狀態",
+      "liveStatusToggleDesc": "顯示執行中 CLI Agent 的工作或等待狀態；關閉後仍會擷取溯源記錄。"
     },
     "cliManagedConfig": {
       "title": "CLI 設定切換",

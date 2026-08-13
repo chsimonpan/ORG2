@@ -6,19 +6,15 @@
  */
 import { useEffect } from "react";
 
-import { listKeys } from "@src/api/services/keyValidation";
-
-import { replaceModelAliasesFromKeys } from "./modelAliasRegistry";
+import { loadSharedLocalKeys } from "@src/hooks/keyVault/sharedLocalKeyStore";
 
 export function useModelAliasRegistry(): void {
   useEffect(() => {
     let cancelled = false;
 
     async function populate() {
-      const keys = await listKeys();
+      await loadSharedLocalKeys();
       if (cancelled) return;
-
-      replaceModelAliasesFromKeys(keys);
     }
 
     void populate();

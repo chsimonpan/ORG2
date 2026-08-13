@@ -1,9 +1,9 @@
 # Frontend UI Audit — AgentStationChromeFrame
 
-**File:** `src/modules/WorkStation/AppShell/AgentStationChromeFrame.tsx` (78 LOC)
-**Companion style:** `src/styles/_utilities.scss` (`.composer-breathing`, `.station-chrome-static-glow`)
-**Date:** 2026-07-11
-**Auditor:** orgii session
+**File:** `src/modules/WorkStation/AppShell/AgentStationChromeFrame.tsx` (78 LOC)  
+**Companion style:** `src/styles/_utilities.scss` (`.composer-breathing`, `.station-chrome-static-glow`)  
+**Date:** 2026-07-11  
+**Auditor:** orgii session  
 **Skill:** `~/.orgii/skills/frontend-ui-audit/SKILL.md`
 
 ## Context

@@ -21,23 +21,19 @@ import { useAtomValue } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { GitWorkingDirectoryFile } from "@src/api/http/git";
-import { fetchNumstatMap } from "@src/api/http/git/diff";
 import {
   type ScopedGitApi,
   createScopedGitApi,
 } from "@src/api/http/git/scopedGitApi";
-import { getGitStatus } from "@src/api/http/git/status";
-import type { GitStatusData } from "@src/api/http/git/types";
 import { normalizeGitStatus } from "@src/config/gitStatus";
 import { useFileSelection } from "@src/hooks/git/sourceControl";
 import { generateCommitMessage } from "@src/hooks/git/sourceControl/commitMessageGeneration";
-import { useRepoStatusListener } from "@src/hooks/git/useRepoStatusListener";
-import { useMounted } from "@src/hooks/lifecycle/useMounted";
-import { createLogger } from "@src/hooks/logger";
 import {
-  DEBOUNCE_DELAYS,
-  useDebouncedCallback,
-} from "@src/hooks/perf/useDebouncedCallback";
+  refreshSharedGitStatus,
+  useSharedGitStatus,
+} from "@src/hooks/git/useSharedGitStatus";
+import { useWorkingTreeNumstat } from "@src/hooks/git/useWorkingTreeDiffTotals";
+import { createLogger } from "@src/hooks/logger";
 import { gitCommitInstructionsAtom } from "@src/store/ui/editorSettingsAtom";
 import type { GitFile } from "@src/types/git/types";
 import { confirmDestructiveAction } from "@src/util/dialogs/confirmDestructiveAction";
@@ -100,20 +96,29 @@ export function usePerRepoSourceControl(
   const { repoPath, repoId, onGitFileSelect } = options;
   const commitInstructions = useAtomValue(gitCommitInstructionsAtom);
 
-  const [gitStatus, setGitStatus] = useState<GitStatusData | null>(null);
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Status comes from the shared store: one WebSocket subscription and one
+  // in-flight request per repo, shared across every mounted pane. Keying by
+  // repoPath means a scope switch reads a fresh entry (status null,
+  // initialLoading true) without a manual reset effect.
+  const {
+    status: gitStatus,
+    initialLoading,
+    error,
+  } = useSharedGitStatus(repoId, repoPath);
   const [selectedFileId, setSelectedFileId] = useState("");
   const [commitMessage, setCommitMessage] = useState("");
   const [commitLoading, setCommitLoading] = useState(false);
   const [generateLoading, setGenerateLoading] = useState(false);
-  const [numstatMap, setNumstatMap] = useState<
-    Map<string, { additions: number; deletions: number }>
-  >(new Map());
-
-  const mountedRef = useMounted();
   const filesRef = useRef<GitFile[]>([]);
   const onGitFileSelectRef = useRef(onGitFileSelect);
+  const rawNumstat = useWorkingTreeNumstat(repoId, repoPath);
+  const numstatMap = useMemo(() => {
+    const decoded = new Map<string, { additions: number; deletions: number }>();
+    for (const [path, stats] of rawNumstat.files) {
+      decoded.set(decodeOctalPath(path), stats);
+    }
+    return decoded;
+  }, [rawNumstat.files]);
 
   // Scoped git API — binds repo_id/repo_path once
   const gitRef = useRef<ScopedGitApi>(createScopedGitApi(repoId, repoPath));
@@ -125,81 +130,19 @@ export function usePerRepoSourceControl(
     onGitFileSelectRef.current = onGitFileSelect;
   }, [onGitFileSelect]);
 
-  // Reset stale pane state immediately when the scoped repo path changes
-  // (e.g. switching worktree scope) so the file list never flashes the
-  // previous scope's files while the next status fetch is in flight.
+  // Clear the pane's own selection when the scoped repo path changes (e.g.
+  // switching worktree scope). Status itself resets via the shared store key.
   useEffect(() => {
-    setGitStatus(null);
-    setInitialLoading(true);
-    setError(null);
     setSelectedFileId("");
-    setNumstatMap(new Map());
   }, [repoPath]);
 
-  // Load per-file numstat (non-blocking, runs after status)
-  const fetchNumstat = useCallback(async () => {
-    const raw = await fetchNumstatMap(repoId, repoPath);
-    if (!mountedRef.current) return;
-    // fetchNumstatMap paths are raw (not octal-decoded); decode here so they
-    // match the already-decoded paths in `gitStatus`.
-    const decoded = new Map<string, { additions: number; deletions: number }>();
-    for (const [path, stats] of raw) {
-      decoded.set(decodeOctalPath(path), stats);
-    }
-    setNumstatMap(decoded);
-  }, [repoId, repoPath, mountedRef]);
-
-  // Core fetch — only sets initialLoading on first call.
-  // fetchNumstat only needs repoId/repoPath (not the status response), so
-  // both requests are fired in parallel via Promise.all.
-  const fetchStatus = useCallback(async () => {
-    try {
-      const [status] = await Promise.all([
-        getGitStatus({ repo_id: repoId, repo_path: repoPath }),
-        fetchNumstat(),
-      ]);
-      if (!mountedRef.current) return;
-      if (status) {
-        const decoded: GitStatusData = {
-          ...status,
-          working_directory: {
-            ...status.working_directory,
-            files: status.working_directory.files.map((file) => ({
-              ...file,
-              path: decodeOctalPath(file.path),
-              original_path: file.original_path
-                ? decodeOctalPath(file.original_path)
-                : null,
-            })),
-          },
-        };
-        setGitStatus(decoded);
-        setError(null);
-      } else {
-        setError("Failed to fetch git status");
-      }
-      setInitialLoading(false);
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(err instanceof Error ? err.message : String(err));
-        setInitialLoading(false);
-      }
-    }
-  }, [repoId, repoPath, fetchNumstat, mountedRef]);
-
-  // Debounced fetch for WebSocket events — replaces hand-rolled timer
-  const debouncedFetch = useDebouncedCallback(
-    () => fetchStatus(),
-    DEBOUNCE_DELAYS.API
+  // Forced refresh after a local mutation (stage, commit, discard). The
+  // store's WebSocket subscription covers passive updates, so this is only
+  // for the cases that need the new status before continuing.
+  const fetchStatus = useCallback(
+    () => refreshSharedGitStatus(repoId, repoPath),
+    [repoId, repoPath]
   );
-
-  // Initial load
-  useEffect(() => {
-    fetchStatus();
-  }, [fetchStatus]);
-
-  // WebSocket listener — triggers debounced re-fetch on working-tree change
-  useRepoStatusListener(repoId, debouncedFetch);
 
   // Derive files from gitStatus, enriched with numstat
   const files = useMemo<GitFile[]>(() => {

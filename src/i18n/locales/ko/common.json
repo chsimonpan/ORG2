@@ -209,7 +209,9 @@
     "skipThisVersion": "이 버전 건너뛰기",
     "later": "나중에",
     "link": "연결",
-    "copyName": "이름 복사"
+    "copyName": "이름 복사",
+    "toggle": "스레드 토글",
+    "switchMethod": "방법 전환"
   },
   "refreshToast": {
     "successName": "{{name}} 새로고침됨",
@@ -392,8 +394,8 @@
     "history": "기록",
     "execution": "실행",
     "gitHistory": "Git 기록",
-    "noPullRequest": "풀 리퀘스트 없음",
-    "pullRequest": "풀 리퀘스트",
+    "noPullRequest": "pull request 없음",
+    "pullRequest": "Pull request",
     "operationLog": "작업 로그",
     "gitDashboard": "대시보드",
     "changedFiles": "변경된 파일",
@@ -572,7 +574,11 @@
     "imageUploadFailed": "이미지 업로드 실패",
     "imageTooLarge": "이미지가 너무 큽니다",
     "failedToLoad": "로드 실패",
-    "unknownError": "알 수 없는 오류가 발생했습니다"
+    "unknownError": "알 수 없는 오류가 발생했습니다",
+    "codexLoginExpired": "Codex 로그인 만료",
+    "codexLoginExpiredDescription": "이 계정을 복구하려면 Codex에 다시 연결하세요. 새 로그인이 저장되면 이 세션으로 돌아옵니다.",
+    "reconnectCodex": "Codex 다시 연결",
+    "technicalDetails": "기술 세부 정보"
   },
   "confirmation": {
     "delete": "정말 삭제하시겠습니까?",
@@ -859,7 +865,7 @@
     "listDirParseSafetyHint": "처음 {{maxShown}}개만 표시합니다. 성능을 위해 전체 목록이 잘렸습니다.",
     "noTasks": "작업 없음",
     "noTasksWithDates": "표시할 날짜가 있는 작업이 없습니다",
-    "noTasksWithDatesSubtitle": "작업에 시작일과 종료일을 추가하면 여기에 표시됩니다",
+    "noTasksWithDatesSubtitle": "시작일과 종료일을 추가하면 작업이 표시됩니다",
     "noItemsAvailable": "사용 가능한 항목 없음",
     "loadingMore": "더 불러오는 중...",
     "scrollForMore": "더 보려면 스크롤",
@@ -867,10 +873,10 @@
     "typeToSearch": "검색하려면 입력",
     "pleaseTryAgain": "다시 시도해 주세요",
     "noFileOpen": "파일을 열어 편집 시작",
-    "selectFileToEdit": "탐색기에서 파일을 선택하여 편집 시작",
+    "selectFileToEdit": "탐색기에서 파일 선택",
     "noTabs": "탭을 열어 시작하기",
     "noTabsOpen": "항목을 열어 시작하기",
-    "selectItemToStart": "사이드바에서 항목을 선택하여 시작",
+    "selectItemToStart": "사이드바에서 항목 선택",
     "noDatabaseConnected": "연결된 데이터베이스 없음",
     "addConnectionToQuery": "쿼리를 시작하려면 연결을 추가하세요",
     "noQueryResults": "쿼리를 실행하여 결과 보기",
@@ -879,7 +885,7 @@
     "chatHistoryEmpty": "아직 활동이 없습니다",
     "chatHistoryReloadHint": "Session 데이터가 로드되지 않았을 수 있습니다",
     "chatHistoryAgentWorking": "Agent 실행 중",
-    "chatHistoryAgentWorkingHint": "어시스턴트 응답이 여기에 표시됩니다. 첫 이벤트 전까지 도구 모음에 유휴로 보일 수 있습니다.",
+    "chatHistoryAgentWorkingHint": "첫 응답부터 메시지가 표시되며 그전에는 도구 모음이 유휴 상태로 보일 수 있습니다",
     "pleaseSelect": "선택해 주세요",
     "noTerminalsAvailable": "터미널을 열어 시작하기",
     "noSessionsFound": "Session을 찾을 수 없습니다",
@@ -889,7 +895,7 @@
     "noQueryHistory": "아직 실행된 쿼리가 없습니다",
     "executedQueriesSubtitle": "실행된 쿼리가 여기에 표시됩니다",
     "noOperationHistory": "기록된 작업이 없습니다",
-    "noOperationHistorySubtitle": "Commit, push, pull 등 Git 작업이 여기에 표시됩니다",
+    "noOperationHistorySubtitle": "Git 작업이 여기에 표시됩니다",
     "selectFileToViewChanges": "변경사항을 보려면 파일을 선택하세요",
     "failedToLoadHistory": "기록 로드 실패",
     "noGitHistory": "Git 기록이 없습니다",
@@ -956,13 +962,12 @@
     "addCssVariables": "프로젝트에 CSS 변수를 추가하세요",
     "loadingAccountStatus": "계정 상태 로드 중...",
     "noRepositorySelected": "선택된 리포지토리가 없습니다",
-    "selectRepositoryFromHome": "열려면 홈 페이지에서 리포지토리를 선택하세요.",
     "noWorkspaceExplorerTitle": "열린 Workspace가 없습니다",
-    "noWorkspaceExplorerSubtitle": "파일을 보려면 Workspace 열기",
+    "noWorkspaceExplorerSubtitle": "Workspace를 열어 파일 보기",
     "cannotFindRepo": "{{repoName}}을(를) 찾을 수 없습니다",
     "lastSeenAtPath": "마지막으로 확인된 경로: {{path}}",
     "unsupportedFileType": "지원되지 않는 파일 형식",
-    "binaryUnsupportedEncoding": "이 파일은 바이너리이거나 지원되지 않는 텍스트 인코딩을 사용하므로 표시되지 않습니다.",
+    "binaryUnsupportedEncoding": "바이너리 파일 또는 지원되지 않는 텍스트 인코딩",
     "connectingDatabase": "데이터베이스 열는 중...",
     "invalidDatabase": "잘못된 데이터베이스 파일",
     "selectTable": "테이블 선택",
@@ -987,7 +992,8 @@
     "scanningFileExtensions": "Scanning file extensions...",
     "startBrowsingMarket": "Start browsing the marketplace",
     "previewUnavailable": "미리보기를 사용할 수 없습니다",
-    "selectPrCommitToViewDiff": "Select a pull request commit from the header to view its diff."
+    "selectPrCommitToViewDiff": "Select a pull request commit from the header to view its diff.",
+    "selectRepositoryFromWorkspace": "워크스페이스 리포지토리 선택"
   },
   "inbox": {
     "searchPlaceholder": "메시지 검색...",
@@ -1147,8 +1153,6 @@
       "tryVerifyUrl": "URL이 올바른지 확인",
       "tryAgainLater": "나중에 다시 시도"
     },
-    "selectRepoFromHome": "Please select a repo from the home page",
-    "cloneRepoAgain": "Please clone the repo again from the home page",
     "unsavedChangesTitle": "Unsaved Changes",
     "prkPlaceholder": "PRJ",
     "gitSyncMenuTitle": "Git sync actions"
@@ -1188,7 +1192,8 @@
       "takeAction": "작업 수행",
       "sync": "동기화",
       "createPR": "PR 생성",
-      "stash": "스태시"
+      "stash": "스태시",
+      "compareBranch": "브랜치 비교"
     },
     "messages": {
       "pushSuccess": "Successfully pushed changes to remote",
@@ -1241,6 +1246,222 @@
         "closed": "닫힘",
         "completed": "완료됨",
         "notPlanned": "계획 없음"
+      },
+      "activity": {
+        "opened": "님이 이 issue를 열었습니다",
+        "commented": "님이 댓글을 남겼습니다",
+        "timelineItemCount_one": "타임라인 항목 {{count}}개",
+        "timelineItemCount_other": "타임라인 항목 {{count}}개",
+        "noDescription": "설명이 없습니다.",
+        "assigned": "님이 다음 사용자를 할당했습니다:",
+        "assignedIssue": "님이 이 issue를 할당했습니다",
+        "unassigned": "님이 다음 사용자의 할당을 해제했습니다:",
+        "removedAssignee": "님이 담당자를 제거했습니다",
+        "added": "님이 추가했습니다:",
+        "removed": "님이 제거했습니다:",
+        "label": "레이블",
+        "milestoned": "님이 이 issue를 마일스톤 {{milestone}}에 추가했습니다",
+        "demilestoned": "님이 이 issue를 마일스톤 {{milestone}}에서 제거했습니다",
+        "closedViaCommit": "님이 커밋 {{commit}}으로 이 issue를 닫았습니다",
+        "closed": "님이 이 issue를 닫았습니다",
+        "reopened": "님이 이 issue를 다시 열었습니다",
+        "renamedTo": "님이 이 issue의 이름을 다음으로 변경했습니다:",
+        "renamed": "님이 이 issue의 이름을 변경했습니다",
+        "locked": "님이 이 대화를 잠갔습니다",
+        "lockedAs": "님이 {{reason}} 사유로 이 대화를 잠갔습니다",
+        "unlocked": "님이 이 대화의 잠금을 해제했습니다",
+        "crossReferencedFrom": "님이 다음 위치에서 이 issue를 참조했습니다:",
+        "crossReferenced": "님이 이 issue에 대한 상호 참조를 만들었습니다",
+        "referencedInCommit": "님이 커밋 {{commit}}에서 이 issue를 참조했습니다",
+        "referencedInACommit": "님이 커밋에서 이 issue를 참조했습니다",
+        "connected": "님이 이 issue를 연결했습니다",
+        "disconnected": "님이 이 issue의 연결을 해제했습니다",
+        "markedAsDuplicate": "님이 이 issue를 중복으로 표시했습니다",
+        "unmarkedAsDuplicate": "님이 중복 표시를 제거했습니다",
+        "pinned": "님이 이 issue를 고정했습니다",
+        "unpinned": "님이 이 issue의 고정을 해제했습니다",
+        "transferred": "님이 이 issue를 이전했습니다",
+        "convertedToDiscussion": "님이 이 issue를 토론으로 전환했습니다",
+        "mentioned": "님이 이 issue를 언급했습니다",
+        "commentDeleted": "님이 댓글을 삭제했습니다",
+        "subscribed": "님이 이 issue를 구독했습니다",
+        "unsubscribed": "님이 이 issue 구독을 취소했습니다",
+        "addedToProject": "님이 이 issue를 프로젝트에 추가했습니다",
+        "movedInProject": "님이 프로젝트에서 이 issue를 이동했습니다",
+        "removedFromProject": "님이 이 issue를 프로젝트에서 제거했습니다",
+        "archived": "님이 이 issue를 보관했습니다",
+        "unarchived": "님이 이 issue의 보관을 해제했습니다",
+        "merged": "님이 이 pull request를 병합했습니다",
+        "committed": "님이 이 pull request에 커밋했습니다",
+        "headRefDeleted": "님이 헤드 브랜치를 삭제했습니다",
+        "headRefRestored": "님이 헤드 브랜치를 복원했습니다",
+        "headRefForcePushed": "님이 헤드 브랜치를 강제 푸시했습니다",
+        "baseRefChanged": "님이 베이스 브랜치를 변경했습니다",
+        "automaticBaseChangeFailed": "님이 베이스 브랜치를 자동으로 변경하지 못했습니다",
+        "automaticBaseChangeSucceeded": "님이 베이스 브랜치를 자동으로 변경했습니다",
+        "deployed": "님이 이 pull request를 배포했습니다",
+        "deploymentEnvironmentChanged": "님이 배포 환경을 변경했습니다",
+        "readyForReview": "님이 이 pull request를 리뷰 준비 상태로 표시했습니다",
+        "reviewRequested": "님이 리뷰를 요청했습니다",
+        "reviewRequestRemoved": "님이 리뷰 요청을 제거했습니다",
+        "reviewed": "님이 이 변경 사항을 리뷰했습니다",
+        "reviewDismissed": "님이 리뷰를 기각했습니다",
+        "userBlocked": "님이 이 사용자를 차단했습니다"
+      },
+      "composer": {
+        "addComment": "댓글 추가",
+        "commentingAs": "{{login}} 계정으로 작업 중",
+        "identityUnavailable": "GitHub 사용자 정보를 사용할 수 없습니다",
+        "commentPlaceholder": "댓글 작성…",
+        "submitComment": "댓글",
+        "closeIssue": "issue 닫기",
+        "closeAsCompleted": "완료로 닫기",
+        "closeAsNotPlanned": "계획되지 않음으로 닫기",
+        "closeAsDuplicate": "중복으로 닫기",
+        "duplicateSearchPlaceholder": "issue 검색",
+        "duplicateEmpty": "일치하는 issue가 없습니다",
+        "duplicateLoadFailed": "issue를 불러오지 못했습니다",
+        "reopenIssue": "issue 다시 열기",
+        "commentFailed": "댓글을 추가하지 못했습니다",
+        "bodyUpdateFailed": "issue 설명을 업데이트하지 못했습니다",
+        "statusFailed": "issue 상태를 업데이트하지 못했습니다"
+      }
+    },
+    "rail": {
+      "openTabs": "열린 탭",
+      "closeItem": "{{label}} 닫기",
+      "expand": "워크스테이션 정보 펼치기",
+      "collapse": "워크스테이션 정보 접기"
+    },
+    "pr": {
+      "title": "Pull request",
+      "linkedBranch": "Pull request #{{number}}",
+      "baseBranch": "베이스",
+      "noDescription": "설명이 없습니다.",
+      "loadingConversation": "불러오는 중…",
+      "reviewNoBody": "리뷰 댓글을 남겼습니다.",
+      "submitReview": "리뷰 제출",
+      "reviewHeadNotice": "표시된 헤드 커밋이 계속 일치하는 경우에만 리뷰가 적용됩니다.",
+      "reviewDecision": "리뷰 결정",
+      "reviewComment": "리뷰 댓글",
+      "reviewCommentPlaceholder": "댓글 추가…",
+      "commentPlaceholder": "댓글 남기기…",
+      "comment": "댓글",
+      "approve": "승인",
+      "requestChanges": "변경 요청",
+      "reply": "답글",
+      "replyPlaceholder": "답글…",
+      "reviewThreads": "리뷰 댓글",
+      "details": "세부 정보",
+      "unknownAuthor": "알 수 없음",
+      "activity": {
+        "opened": "이 pull request를 열었습니다",
+        "commented": "댓글을 남겼습니다",
+        "approved": "변경 사항을 승인했습니다",
+        "changesRequested": "변경을 요청했습니다",
+        "reviewDismissed": "리뷰를 기각했습니다",
+        "reviewed": "리뷰했습니다"
+      },
+      "summary": {
+        "label": "pull request 요약",
+        "branch": "브랜치",
+        "reviewers": "리뷰어",
+        "noReviewers": "리뷰어 없음",
+        "comments": "댓글",
+        "commentCount_one": "댓글 {{count}}개",
+        "commentCount_other": "댓글 {{count}}개",
+        "checks": "검사",
+        "noChecks": "CI 검사 없음",
+        "checksFailed": "검사 실패",
+        "status": "상태"
+      },
+      "tabs": {
+        "conversation": "대화",
+        "commits": "커밋",
+        "checks": "검사",
+        "changes": "변경 사항"
+      },
+      "checks": {
+        "none": "보고된 검사가 없습니다",
+        "noneHint": "이 pull request의 헤드 커밋에서 실행된 CI 검사나 상태가 없습니다.",
+        "allPassed": "모든 검사 통과",
+        "someFailed": "일부 검사 실패",
+        "pending": "검사 진행 중",
+        "passedShort": "통과",
+        "failedShort": "실패",
+        "runningShort": "실행 중",
+        "checkingShort": "확인 중",
+        "noneShort": "CI 없음",
+        "unavailableShort": "CI를 사용할 수 없음",
+        "branchStatus": "Pull request #{{number}} CI: {{status}}"
+      },
+      "commits": {
+        "backToList": "모든 커밋",
+        "none": "커밋 없음"
+      },
+      "changes": {
+        "title": "변경된 파일",
+        "noFiles": "파일 변경 없음",
+        "tooLarge": "파일이 너무 커서 차이를 표시할 수 없습니다",
+        "unavailable": "변경 사항을 사용할 수 없음",
+        "unavailableHint": "pull request의 베이스 및 헤드 커밋을 확인할 수 없습니다."
+      },
+      "status": {
+        "open": "열림",
+        "merged": "병합됨",
+        "closed": "닫힘",
+        "draft": "초안"
+      },
+      "actions": {
+        "label": "pull request 작업",
+        "confirmMergeTitle": "pull request를 병합할까요?",
+        "confirmMergeMessage": "GitHub가 현재 pull request의 소스 브랜치를 기본 브랜치에 병합합니다.",
+        "merge": "병합",
+        "squash": "스쿼시 후 병합",
+        "rebase": "리베이스 후 병합",
+        "mergeSuccess": "pull request를 병합했습니다",
+        "mergeRequested": "병합을 요청했습니다",
+        "removedFromQueue": "병합 대기열에서 제거했습니다",
+        "autoMergeEnabled": "자동 병합을 활성화했습니다",
+        "autoMergeDisabled": "자동 병합을 비활성화했습니다",
+        "confirmCloseTitle": "pull request를 닫을까요?",
+        "confirmCloseMessage": "pull request는 계속 사용할 수 있으며 나중에 다시 열 수 있습니다.",
+        "closeSuccess": "pull request를 닫았습니다",
+        "reopen": "pull request 다시 열기",
+        "reopenSuccess": "pull request를 다시 열었습니다",
+        "enableAutoMerge": "자동 병합 활성화",
+        "mergeWhenReady": "준비되면 병합",
+        "disableAutoMerge": "자동 병합 비활성화",
+        "removeFromMergeQueue": "병합 대기열에서 제거",
+        "merged": "병합됨",
+        "closed": "닫힘",
+        "draft": "초안",
+        "inMergeQueue": "병합 대기열에 있음",
+        "approvalRequired": "승인 필요",
+        "changesRequested": "변경 요청됨",
+        "checksFailed": "검사 실패",
+        "checksPending": "검사 대기 중",
+        "mergeBlocked": "병합 차단됨",
+        "searchReviewers": "리뷰어 검색",
+        "reviewersLoadFailed": "리뷰어를 불러올 수 없습니다",
+        "noReviewers": "사용 가능한 리뷰어가 없습니다",
+        "reviewersUpdated": "리뷰어를 업데이트했습니다",
+        "reviewersCount_one": "리뷰어 {{count}}명",
+        "reviewersCount_other": "리뷰어 {{count}}명",
+        "reviewers": "리뷰어",
+        "tooltips": {
+          "merge": "GitHub에서 이 pull request 병합",
+          "alreadyMerged": "이 pull request는 이미 병합되었습니다",
+          "reopenBeforeMerging": "병합하기 전에 이 pull request를 다시 여세요",
+          "markReady": "병합하기 전에 이 pull request를 리뷰 준비 상태로 표시하세요",
+          "mergeQueue": "GitHub가 병합 대기열을 통해 이 pull request를 병합합니다",
+          "approvalRequired": "GitHub에서 병합 전에 리뷰 승인을 요구합니다",
+          "changesRequested": "병합하기 전에 요청된 변경 사항을 해결해야 합니다",
+          "resolveConflicts": "병합하기 전에 충돌을 해결하세요",
+          "checksFailed": "병합하기 전에 필수 검사를 통과해야 합니다",
+          "checksPending": "필수 검사를 기다리거나 자동 병합을 활성화하세요",
+          "mergeBlocked": "GitHub에서 충족되지 않은 병합 요구 사항을 보고했습니다"
+        }
       }
     }
   },
@@ -1697,7 +1918,6 @@
     "ramCurrentSession": "현재 세션",
     "ramChatRenderedTree": "Chat 렌더 트리",
     "ramSessionStore": "Session store",
-    "ramStartSidebar": "Start 사이드바",
     "ramSessionSidebar": "Session 사이드바",
     "ramSecondLevelSidebars": "두 번째 레벨 사이드바",
     "ramSettingsSidebar": "Settings 사이드바",
@@ -2131,20 +2351,7 @@
     }
   },
   "dragDrop": {
-    "dropFilesToUpload": "Drop files to upload",
-    "dropFileToChat": "Drop file to add to chat",
-    "dropFolderToAdd": "Drop folder to add repo",
-    "releaseToAddFiles": "Release to add files to your session",
-    "releaseToAddFileToChat": "Release to add file to chat (like ⌘L)",
-    "releaseToOpenFolder": "Release to open the folder",
-    "folderDetected": "Folder Detected",
-    "openSpotlightToAdd": "Open Spotlight to add this folder as a repo",
-    "openSpotlight": "Open Spotlight",
-    "addedToChat": "Added \"{{name}}\" to chat",
-    "couldNotExtractPath": "Could not extract file path from drop",
-    "couldNotExtractPathFromItem": "Could not extract file path from dropped item",
-    "dropFilesHere": "Drop files here",
-    "dragFilesFromIde": "Drag files or tabs from VS Code to add them to chat"
+    "couldNotExtractPathFromItem": "Could not extract file path from dropped item"
   },
   "contextList": {
     "task": "Task",
@@ -2260,8 +2467,8 @@
     "selectRepoToStart": "Repo를 선택하여 시작"
   },
   "quitConfirmation": {
-    "title": "ORGII를 종료하시겠습니까?",
-    "subtitle": "실행 중인 세션은 현재 상태를 유지합니다. 나중에 ORGII를 다시 열 수 있습니다.",
+    "title": "ORG-2를 종료하시겠습니까?",
+    "subtitle": "실행 중인 세션은 현재 상태를 유지합니다. 나중에 ORG-2를 다시 열 수 있습니다.",
     "cancel": "취소",
     "confirm": "종료"
   },
@@ -2292,5 +2499,222 @@
     "downloadedOfTotal": "{{downloaded}} / {{total}}",
     "preparingDownload": "다운로드 준비 중…",
     "downloadingAndInstalling": "업데이트 다운로드 및 설치 중 (v{{version}})…"
+  },
+  "teamInbox": {
+    "title": "팀 수신함",
+    "listLabel": "팀 수신함 목록",
+    "itemsLabel": "팀 수신함 항목",
+    "unreadCount": "읽지 않음 {{count}}건",
+    "allRead": "모두 확인했습니다",
+    "loadMore": "더 불러오기",
+    "filters": {
+      "all": "전체",
+      "mentions": "멘션",
+      "assigned": "할당됨"
+    },
+    "sections": {
+      "reviewRequested": "리뷰 요청됨",
+      "authoredByMe": "내가 작성",
+      "otherTodos": "기타 할 일"
+    },
+    "status": {
+      "read": "읽음",
+      "unread": "읽지 않음"
+    },
+    "row": {
+      "assignedSummary": "{{status}} · {{priority}}",
+      "ariaLabel": "{{title}}, {{status}}"
+    },
+    "search": {
+      "placeholder": "수신함 검색",
+      "ariaLabel": "팀 수신함 검색"
+    },
+    "groups": {
+      "today": "오늘",
+      "yesterday": "어제",
+      "thisWeek": "이번 주",
+      "earlier": "이전"
+    },
+    "empty": {
+      "title": "아직 항목이 없습니다",
+      "subtitle": "멘션과 할당된 작업 항목이 여기에 표시됩니다.",
+      "selectTitle": "항목을 선택하세요",
+      "selectSubtitle": "댓글 맥락이나 작업 항목 세부 정보를 확인하세요",
+      "mentions": {
+        "title": "멘션이 없습니다",
+        "subtitle": "팀원이 댓글에서 @로 멘션하면 여기에 표시됩니다"
+      },
+      "assigned": {
+        "title": "할당된 항목이 없습니다",
+        "subtitle": "나에게 할당된 작업 항목이 여기에 표시됩니다."
+      },
+      "noResults": {
+        "title": "일치하는 항목이 없습니다",
+        "subtitle": "“{{query}}”와(과) 일치하는 항목이 없습니다."
+      }
+    },
+    "loading": "팀 수신함을 불러오는 중…",
+    "drop": {
+      "title": "여기로 끌어다 놓아 작업 항목 만들기",
+      "subtitle": "세션 스냅샷을 확인한 다음 작업 항목을 만들거나 인계하세요.",
+      "processing": "“{{title}}”에서 작업 항목을 만드는 중…",
+      "processingHint": "세션을 읽고 프로젝트 구성원을 확인하는 중입니다.",
+      "success": "작업 항목을 만들었습니다",
+      "reused": "기존 작업 항목을 업데이트했습니다",
+      "failed": "작업 항목을 만들지 못했습니다",
+      "error": "이 세션에서 작업 항목을 만들 수 없습니다.",
+      "open": "열기",
+      "dismiss": "닫기"
+    },
+    "handoff": {
+      "title": "세션에서 만들기",
+      "createFromSession": "팀 작업 항목 만들기…",
+      "project": "대상 프로젝트",
+      "chooseProject": "프로젝트 선택",
+      "recipientSelf": "{{name}}(나)",
+      "chooseRecipient": "받는 사람 선택",
+      "todoCount_other": "할 일 {{count}}개",
+      "workItemTitle": "작업 항목 제목",
+      "assignTo": "담당자",
+      "note": "인계 메모",
+      "notePlaceholder": "완료된 사항, 남은 미해결 사항, 다음에 해야 할 일을 알려주세요.",
+      "selfHint": "자신에게 할당하면 인계 요청 없이 일반 작업 항목이 생성됩니다.",
+      "submitHandoff": "만들고 인계하기",
+      "submitCreate": "작업 항목 만들기",
+      "preparing": "“{{title}}” 준비하는 중…",
+      "preparationError": {
+        "session_unavailable": "이 세션을 더 이상 사용할 수 없습니다. 다시 열어서 시도해 주세요.",
+        "project_unavailable": "이 세션의 프로젝트를 더 이상 사용할 수 없습니다.",
+        "identity_unavailable": "회원님은 이 세션 프로젝트의 구성원이 아닙니다.",
+        "no_project": "사용 가능한 프로젝트가 없습니다. 프로젝트를 만들거나 참여한 후 다시 시도해 주세요.",
+        "unknown": "이 세션을 준비할 수 없습니다. 팀 수신함을 새로 고친 후 다시 시도해 주세요."
+      },
+      "submitError": "작업 항목을 만들지 못했습니다. 받는 사람을 확인한 후 다시 시도해 주세요.",
+      "pendingTitle": "{{name}} 님의 인계",
+      "acceptedTitle": "{{name}} 님이 수락함",
+      "returnedTitle": "{{name}} 님이 반려함",
+      "noNote": "인계 메모가 없습니다.",
+      "statusLabel": "작업 항목 인계",
+      "return": "반려",
+      "accept": "수락",
+      "returnTitle": "이 인계를 반려하시겠어요?",
+      "confirmReturn": "보낸 사람에게 반려",
+      "returnHint": "{{name}} 님에게 확인이나 후속 조치가 필요한 내용을 알려주세요. 작업 항목이 다시 할당됩니다.",
+      "returnPlaceholder": "다시 인계하기 전에 무엇을 변경해야 하나요?",
+      "responseError": "인계 응답을 저장하지 못했습니다. 다시 시도해 주세요.",
+      "identityUnavailable": "팀 신원을 확인할 수 없습니다. 응답하기 전에 프로젝트 프로필을 확인하세요.",
+      "rowPending": "{{name}} 님으로부터 · 응답 대기 중",
+      "rowAccepted": "인계 수락됨 · {{status}} · {{priority}}",
+      "rowReturned": "{{name}} 님이 반려함 · {{status}} · {{priority}}"
+    },
+    "errors": {
+      "loadTitle": "팀 수신함을 불러올 수 없습니다",
+      "load": "팀 수신함을 불러올 수 없습니다",
+      "loadMore": "팀 수신함 항목을 더 불러올 수 없습니다. 다시 시도해 주세요.",
+      "refresh": "팀 수신함을 새로 고칠 수 없습니다",
+      "markRead": "이 항목을 읽음으로 표시할 수 없습니다. 다시 시도해 주세요.",
+      "markUnread": "이 항목을 읽지 않음으로 표시할 수 없습니다. 다시 시도해 주세요.",
+      "markAllRead": "모든 항목을 읽음으로 표시할 수 없습니다. 다시 시도해 주세요.",
+      "identity": "계정을 프로젝트 구성원과 일치시킬 수 없습니다. 프로젝트 프로필의 이메일을 확인하세요.",
+      "partialLoad": "일부 팀 수신함 소스를 새로 고칠 수 없습니다. 사용 가능한 항목은 계속 표시됩니다",
+      "pullRequestsPartialLoad": "일부 pull request를 새로 고칠 수 없습니다",
+      "pullRequestsPartialLoadHelp": "사용 가능한 항목은 계속 표시됩니다. 새로 고쳐 누락된 pull request를 다시 불러오세요",
+      "workItemContext": "일부 프로젝트 정보를 사용할 수 없습니다. 작업 항목은 계속 사용할 수 있습니다.",
+      "workItemLoad": "이 작업 항목을 불러올 수 없습니다. 다시 시도해 주세요.",
+      "workItemUpdate": "작업 항목의 최신 변경 사항을 저장할 수 없습니다. 다시 시도해 주세요."
+    },
+    "detail": {
+      "assignedSubtitle": "할당된 작업 항목",
+      "standaloneProject": "독립 항목",
+      "mentionSubtitle": "댓글에서 멘션됨",
+      "mentionedYou": "님이 회원님을 멘션했습니다",
+      "threadComments_other": "이 스레드에 댓글 {{count}}개가 있습니다"
+    },
+    "actions": {
+      "markRead": "읽음으로 표시",
+      "markUnread": "읽지 않음으로 표시",
+      "openWorkItem": "작업 항목 열기",
+      "openSession": "세션 열기"
+    },
+    "fields": {
+      "status": "상태",
+      "priority": "우선순위",
+      "assignee": "담당자",
+      "workItemId": "작업 항목 ID",
+      "session": "세션",
+      "comments": "댓글",
+      "threadId": "스레드 ID",
+      "commentId": "댓글 ID"
+    },
+    "workItemStatus": {
+      "backlog": "백로그",
+      "todo": "할 일",
+      "in_progress": "진행 중",
+      "in_review": "검토 중",
+      "blocked": "차단됨",
+      "done": "완료",
+      "cancelled": "취소됨"
+    },
+    "priority": {
+      "none": "우선순위 없음",
+      "low": "낮음",
+      "medium": "중간",
+      "high": "높음",
+      "urgent": "긴급"
+    }
+  },
+  "windowChrome": {
+    "menus": {
+      "file": "파일",
+      "edit": "편집",
+      "view": "보기",
+      "window": "창",
+      "help": "도움말",
+      "aria": "{{label}} 메뉴"
+    },
+    "items": {
+      "quitOrg2": "ORG-2 종료",
+      "newSession": "새 세션",
+      "openFolder": "폴더 열기...",
+      "addFolderToWorkspace": "작업 영역에 폴더 추가...",
+      "saveWorkspaceAs": "작업 영역을 다른 이름으로 저장...",
+      "closeWindow": "창 닫기",
+      "undo": "실행 취소",
+      "redo": "다시 실행",
+      "cut": "잘라내기",
+      "copy": "복사",
+      "paste": "붙여넣기",
+      "selectAll": "모두 선택",
+      "commandPalette": "명령 팔레트",
+      "goToFile": "파일로 이동...",
+      "selectModel": "모델 선택...",
+      "switchWorkspace": "작업 영역 전환...",
+      "switchBranch": "브랜치 전환...",
+      "switchRunningLocation": "실행 위치 전환...",
+      "settings": "설정...",
+      "zoomIn": "확대",
+      "zoomOut": "축소",
+      "actualSize": "실제 크기",
+      "minimize": "최소화",
+      "maximizeRestore": "최대화 / 복원",
+      "maximizeWorkstation": "워크스테이션 최대화",
+      "documentation": "문서",
+      "reportIssue": "문제 신고"
+    },
+    "controls": {
+      "minimizeWindow": "창 최소화",
+      "maximizeRestoreWindow": "창 최대화 또는 복원",
+      "closeWindow": "창 닫기"
+    }
+  },
+  "workManagementTable": {
+    "columns": {
+      "id": "ID",
+      "titleContext": "제목 / 컨텍스트",
+      "status": "상태",
+      "assignee": "담당자",
+      "updated": "업데이트"
+    },
+    "selectRow": "{{id}} 선택"
   }
 }

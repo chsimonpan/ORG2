@@ -5,6 +5,20 @@ export type { ImportedHistorySourceId } from "@src/types/session/externalHistory
 export type ImportedHistoryListCategory =
   `external_history:${ImportedHistorySourceId}`;
 
+/**
+ * Native-CLI continuation capability of an imported source. Present only
+ * when `orgtrack_core::sources::cli_resume` can plan a resume for the
+ * source (the backend stays authoritative per session — subagent rows and
+ * malformed ids still resolve to no plan). Sources without it are pure
+ * read-only replays: no continue button and no chat composer.
+ */
+export interface ImportedHistoryCliResume {
+  /** `code_sessions.cli_agent_type` of the owning CLI (launch-profile key). */
+  agentType: string;
+  /** Fallback label when the CLI registry has not answered (or errored). */
+  displayName: string;
+}
+
 export interface ImportedHistorySourceDescriptor {
   sourceId: ImportedHistorySourceId;
   listCategory: ImportedHistoryListCategory;
@@ -15,6 +29,7 @@ export interface ImportedHistorySourceDescriptor {
   listable: true;
   replayable: true;
   supportsWindowedReplay: boolean;
+  cliResume?: ImportedHistoryCliResume;
 }
 
 export const IMPORTED_HISTORY_SOURCE_DESCRIPTORS: readonly ImportedHistorySourceDescriptor[] =
@@ -39,7 +54,11 @@ export const IMPORTED_HISTORY_SOURCE_DESCRIPTORS: readonly ImportedHistorySource
       groupLabel: "Cursor CLI",
       listable: true,
       replayable: true,
-      supportsWindowedReplay: false,
+      supportsWindowedReplay: true,
+      cliResume: {
+        agentType: "cursor_cli",
+        displayName: "Cursor CLI",
+      },
     },
     {
       sourceId: "codex_app",
@@ -50,7 +69,11 @@ export const IMPORTED_HISTORY_SOURCE_DESCRIPTORS: readonly ImportedHistorySource
       groupLabel: "Codex App",
       listable: true,
       replayable: true,
-      supportsWindowedReplay: false,
+      supportsWindowedReplay: true,
+      cliResume: {
+        agentType: "codex",
+        displayName: "Codex",
+      },
     },
     {
       sourceId: "claude_code",
@@ -61,7 +84,11 @@ export const IMPORTED_HISTORY_SOURCE_DESCRIPTORS: readonly ImportedHistorySource
       groupLabel: "Claude App",
       listable: true,
       replayable: true,
-      supportsWindowedReplay: false,
+      supportsWindowedReplay: true,
+      cliResume: {
+        agentType: "claude_code",
+        displayName: "Claude Code",
+      },
     },
     {
       sourceId: "opencode",
@@ -72,7 +99,11 @@ export const IMPORTED_HISTORY_SOURCE_DESCRIPTORS: readonly ImportedHistorySource
       groupLabel: "OpenCode",
       listable: true,
       replayable: true,
-      supportsWindowedReplay: false,
+      supportsWindowedReplay: true,
+      cliResume: {
+        agentType: "opencode",
+        displayName: "OpenCode",
+      },
     },
     {
       sourceId: "windsurf",
@@ -83,7 +114,7 @@ export const IMPORTED_HISTORY_SOURCE_DESCRIPTORS: readonly ImportedHistorySource
       groupLabel: "Windsurf",
       listable: true,
       replayable: true,
-      supportsWindowedReplay: false,
+      supportsWindowedReplay: true,
     },
     {
       sourceId: "workbuddy",
@@ -94,7 +125,7 @@ export const IMPORTED_HISTORY_SOURCE_DESCRIPTORS: readonly ImportedHistorySource
       groupLabel: "WorkBuddy",
       listable: true,
       replayable: true,
-      supportsWindowedReplay: false,
+      supportsWindowedReplay: true,
     },
     {
       sourceId: "trae",
@@ -105,7 +136,7 @@ export const IMPORTED_HISTORY_SOURCE_DESCRIPTORS: readonly ImportedHistorySource
       groupLabel: "Trae",
       listable: true,
       replayable: true,
-      supportsWindowedReplay: false,
+      supportsWindowedReplay: true,
     },
     {
       sourceId: "cline",
@@ -116,7 +147,11 @@ export const IMPORTED_HISTORY_SOURCE_DESCRIPTORS: readonly ImportedHistorySource
       groupLabel: "Cline",
       listable: true,
       replayable: true,
-      supportsWindowedReplay: false,
+      supportsWindowedReplay: true,
+      cliResume: {
+        agentType: "cline",
+        displayName: "Cline",
+      },
     },
     {
       sourceId: "warp",
@@ -127,7 +162,7 @@ export const IMPORTED_HISTORY_SOURCE_DESCRIPTORS: readonly ImportedHistorySource
       groupLabel: "Warp",
       listable: true,
       replayable: true,
-      supportsWindowedReplay: false,
+      supportsWindowedReplay: true,
     },
     {
       sourceId: "zcode",
@@ -138,7 +173,7 @@ export const IMPORTED_HISTORY_SOURCE_DESCRIPTORS: readonly ImportedHistorySource
       groupLabel: "ZCode",
       listable: true,
       replayable: true,
-      supportsWindowedReplay: false,
+      supportsWindowedReplay: true,
     },
     {
       sourceId: "qoder",
@@ -149,6 +184,99 @@ export const IMPORTED_HISTORY_SOURCE_DESCRIPTORS: readonly ImportedHistorySource
       groupLabel: "Qoder",
       listable: true,
       replayable: true,
-      supportsWindowedReplay: false,
+      supportsWindowedReplay: true,
+    },
+    {
+      sourceId: "mimo_code",
+      listCategory: "external_history:mimo_code",
+      prefix: "mimocodeapp-",
+      iconId: "mimo_code",
+      displayName: "Mimo Code",
+      groupLabel: "Mimo Code",
+      listable: true,
+      replayable: true,
+      supportsWindowedReplay: true,
+      cliResume: {
+        agentType: "mimo_code",
+        displayName: "MiMo Code",
+      },
+    },
+    {
+      sourceId: "omp",
+      listCategory: "external_history:omp",
+      prefix: "ompapp-",
+      iconId: "omp",
+      displayName: "OMP",
+      groupLabel: "OMP",
+      listable: true,
+      replayable: true,
+      supportsWindowedReplay: true,
+      cliResume: {
+        agentType: "omp",
+        displayName: "OMP",
+      },
+    },
+    {
+      sourceId: "pi",
+      listCategory: "external_history:pi",
+      prefix: "piapp-",
+      iconId: "pi",
+      displayName: "Pi",
+      groupLabel: "Pi",
+      listable: true,
+      replayable: true,
+      supportsWindowedReplay: true,
+    },
+    {
+      sourceId: "qoder_cli",
+      listCategory: "external_history:qoder_cli",
+      prefix: "qodercliapp-",
+      iconId: "qoder",
+      displayName: "Qoder CLI",
+      groupLabel: "Qoder CLI",
+      listable: true,
+      replayable: true,
+      supportsWindowedReplay: true,
+    },
+    {
+      sourceId: "qwen_code",
+      listCategory: "external_history:qwen_code",
+      prefix: "qwencodeapp-",
+      iconId: "qwen_code",
+      displayName: "Qwen Code",
+      groupLabel: "Qwen Code",
+      listable: true,
+      replayable: true,
+      supportsWindowedReplay: true,
+    },
+    {
+      sourceId: "kimi",
+      listCategory: "external_history:kimi",
+      prefix: "kimihistoryapp-",
+      iconId: "kimi",
+      displayName: "Kimi",
+      groupLabel: "Kimi",
+      listable: true,
+      replayable: true,
+      supportsWindowedReplay: true,
+      cliResume: {
+        agentType: "kimi_cli",
+        displayName: "Kimi",
+      },
+    },
+    {
+      sourceId: "copilot",
+      listCategory: "external_history:copilot",
+      prefix: "copilotapp-",
+      iconId: "copilot",
+      displayName: "Copilot CLI",
+      groupLabel: "Copilot CLI",
+      listable: true,
+      replayable: true,
+      supportsWindowedReplay: true,
+      cliResume: {
+        agentType: "copilot",
+        displayName: "Copilot CLI",
+      },
     },
   ];

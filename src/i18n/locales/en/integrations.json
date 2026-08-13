@@ -2048,18 +2048,18 @@
       "previewEmpty": "Add agents to see the team chart preview",
       "hierarchyMode": {
         "label": "Hierarchy mode",
-        "description": "How the reports-to relationships between members are interpreted at runtime",
+        "description": "How Reports-to controls communication routing and task-assignment authority at runtime",
         "flat": {
           "label": "Flat",
-          "description": "No reporting hierarchy. Every member can message every other member directly. The Reports-to column is hidden"
+          "description": "No reporting hierarchy. Peer messaging is open, but non-coordinator members manage only their own tasks. The Reports-to column is hidden"
         },
         "soft": {
           "label": "Soft (recommended)",
-          "description": "Reports-to is shown to the LLM as an organizational hint. Routing is unrestricted at runtime — the LLM may message peers directly when sensible"
+          "description": "Peer messaging is unrestricted, but task authority is enforced: members manage themselves and direct reports only. Talking to a peer never grants permission to assign it work"
         },
         "strict": {
           "label": "Strict",
-          "description": "Reports-to is enforced at runtime. A member can only message its manager, direct reports, or the coordinator. Sibling-to-sibling messaging is rejected"
+          "description": "Reports-to is enforced for both communication and task authority. Members may message their manager/direct reports/coordinator, and may assign tasks only to themselves or direct reports"
         }
       },
       "strictBanner": "Strict mode: members can only message their manager, direct reports, or the coordinator. Sibling-to-sibling messaging is blocked at runtime.",
@@ -2094,7 +2094,23 @@
       "dangerZone": "Danger Zone",
       "deleteOrg": "Delete this team",
       "deleteOrgDesc": "Permanently delete this agent team. Member agents are not affected. This action cannot be undone",
-      "deleteThisOrg": "Delete this team"
+      "deleteThisOrg": "Delete this team",
+      "planApprovalPolicy": {
+        "label": "Plan approval",
+        "description": "Who decides when a Planner's submitted plan is ready to unlock dependent tasks",
+        "coordinator": {
+          "label": "Coordinator (recommended)",
+          "description": "The coordinator reviews the plan inside the run, then approves it or asks the Planner for changes"
+        },
+        "user": {
+          "label": "User",
+          "description": "The Group chat waits quietly and shows you the plan with Approve, Edit, and Request changes actions"
+        },
+        "automatic": {
+          "label": "Automatic",
+          "description": "A valid submitted plan is accepted immediately and its dependent tasks are unlocked"
+        }
+      }
     },
     "agentWizard": {
       "title": "Config Agent",
@@ -2506,7 +2522,9 @@
           "rename": "Rename",
           "search": "Search"
         }
-      }
+      },
+      "liveStatusToggle": "Live agent status",
+      "liveStatusToggleDesc": "Shows when running CLI agents are working or waiting. Off keeps provenance capture on."
     }
   },
   "tableHeaders": {

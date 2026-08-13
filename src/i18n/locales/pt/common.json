@@ -209,7 +209,9 @@
     "skipThisVersion": "Ignorar esta versão",
     "later": "Mais tarde",
     "link": "Vincular",
-    "copyName": "Copiar nome"
+    "copyName": "Copiar nome",
+    "toggle": "Alternar tópico",
+    "switchMethod": "Alterar método"
   },
   "refreshToast": {
     "successName": "{{name}} atualizado",
@@ -572,7 +574,11 @@
     },
     "imageUploadFailed": "Falha ao enviar imagem",
     "imageTooLarge": "A imagem é muito grande",
-    "unknownError": "Ocorreu um erro desconhecido"
+    "unknownError": "Ocorreu um erro desconhecido",
+    "codexLoginExpired": "A sessão do Codex expirou",
+    "codexLoginExpiredDescription": "Reconecte o Codex para reparar esta conta. Você retornará a esta sessão quando o novo login for salvo.",
+    "reconnectCodex": "Reconectar o Codex",
+    "technicalDetails": "Detalhes técnicos"
   },
   "confirmation": {
     "delete": "Tem certeza de que deseja excluir isto?",
@@ -859,7 +865,7 @@
     "listDirParseSafetyHint": "Mostrando as primeiras {{maxShown}} entradas. A listagem completa foi limitada para desempenho.",
     "noTasks": "Sem tarefas",
     "noTasksWithDates": "Nenhuma tarefa com datas para exibir",
-    "noTasksWithDatesSubtitle": "Adicione datas de início e término às suas tarefas para vê-las aqui",
+    "noTasksWithDatesSubtitle": "Adicione datas de início e fim para exibir as tarefas aqui",
     "noItemsAvailable": "Nenhum item disponível",
     "loadingMore": "Carregando mais...",
     "scrollForMore": "Role para ver mais",
@@ -867,10 +873,10 @@
     "typeToSearch": "Digite para pesquisar",
     "pleaseTryAgain": "Tente novamente",
     "noFileOpen": "Abra um arquivo para começar a editar",
-    "selectFileToEdit": "Selecione um arquivo no explorador para começar a editar",
+    "selectFileToEdit": "Escolha um arquivo no explorador",
     "noTabs": "Abra uma aba para começar",
     "noTabsOpen": "Abra um item para começar",
-    "selectItemToStart": "Selecione um item na barra lateral para começar",
+    "selectItemToStart": "Escolha um item na barra lateral",
     "noDatabaseConnected": "Nenhum banco de dados conectado",
     "addConnectionToQuery": "Adicione uma conexão para começar a consultar",
     "noQueryResults": "Execute uma consulta para ver resultados",
@@ -879,7 +885,7 @@
     "chatHistoryEmpty": "Nenhuma atividade ainda",
     "chatHistoryReloadHint": "Os dados da sessão podem não ter sido carregados",
     "chatHistoryAgentWorking": "O Agent está em execução",
-    "chatHistoryAgentWorkingHint": "As mensagens aparecem conforme o assistente transmite. A barra de ferramentas pode mostrar inativo até o primeiro evento.",
+    "chatHistoryAgentWorkingHint": "As mensagens aparecem com a primeira resposta; até lá, a barra pode parecer inativa",
     "pleaseSelect": "Selecione",
     "noTerminalsAvailable": "Abra um terminal para começar",
     "noSessionsFound": "Nenhuma sessão encontrada",
@@ -889,7 +895,7 @@
     "noQueryHistory": "Nenhuma consulta executada ainda",
     "executedQueriesSubtitle": "As consultas executadas aparecerão aqui",
     "noOperationHistory": "Nenhuma operação registrada ainda",
-    "noOperationHistorySubtitle": "Commit, push, pull e outras operações do Git aparecerão aqui",
+    "noOperationHistorySubtitle": "As operações do Git aparecerão aqui",
     "selectFileToViewChanges": "Selecione um arquivo para ver as alterações",
     "failedToLoadHistory": "Falha ao carregar histórico",
     "noGitHistory": "Nenhum histórico do Git disponível",
@@ -956,13 +962,12 @@
     "addCssVariables": "Adicione variáveis CSS ao seu projeto",
     "loadingAccountStatus": "Carregando status da conta...",
     "noRepositorySelected": "Nenhum Repo selecionado",
-    "selectRepositoryFromHome": "Selecione um Repo na página inicial para abrir.",
     "noWorkspaceExplorerTitle": "Nenhum workspace aberto",
-    "noWorkspaceExplorerSubtitle": "Abrir workspace para ver arquivos",
+    "noWorkspaceExplorerSubtitle": "Abra um espaço de trabalho para ver arquivos",
     "cannotFindRepo": "Não foi possível encontrar {{repoName}}",
     "lastSeenAtPath": "Visto pela última vez em {{path}}",
     "unsupportedFileType": "Tipo de arquivo não suportado",
-    "binaryUnsupportedEncoding": "Este arquivo não é exibido porque é binário ou usa uma codificação de texto não suportada.",
+    "binaryUnsupportedEncoding": "Arquivo binário ou codificação de texto não suportada",
     "connectingDatabase": "Abrindo banco de dados...",
     "invalidDatabase": "Arquivo de banco de dados inválido",
     "selectTable": "Selecione uma tabela",
@@ -987,7 +992,8 @@
     "scanningFileExtensions": "Varrendo extensões de arquivo...",
     "startBrowsingMarket": "Comece a navegar no Marketplace",
     "previewUnavailable": "Pré-visualização indisponível",
-    "selectPrCommitToViewDiff": "Select a pull request commit from the header to view its diff."
+    "selectPrCommitToViewDiff": "Select a pull request commit from the header to view its diff.",
+    "selectRepositoryFromWorkspace": "Escolha um repositório do espaço de trabalho"
   },
   "inbox": {
     "searchPlaceholder": "Pesquisar mensagens...",
@@ -1146,8 +1152,6 @@
       "tryVerifyUrl": "Verificar se a URL está correta",
       "tryAgainLater": "Tentar novamente mais tarde"
     },
-    "selectRepoFromHome": "Selecione um Repo na página inicial",
-    "cloneRepoAgain": "Clone o Repo novamente na página inicial",
     "unsavedChangesTitle": "Alterações não salvas",
     "prkPlaceholder": "PRJ",
     "gitSyncMenuTitle": "Ações de sincronização Git"
@@ -1187,7 +1191,8 @@
       "takeAction": "Agir",
       "sync": "Sincronizar",
       "createPR": "Criar PR",
-      "stash": "Stash"
+      "stash": "Stash",
+      "compareBranch": "Comparar branch"
     },
     "messages": {
       "pushSuccess": "Alterações enviadas (push) ao remote com sucesso",
@@ -1240,6 +1245,222 @@
         "closed": "Fechado",
         "completed": "Concluído",
         "notPlanned": "Não planejado"
+      },
+      "activity": {
+        "opened": "abriu esta issue",
+        "commented": "comentou",
+        "timelineItemCount_one": "{{count}} item na linha do tempo",
+        "timelineItemCount_other": "{{count}} itens na linha do tempo",
+        "noDescription": "Nenhuma descrição fornecida.",
+        "assigned": "atribuiu a",
+        "assignedIssue": "atribuiu esta issue",
+        "unassigned": "removeu a atribuição de",
+        "removedAssignee": "removeu uma pessoa atribuída",
+        "added": "adicionou",
+        "removed": "removeu",
+        "label": "uma etiqueta",
+        "milestoned": "adicionou esta issue ao marco {{milestone}}",
+        "demilestoned": "removeu esta issue do marco {{milestone}}",
+        "closedViaCommit": "fechou esta issue pelo commit {{commit}}",
+        "closed": "fechou esta issue",
+        "reopened": "reabriu esta issue",
+        "renamedTo": "renomeou esta issue para",
+        "renamed": "renomeou esta issue",
+        "locked": "bloqueou esta conversa",
+        "lockedAs": "bloqueou esta conversa pelo motivo {{reason}}",
+        "unlocked": "desbloqueou esta conversa",
+        "crossReferencedFrom": "referenciou esta issue a partir de",
+        "crossReferenced": "criou uma referência cruzada para esta issue",
+        "referencedInCommit": "referenciou esta issue no commit {{commit}}",
+        "referencedInACommit": "referenciou esta issue em um commit",
+        "connected": "vinculou esta issue",
+        "disconnected": "desvinculou esta issue",
+        "markedAsDuplicate": "marcou esta issue como duplicada",
+        "unmarkedAsDuplicate": "removeu a marca de duplicada",
+        "pinned": "fixou esta issue",
+        "unpinned": "desafixou esta issue",
+        "transferred": "transferiu esta issue",
+        "convertedToDiscussion": "converteu esta issue em uma discussão",
+        "mentioned": "mencionou esta issue",
+        "commentDeleted": "excluiu um comentário",
+        "subscribed": "assinou esta issue",
+        "unsubscribed": "cancelou a assinatura desta issue",
+        "addedToProject": "adicionou esta issue a um projeto",
+        "movedInProject": "moveu esta issue em um projeto",
+        "removedFromProject": "removeu esta issue de um projeto",
+        "archived": "arquivou esta issue",
+        "unarchived": "desarquivou esta issue",
+        "merged": "mesclou esta pull request",
+        "committed": "fez commit nesta pull request",
+        "headRefDeleted": "excluiu a branch de origem",
+        "headRefRestored": "restaurou a branch de origem",
+        "headRefForcePushed": "forçou o push da branch de origem",
+        "baseRefChanged": "alterou a branch base",
+        "automaticBaseChangeFailed": "não conseguiu alterar automaticamente a branch base",
+        "automaticBaseChangeSucceeded": "alterou automaticamente a branch base",
+        "deployed": "implantou esta pull request",
+        "deploymentEnvironmentChanged": "alterou o ambiente de implantação",
+        "readyForReview": "marcou esta pull request como pronta para revisão",
+        "reviewRequested": "solicitou uma revisão",
+        "reviewRequestRemoved": "removeu uma solicitação de revisão",
+        "reviewed": "revisou estas alterações",
+        "reviewDismissed": "dispensou uma revisão",
+        "userBlocked": "bloqueou este usuário"
+      },
+      "composer": {
+        "addComment": "Adicionar um comentário",
+        "commentingAs": "Comentando como {{login}}",
+        "identityUnavailable": "Identidade do GitHub indisponível",
+        "commentPlaceholder": "Escreva um comentário…",
+        "submitComment": "Comentar",
+        "closeIssue": "Fechar issue",
+        "closeAsCompleted": "Fechar como concluído",
+        "closeAsNotPlanned": "Fechar como não planejado",
+        "closeAsDuplicate": "Fechar como duplicado",
+        "duplicateSearchPlaceholder": "Pesquisar issues",
+        "duplicateEmpty": "Nenhuma issue correspondente",
+        "duplicateLoadFailed": "Falha ao carregar issues",
+        "reopenIssue": "Reabrir issue",
+        "commentFailed": "Não foi possível adicionar o comentário",
+        "bodyUpdateFailed": "Não foi possível atualizar a descrição da issue",
+        "statusFailed": "Não foi possível atualizar o status da issue"
+      }
+    },
+    "rail": {
+      "openTabs": "Abas abertas",
+      "closeItem": "Fechar {{label}}",
+      "expand": "Expandir informações da área de trabalho",
+      "collapse": "Recolher informações da área de trabalho"
+    },
+    "pr": {
+      "title": "Pull request",
+      "linkedBranch": "Pull request nº {{number}}",
+      "baseBranch": "Base",
+      "noDescription": "Nenhuma descrição fornecida.",
+      "loadingConversation": "Carregando…",
+      "reviewNoBody": "Deixou comentários de revisão.",
+      "submitReview": "Enviar revisão",
+      "reviewHeadNotice": "A revisão só será aplicada se o commit de cabeçalho exibido ainda corresponder.",
+      "reviewDecision": "Decisão da revisão",
+      "reviewComment": "Comentário da revisão",
+      "reviewCommentPlaceholder": "Adicionar um comentário…",
+      "commentPlaceholder": "Deixar um comentário…",
+      "comment": "Comentar",
+      "approve": "Aprovar",
+      "requestChanges": "Solicitar alterações",
+      "reply": "Responder",
+      "replyPlaceholder": "Responder…",
+      "reviewThreads": "Comentários da revisão",
+      "details": "Detalhes",
+      "unknownAuthor": "Desconhecido",
+      "activity": {
+        "opened": "abriu este pull request",
+        "commented": "comentou",
+        "approved": "aprovou estas alterações",
+        "changesRequested": "solicitou alterações",
+        "reviewDismissed": "descartou uma revisão",
+        "reviewed": "revisou"
+      },
+      "summary": {
+        "label": "Resumo do pull request",
+        "branch": "Branch",
+        "reviewers": "Revisores",
+        "noReviewers": "Sem revisores",
+        "comments": "Comentários",
+        "commentCount_one": "{{count}} comentário",
+        "commentCount_other": "{{count}} comentários",
+        "checks": "Verificações",
+        "noChecks": "Sem verificações de CI",
+        "checksFailed": "Falha nas verificações",
+        "status": "Status"
+      },
+      "tabs": {
+        "conversation": "Conversa",
+        "commits": "Commits",
+        "checks": "Verificações",
+        "changes": "Alterações"
+      },
+      "checks": {
+        "none": "Nenhuma verificação relatada",
+        "noneHint": "Nenhuma verificação de CI ou status foi executado no commit principal deste pull request.",
+        "allPassed": "Todas as verificações passaram",
+        "someFailed": "Algumas verificações falharam",
+        "pending": "Verificações em andamento",
+        "passedShort": "Aprovado",
+        "failedShort": "Falhou",
+        "runningShort": "Em execução",
+        "checkingShort": "Verificando",
+        "noneShort": "Sem CI",
+        "unavailableShort": "CI indisponível",
+        "branchStatus": "CI do pull request nº {{number}}: {{status}}"
+      },
+      "commits": {
+        "backToList": "Todos os commits",
+        "none": "Sem commits"
+      },
+      "changes": {
+        "title": "Arquivos alterados",
+        "noFiles": "Nenhuma alteração de arquivo",
+        "tooLarge": "Arquivo grande demais para exibir o diff",
+        "unavailable": "Alterações indisponíveis",
+        "unavailableHint": "Não foi possível resolver os commits base e principal do pull request."
+      },
+      "status": {
+        "open": "Aberto",
+        "merged": "Mesclado",
+        "closed": "Fechado",
+        "draft": "Rascunho"
+      },
+      "actions": {
+        "label": "Ações do pull request",
+        "confirmMergeTitle": "Mesclar o pull request?",
+        "confirmMergeMessage": "O GitHub mesclará o branch de origem do pull request atual no branch base.",
+        "merge": "Mesclar",
+        "squash": "Combinar commits e mesclar",
+        "rebase": "Rebase e mesclar",
+        "mergeSuccess": "Pull request mesclado",
+        "mergeRequested": "Mesclagem solicitada",
+        "removedFromQueue": "Removido da fila de mesclagem",
+        "autoMergeEnabled": "Mesclagem automática ativada",
+        "autoMergeDisabled": "Mesclagem automática desativada",
+        "confirmCloseTitle": "Fechar o pull request?",
+        "confirmCloseMessage": "O pull request continuará disponível e poderá ser reaberto depois.",
+        "closeSuccess": "Pull request fechado",
+        "reopen": "Reabrir pull request",
+        "reopenSuccess": "Pull request reaberto",
+        "enableAutoMerge": "Ativar mesclagem automática",
+        "mergeWhenReady": "Mesclar quando estiver pronto",
+        "disableAutoMerge": "Desativar mesclagem automática",
+        "removeFromMergeQueue": "Remover da fila de mesclagem",
+        "merged": "Mesclado",
+        "closed": "Fechado",
+        "draft": "Rascunho",
+        "inMergeQueue": "Na fila de mesclagem",
+        "approvalRequired": "Aprovação necessária",
+        "changesRequested": "Alterações solicitadas",
+        "checksFailed": "Verificações falharam",
+        "checksPending": "Verificações pendentes",
+        "mergeBlocked": "Mesclagem bloqueada",
+        "searchReviewers": "Pesquisar revisores",
+        "reviewersLoadFailed": "Não foi possível carregar os revisores",
+        "noReviewers": "Nenhum revisor disponível",
+        "reviewersUpdated": "Revisores atualizados",
+        "reviewersCount_one": "{{count}} revisor",
+        "reviewersCount_other": "{{count}} revisores",
+        "reviewers": "Revisores",
+        "tooltips": {
+          "merge": "Mesclar este pull request no GitHub",
+          "alreadyMerged": "Este pull request já foi mesclado",
+          "reopenBeforeMerging": "Reabra este pull request antes de mesclar",
+          "markReady": "Marque este pull request como pronto para revisão antes de mesclar",
+          "mergeQueue": "O GitHub mesclará este pull request pela fila de mesclagem",
+          "approvalRequired": "O GitHub exige aprovação de revisão antes da mesclagem",
+          "changesRequested": "As alterações solicitadas devem ser resolvidas antes da mesclagem",
+          "resolveConflicts": "Resolva os conflitos antes da mesclagem",
+          "checksFailed": "As verificações obrigatórias devem passar antes da mesclagem",
+          "checksPending": "Aguarde as verificações obrigatórias ou ative a mesclagem automática",
+          "mergeBlocked": "O GitHub informa requisitos de mesclagem não atendidos"
+        }
       }
     }
   },
@@ -1693,7 +1914,6 @@
     "ramCurrentSession": "Sessão atual",
     "ramChatRenderedTree": "Árvore renderizada do Chat",
     "ramSessionStore": "Store de sessões",
-    "ramStartSidebar": "Barra lateral Start",
     "ramSessionSidebar": "Barra lateral Session",
     "ramSecondLevelSidebars": "Barras laterais de segundo nível",
     "ramSettingsSidebar": "Barra lateral Settings",
@@ -2128,20 +2348,7 @@
     }
   },
   "dragDrop": {
-    "dropFilesToUpload": "Solte arquivos para enviar",
-    "dropFileToChat": "Solte o arquivo para adicionar ao chat",
-    "dropFolderToAdd": "Solte a pasta para adicionar Repo",
-    "releaseToAddFiles": "Solte para adicionar arquivos à sua sessão",
-    "releaseToAddFileToChat": "Solte para adicionar o arquivo ao chat (como ⌘L)",
-    "releaseToOpenFolder": "Solte para abrir a pasta",
-    "folderDetected": "Pasta detectada",
-    "openSpotlightToAdd": "Abra o Spotlight para adicionar esta pasta como Repo",
-    "openSpotlight": "Abrir Spotlight",
-    "addedToChat": "\"{{name}}\" adicionado ao chat",
-    "couldNotExtractPath": "Não foi possível extrair o caminho do arquivo do drop",
-    "couldNotExtractPathFromItem": "Não foi possível extrair o caminho do arquivo do item solto",
-    "dropFilesHere": "Solte os arquivos aqui",
-    "dragFilesFromIde": "Arraste arquivos ou abas do VS Code para adicioná-los ao chat"
+    "couldNotExtractPathFromItem": "Não foi possível extrair o caminho do arquivo do item solto"
   },
   "contextList": {
     "task": "Tarefa",
@@ -2257,8 +2464,8 @@
     "selectRepoToStart": "Selecione um Repo para começar"
   },
   "quitConfirmation": {
-    "title": "Sair do ORGII?",
-    "subtitle": "As sessões em execução manterão o estado atual. Você poderá reabrir o ORGII mais tarde.",
+    "title": "Sair do ORG-2?",
+    "subtitle": "As sessões em execução manterão o estado atual. Você poderá reabrir o ORG-2 mais tarde.",
     "cancel": "Cancelar",
     "confirm": "Sair"
   },
@@ -2289,5 +2496,224 @@
     "downloadedOfTotal": "{{downloaded}} de {{total}}",
     "preparingDownload": "Preparando download…",
     "downloadingAndInstalling": "Baixando e instalando atualização (v{{version}})…"
+  },
+  "teamInbox": {
+    "title": "Caixa de entrada da equipe",
+    "listLabel": "Lista da caixa de entrada da equipe",
+    "itemsLabel": "Itens da caixa de entrada da equipe",
+    "unreadCount": "{{count}} não lidas",
+    "allRead": "Tudo em dia",
+    "loadMore": "Carregar mais",
+    "filters": {
+      "all": "Todos",
+      "mentions": "Menções",
+      "assigned": "Atribuídos"
+    },
+    "sections": {
+      "reviewRequested": "Revisão solicitada",
+      "authoredByMe": "Criados por mim",
+      "otherTodos": "Outras tarefas"
+    },
+    "status": {
+      "read": "Lido",
+      "unread": "Não lido"
+    },
+    "row": {
+      "assignedSummary": "{{status}} · {{priority}}",
+      "ariaLabel": "{{title}}, {{status}}"
+    },
+    "search": {
+      "placeholder": "Pesquisar na caixa de entrada",
+      "ariaLabel": "Pesquisar na caixa de entrada da equipe"
+    },
+    "groups": {
+      "today": "Hoje",
+      "yesterday": "Ontem",
+      "thisWeek": "Esta semana",
+      "earlier": "Anteriores"
+    },
+    "empty": {
+      "title": "Ainda não há nada aqui",
+      "subtitle": "Menções e itens de trabalho atribuídos aparecerão aqui.",
+      "selectTitle": "Selecione um item",
+      "selectSubtitle": "Veja o contexto do comentário ou os detalhes do item de trabalho",
+      "mentions": {
+        "title": "Nenhuma menção",
+        "subtitle": "Quando um colega de equipe mencionar você com @ em um comentário, isso aparecerá aqui"
+      },
+      "assigned": {
+        "title": "Nada atribuído a você",
+        "subtitle": "Os itens de trabalho atribuídos a você aparecerão aqui."
+      },
+      "noResults": {
+        "title": "Nenhuma correspondência",
+        "subtitle": "Nenhum item corresponde a “{{query}}”."
+      }
+    },
+    "loading": "Carregando a caixa de entrada da equipe…",
+    "drop": {
+      "title": "Solte aqui para criar um item de trabalho",
+      "subtitle": "Revise o snapshot da sessão e, em seguida, crie ou repasse o item de trabalho.",
+      "processing": "Criando um item de trabalho a partir de “{{title}}”…",
+      "processingHint": "Lendo a sessão e resolvendo os membros do projeto.",
+      "success": "Item de trabalho criado",
+      "reused": "Item de trabalho existente atualizado",
+      "failed": "Não foi possível criar o item de trabalho",
+      "error": "Não é possível criar um item de trabalho a partir desta sessão.",
+      "open": "Abrir",
+      "dismiss": "Descartar"
+    },
+    "handoff": {
+      "title": "Criar a partir da sessão",
+      "createFromSession": "Criar item de trabalho da equipe…",
+      "project": "Projeto de destino",
+      "chooseProject": "Escolher um projeto",
+      "recipientSelf": "{{name}} (eu)",
+      "chooseRecipient": "Escolher um destinatário",
+      "todoCount_one": "{{count}} tarefa",
+      "todoCount_other": "{{count}} tarefas",
+      "workItemTitle": "Título do item de trabalho",
+      "assignTo": "Atribuir a",
+      "note": "Nota de repasse",
+      "notePlaceholder": "Compartilhe o que está pronto, o que está pendente e o que deve acontecer a seguir.",
+      "selfHint": "Atribuir isto a você mesmo cria um item de trabalho normal, sem solicitação de repasse.",
+      "submitHandoff": "Criar e repassar",
+      "submitCreate": "Criar item de trabalho",
+      "preparing": "Preparando “{{title}}”…",
+      "preparationError": {
+        "session_unavailable": "Esta sessão não está mais disponível. Reabra-a e tente novamente.",
+        "project_unavailable": "O projeto desta sessão não está mais disponível.",
+        "identity_unavailable": "Sua identidade não é membro do projeto desta sessão.",
+        "no_project": "Nenhum projeto elegível disponível. Crie ou participe de um projeto e tente novamente.",
+        "unknown": "Não foi possível preparar esta sessão. Atualize a caixa de entrada da equipe e tente novamente."
+      },
+      "submitError": "Não foi possível criar o item de trabalho. Verifique o destinatário e tente novamente.",
+      "pendingTitle": "Repasse de {{name}}",
+      "acceptedTitle": "Aceito por {{name}}",
+      "returnedTitle": "Devolvido por {{name}}",
+      "noNote": "Sem nota de repasse.",
+      "statusLabel": "Repasse do item de trabalho",
+      "return": "Devolver",
+      "accept": "Aceitar",
+      "returnTitle": "Devolver este repasse?",
+      "confirmReturn": "Devolver ao remetente",
+      "returnHint": "Informe a {{name}} o que precisa de esclarecimento ou acompanhamento. O item de trabalho será reatribuído a essa pessoa.",
+      "returnPlaceholder": "O que precisa mudar antes de um novo repasse?",
+      "responseError": "Não foi possível salvar a resposta do repasse. Tente novamente.",
+      "identityUnavailable": "Não foi possível verificar sua identidade de equipe. Confira seu perfil do projeto antes de responder.",
+      "rowPending": "De {{name}} · Aguardando resposta",
+      "rowAccepted": "Repasse aceito · {{status}} · {{priority}}",
+      "rowReturned": "Devolvido por {{name}} · {{status}} · {{priority}}"
+    },
+    "errors": {
+      "loadTitle": "Não foi possível carregar a caixa de entrada da equipe",
+      "load": "Não foi possível carregar a caixa de entrada da equipe",
+      "loadMore": "Não foi possível carregar mais itens da caixa de entrada da equipe. Tente novamente.",
+      "refresh": "Não foi possível atualizar a caixa de entrada da equipe",
+      "markRead": "Não foi possível marcar este item como lido. Tente novamente.",
+      "markUnread": "Não foi possível marcar este item como não lido. Tente novamente.",
+      "markAllRead": "Não foi possível marcar todos os itens como lidos. Tente novamente.",
+      "identity": "Sua conta não pôde ser associada a um membro do projeto. Verifique o e-mail no seu perfil do projeto.",
+      "partialLoad": "Algumas fontes da caixa de entrada da equipe não puderam ser atualizadas. Os itens disponíveis continuam sendo exibidos",
+      "pullRequestsPartialLoad": "Algumas pull requests não puderam ser atualizadas",
+      "pullRequestsPartialLoadHelp": "Os itens disponíveis continuam sendo exibidos; atualize para tentar carregar novamente as pull requests ausentes",
+      "workItemContext": "Parte do contexto do projeto não está disponível. O item de trabalho continua utilizável.",
+      "workItemLoad": "Não foi possível carregar este item de trabalho. Tente novamente.",
+      "workItemUpdate": "Não foi possível salvar a última alteração do item de trabalho. Tente novamente."
+    },
+    "detail": {
+      "assignedSubtitle": "Item de trabalho atribuído",
+      "standaloneProject": "Independente",
+      "mentionSubtitle": "Mencionado em um comentário",
+      "mentionedYou": "mencionou você",
+      "threadComments_one": "{{count}} comentário nesta conversa",
+      "threadComments_other": "{{count}} comentários nesta conversa"
+    },
+    "actions": {
+      "markRead": "Marcar como lido",
+      "markUnread": "Marcar como não lido",
+      "openWorkItem": "Abrir item de trabalho",
+      "openSession": "Abrir sessão"
+    },
+    "fields": {
+      "status": "Status",
+      "priority": "Prioridade",
+      "assignee": "Responsável",
+      "workItemId": "ID do item de trabalho",
+      "session": "Sessão",
+      "comments": "Comentários",
+      "threadId": "ID da conversa",
+      "commentId": "ID do comentário"
+    },
+    "workItemStatus": {
+      "backlog": "Backlog",
+      "todo": "A fazer",
+      "in_progress": "Em andamento",
+      "in_review": "Em revisão",
+      "blocked": "Bloqueado",
+      "done": "Concluído",
+      "cancelled": "Cancelado"
+    },
+    "priority": {
+      "none": "Sem prioridade",
+      "low": "Baixa",
+      "medium": "Média",
+      "high": "Alta",
+      "urgent": "Urgente"
+    }
+  },
+  "windowChrome": {
+    "menus": {
+      "file": "Arquivo",
+      "edit": "Editar",
+      "view": "Exibir",
+      "window": "Janela",
+      "help": "Ajuda",
+      "aria": "Menu {{label}}"
+    },
+    "items": {
+      "quitOrg2": "Sair do ORG-2",
+      "newSession": "Nova sessão",
+      "openFolder": "Abrir pasta...",
+      "addFolderToWorkspace": "Adicionar pasta ao espaço de trabalho...",
+      "saveWorkspaceAs": "Salvar espaço de trabalho como...",
+      "closeWindow": "Fechar janela",
+      "undo": "Desfazer",
+      "redo": "Refazer",
+      "cut": "Recortar",
+      "copy": "Copiar",
+      "paste": "Colar",
+      "selectAll": "Selecionar tudo",
+      "commandPalette": "Paleta de comandos",
+      "goToFile": "Ir para arquivo...",
+      "selectModel": "Selecionar modelo...",
+      "switchWorkspace": "Alternar espaço de trabalho...",
+      "switchBranch": "Alternar branch...",
+      "switchRunningLocation": "Alternar local de execução...",
+      "settings": "Configurações...",
+      "zoomIn": "Ampliar",
+      "zoomOut": "Reduzir",
+      "actualSize": "Tamanho real",
+      "minimize": "Minimizar",
+      "maximizeRestore": "Maximizar / Restaurar",
+      "maximizeWorkstation": "Maximizar estação de trabalho",
+      "documentation": "Documentação",
+      "reportIssue": "Relatar problema"
+    },
+    "controls": {
+      "minimizeWindow": "Minimizar janela",
+      "maximizeRestoreWindow": "Maximizar ou restaurar janela",
+      "closeWindow": "Fechar janela"
+    }
+  },
+  "workManagementTable": {
+    "columns": {
+      "id": "ID",
+      "titleContext": "Título / contexto",
+      "status": "Status",
+      "assignee": "Responsável",
+      "updated": "Atualizado"
+    },
+    "selectRow": "Selecionar {{id}}"
   }
 }

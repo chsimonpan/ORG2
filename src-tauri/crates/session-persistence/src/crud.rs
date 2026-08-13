@@ -68,6 +68,114 @@ pub(crate) fn normalize_session_sequences(conn: &Connection, session_id: &str) -
     Ok(())
 }
 
+fn upsert_event_rows(
+    conn: &Connection,
+    session_id: &str,
+    events: &[CachedEvent],
+) -> SqliteResult<bool> {
+    get_next_sequence(conn, session_id)?;
+    let mut content_changed = false;
+
+    // Conflict target is the PRIMARY KEY (id). The table also carries
+    // UNIQUE(id, session_id), but that constraint cannot conflict without
+    // the PK conflicting on the same row, so the single target is unambiguous.
+    let mut stmt = conn.prepare_cached(
+        "INSERT INTO events
+         (id, session_id, event_type, function_name, thread_id, args_json, result_json,
+          content, created_at, meta_json, history_sequence)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         ON CONFLICT(id) DO UPDATE SET
+             session_id       = excluded.session_id,
+             event_type       = excluded.event_type,
+             function_name    = excluded.function_name,
+             thread_id        = excluded.thread_id,
+             args_json        = excluded.args_json,
+             result_json      = excluded.result_json,
+             content          = excluded.content,
+             created_at       = excluded.created_at,
+             meta_json        = excluded.meta_json,
+             history_sequence = excluded.history_sequence
+         WHERE events.session_id       IS NOT excluded.session_id
+            OR events.event_type       IS NOT excluded.event_type
+            OR events.function_name    IS NOT excluded.function_name
+            OR events.thread_id        IS NOT excluded.thread_id
+            OR events.args_json        IS NOT excluded.args_json
+            OR events.result_json      IS NOT excluded.result_json
+            OR events.content          IS NOT excluded.content
+            OR events.created_at       IS NOT excluded.created_at
+            OR events.meta_json        IS NOT excluded.meta_json
+            OR events.history_sequence IS NOT excluded.history_sequence",
+    )?;
+
+    for event in events {
+        if is_ts_placeholder_id(&event.id) {
+            continue;
+        }
+        // The frontend's in-memory event cache does NOT track the server-owned
+        // sequence stamp. Keep a persisted value on resubmission and allocate
+        // a new monotonic value only for a genuinely new event.
+        let seq = match event.history_sequence {
+            Some(seq) => seq,
+            None => existing_event_sequence(conn, session_id, &event.id)?
+                .unwrap_or_else(|| increment_sequence(session_id)),
+        };
+
+        content_changed |= stmt.execute(params![
+            event.id,
+            event.session_id,
+            event.event_type,
+            event.function_name,
+            event.thread_id,
+            event.args_json,
+            event.result_json,
+            event.content,
+            event.created_at,
+            event.meta_json,
+            seq,
+        ])? > 0;
+    }
+    Ok(content_changed)
+}
+
+fn refresh_session_metadata_from_events(
+    conn: &Connection,
+    session_id: &str,
+    content_changed: bool,
+) -> SqliteResult<usize> {
+    let (event_count, time_start, time_end): (i64, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT COUNT(*), MIN(created_at), MAX(created_at)
+             FROM events WHERE session_id=?1",
+            [session_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+
+    let now = Utc::now().timestamp();
+    conn.execute(
+        "INSERT INTO sessions
+         (session_id, event_count, cached_at, content_revision, time_range_start, time_range_end, specs_json)
+         VALUES (?1, ?2, ?3, CASE WHEN ?6 THEN 1 ELSE 0 END, ?4, ?5, NULL)
+         ON CONFLICT(session_id) DO UPDATE SET
+             event_count      = excluded.event_count,
+             cached_at        = excluded.cached_at,
+             content_revision = CASE
+                 WHEN ?6 THEN sessions.content_revision + 1
+                 ELSE sessions.content_revision
+             END,
+             time_range_start = excluded.time_range_start,
+             time_range_end   = excluded.time_range_end",
+        params![
+            session_id,
+            event_count,
+            now,
+            time_start,
+            time_end,
+            content_changed
+        ],
+    )?;
+    Ok(event_count.max(0) as usize)
+}
+
 /// Save events to cache.
 ///
 /// Runs under the process-wide writer serializer (`with_sessions_writer`)
@@ -95,107 +203,65 @@ pub fn save_events(session_id: &str, events: &[CachedEvent]) -> SqliteResult<()>
         let conn = get_connection()?;
         let tx = begin_immediate(&conn)?;
 
-        get_next_sequence(&conn, session_id)?;
+        let content_changed = upsert_event_rows(&conn, session_id, events)?;
 
-        // Conflict target is the PRIMARY KEY (id). The table also carries
-        // UNIQUE(id, session_id), but that constraint cannot conflict
-        // without the PK conflicting on the same row, so the single target
-        // is unambiguous. `IS NOT` (null-safe) comparisons everywhere so
-        // NULLable columns (function_name, thread_id, meta_json,
-        // history_sequence) compare correctly.
-        let mut stmt = conn.prepare_cached(
-            "INSERT INTO events
-             (id, session_id, event_type, function_name, thread_id, args_json, result_json,
-              content, created_at, meta_json, history_sequence)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-             ON CONFLICT(id) DO UPDATE SET
-                 session_id       = excluded.session_id,
-                 event_type       = excluded.event_type,
-                 function_name    = excluded.function_name,
-                 thread_id        = excluded.thread_id,
-                 args_json        = excluded.args_json,
-                 result_json      = excluded.result_json,
-                 content          = excluded.content,
-                 created_at       = excluded.created_at,
-                 meta_json        = excluded.meta_json,
-                 history_sequence = excluded.history_sequence
-             WHERE events.session_id       IS NOT excluded.session_id
-                OR events.event_type       IS NOT excluded.event_type
-                OR events.function_name    IS NOT excluded.function_name
-                OR events.thread_id        IS NOT excluded.thread_id
-                OR events.args_json        IS NOT excluded.args_json
-                OR events.result_json      IS NOT excluded.result_json
-                OR events.content          IS NOT excluded.content
-                OR events.created_at       IS NOT excluded.created_at
-                OR events.meta_json        IS NOT excluded.meta_json
-                OR events.history_sequence IS NOT excluded.history_sequence",
-        )?;
-
-        let mut time_start: Option<String> = None;
-        let mut time_end: Option<String> = None;
-
-        for event in events {
-            if is_ts_placeholder_id(&event.id) {
-                continue;
-            }
-            // The frontend's in-memory event cache does NOT track the server-
-            // owned `history_sequence` stamp (minted by the sequence counter).
-            // When the frontend re-submits an already persisted event after a
-            // reload, the field comes back as `None`. Writing `None` through
-            // would desync `history_sequence` from `created_at` and break
-            // truncate cutoffs. So: for an event the frontend submits
-            // without a stamp, KEEP the value already persisted; only mint a
-            // fresh sequence for genuinely new rows.
-            let seq = match event.history_sequence {
-                Some(seq) => seq,
-                None => existing_event_sequence(&conn, session_id, &event.id)?
-                    .unwrap_or_else(|| increment_sequence(session_id)),
-            };
-
-            stmt.execute(params![
-                event.id,
-                event.session_id,
-                event.event_type,
-                event.function_name,
-                event.thread_id,
-                event.args_json,
-                event.result_json,
-                event.content,
-                event.created_at,
-                event.meta_json,
-                seq,
-            ])?;
-
-            if time_start.is_none() || event.created_at < *time_start.as_ref().unwrap() {
-                time_start = Some(event.created_at.clone());
-            }
-            if time_end.is_none() || event.created_at > *time_end.as_ref().unwrap() {
-                time_end = Some(event.created_at.clone());
-            }
-        }
-
-        let now = Utc::now().timestamp();
-        conn.execute(
-            "INSERT INTO sessions (session_id, event_count, cached_at, time_range_start, time_range_end, specs_json)
-             VALUES (?1,
-                     (SELECT COUNT(*) FROM events WHERE session_id = ?1),
-                     ?2, ?3, ?4, NULL)
-             ON CONFLICT(session_id) DO UPDATE SET
-                 event_count      = excluded.event_count,
-                 cached_at        = excluded.cached_at,
-                 time_range_start = excluded.time_range_start,
-                 time_range_end   = excluded.time_range_end",
-            params![session_id, now, time_start, time_end],
-        )?;
-
+        // `save_events` is incremental: callers may submit one newly
+        // materialized Agent Org inbox event after a session already contains
+        // a much older and a much newer event.  Deriving the cached range from
+        // only this batch would shrink the session metadata and make history
+        // pagination skip durable events.  Recompute from the transaction's
+        // full event set instead.
+        refresh_session_metadata_from_events(&conn, session_id, content_changed)?;
         normalize_session_sequences(&conn, session_id)?;
-        drop(stmt);
 
         tx.commit()?;
         Ok(())
     })?;
     super::turn_index_debounce::schedule(session_id);
     Ok(())
+}
+
+/// Append one replay-import batch without rescanning the already written
+/// prefix. The caller must invoke [`finalize_deferred_event_import`] after the
+/// last batch; until then no session metadata or turn index is published.
+pub fn save_events_deferred(session_id: &str, events: &[CachedEvent]) -> SqliteResult<()> {
+    with_sessions_writer(|| -> SqliteResult<()> {
+        let conn = get_connection()?;
+        let tx = begin_immediate(&conn)?;
+        upsert_event_rows(&conn, session_id, events)?;
+        tx.commit()?;
+        Ok(())
+    })
+}
+
+/// Publish a deferred replay import with one O(n) metadata/sequence pass and
+/// schedule one turn-index rebuild. This replaces O(page_count × n) work.
+pub fn finalize_deferred_event_import(session_id: &str) -> SqliteResult<usize> {
+    let event_count = with_sessions_writer(|| -> SqliteResult<usize> {
+        let conn = get_connection()?;
+        let tx = begin_immediate(&conn)?;
+        let count = refresh_session_metadata_from_events(&conn, session_id, true)?;
+        normalize_session_sequences(&conn, session_id)?;
+        tx.commit()?;
+        Ok(count)
+    })?;
+    super::turn_index_debounce::schedule(session_id);
+    Ok(event_count)
+}
+
+/// Count persisted events for a session without loading them.
+///
+/// A pure read: no sequence normalization and no writer serializer, so it
+/// stays cheap even while a large import batch holds the writer lock. Used
+/// as the cache-hit probe for imported replays, where `load_events` on a
+/// 100k-event session just to check non-emptiness is prohibitive.
+pub fn count_events(session_id: &str) -> SqliteResult<i64> {
+    let conn = get_connection()?;
+    conn.query_row(
+        "SELECT COUNT(*) FROM events WHERE session_id = ?1",
+        [session_id],
+        |row| row.get(0),
+    )
 }
 
 /// Load all events for a session.
@@ -385,22 +451,49 @@ pub fn search_events(session_id: &str, query: &str, limit: i64) -> SqliteResult<
         .collect())
 }
 
-/// Substring search across all sessions. Returns one hit per session — the
-/// most recent matching event (`MAX(created_at)`; SQLite's bare-column
-/// guarantee pins `content` to that row). Sessions are ordered newest-hit
-/// first; `rank` is the 0-based position in that order. LIKE semantics are
-/// documented on [`search_events`]. The caller should join with the session
-/// list API to resolve display names.
+/// Substring search across all sessions. Agent events and Human-session notes
+/// share one bounded result set. Returns one hit per session — the most recent
+/// matching entry (`MAX(created_at)`; SQLite's bare-column guarantee pins
+/// `content` to that row). Sessions are ordered newest-hit first; `rank` is the
+/// 0-based position in that order. LIKE semantics are documented on
+/// [`search_events`]. Each source is reduced to at most the requested limit
+/// before the final merge, and public callers are capped at 100 results. The
+/// caller should join with the session list API to resolve display names.
 pub fn search_all_sessions(query: &str, limit: i64) -> SqliteResult<Vec<CrossSessionSearchHit>> {
+    if query.trim().is_empty() || limit <= 0 {
+        return Ok(Vec::new());
+    }
+
     let conn = get_connection()?;
     let pattern = escape_like_pattern(query);
+    let limit = limit.min(100);
 
     let mut stmt = conn.prepare_cached(
-        "SELECT session_id, content, MAX(created_at) AS created_at
-         FROM events
-         WHERE content LIKE '%' || ?1 || '%' ESCAPE '\\'
-            OR function_name LIKE '%' || ?1 || '%' ESCAPE '\\'
-            OR args_json LIKE '%' || ?1 || '%' ESCAPE '\\'
+        "WITH latest_events AS (
+             SELECT session_id, content, MAX(created_at) AS created_at
+             FROM events
+             WHERE content LIKE '%' || ?1 || '%' ESCAPE '\\'
+                OR function_name LIKE '%' || ?1 || '%' ESCAPE '\\'
+                OR args_json LIKE '%' || ?1 || '%' ESCAPE '\\'
+             GROUP BY session_id
+             ORDER BY created_at DESC
+             LIMIT ?2
+         ),
+         latest_human_entries AS (
+             SELECT session_id, body AS content, MAX(created_at) AS created_at
+             FROM human_session_entries
+             WHERE body LIKE '%' || ?1 || '%' ESCAPE '\\'
+             GROUP BY session_id
+             ORDER BY created_at DESC
+             LIMIT ?2
+         ),
+         candidates AS (
+             SELECT session_id, content, created_at FROM latest_events
+             UNION ALL
+             SELECT session_id, content, created_at FROM latest_human_entries
+         )
+         SELECT session_id, content, MAX(created_at) AS created_at
+         FROM candidates
          GROUP BY session_id
          ORDER BY created_at DESC
          LIMIT ?2",
@@ -419,12 +512,14 @@ pub fn search_all_sessions(query: &str, limit: i64) -> SqliteResult<Vec<CrossSes
     Ok(rows
         .into_iter()
         .enumerate()
-        .map(|(idx, (session_id, content, timestamp))| CrossSessionSearchHit {
-            session_id,
-            snippet: build_excerpt(&content, query),
-            timestamp,
-            rank: idx as f64,
-        })
+        .map(
+            |(idx, (session_id, content, timestamp))| CrossSessionSearchHit {
+                session_id,
+                snippet: build_excerpt(&content, query),
+                timestamp,
+                rank: idx as f64,
+            },
+        )
         .collect())
 }
 
@@ -432,7 +527,7 @@ pub fn search_all_sessions(query: &str, limit: i64) -> SqliteResult<Vec<CrossSes
 pub fn get_session_metadata(session_id: &str) -> SqliteResult<Option<SessionMetadata>> {
     let conn = get_connection()?;
     let mut stmt = conn.prepare_cached(
-        "SELECT session_id, event_count, cached_at, time_range_start, time_range_end, specs_json
+        "SELECT session_id, event_count, cached_at, content_revision, time_range_start, time_range_end, specs_json
          FROM sessions WHERE session_id = ?1",
     )?;
 
@@ -441,9 +536,10 @@ pub fn get_session_metadata(session_id: &str) -> SqliteResult<Option<SessionMeta
             session_id: row.get(0)?,
             event_count: row.get(1)?,
             cached_at: row.get(2)?,
-            time_range_start: row.get(3)?,
-            time_range_end: row.get(4)?,
-            specs_json: row.get(5)?,
+            content_revision: row.get(3)?,
+            time_range_start: row.get(4)?,
+            time_range_end: row.get(5)?,
+            specs_json: row.get(6)?,
         })
     });
 
@@ -539,7 +635,7 @@ pub fn clear_old_sessions(max_age_hours: i64) -> SqliteResult<i64> {
 pub fn get_all_sessions() -> SqliteResult<Vec<SessionMetadata>> {
     let conn = get_connection()?;
     let mut stmt = conn.prepare(
-        "SELECT session_id, event_count, cached_at, time_range_start, time_range_end, specs_json
+        "SELECT session_id, event_count, cached_at, content_revision, time_range_start, time_range_end, specs_json
          FROM sessions ORDER BY cached_at DESC",
     )?;
 
@@ -549,9 +645,10 @@ pub fn get_all_sessions() -> SqliteResult<Vec<SessionMetadata>> {
                 session_id: row.get(0)?,
                 event_count: row.get(1)?,
                 cached_at: row.get(2)?,
-                time_range_start: row.get(3)?,
-                time_range_end: row.get(4)?,
-                specs_json: row.get(5)?,
+                content_revision: row.get(3)?,
+                time_range_start: row.get(4)?,
+                time_range_end: row.get(5)?,
+                specs_json: row.get(6)?,
             })
         })?
         .collect::<SqliteResult<Vec<_>>>()?;
@@ -595,13 +692,14 @@ pub(crate) fn update_session_metadata(conn: &Connection, session_id: &str) -> Sq
         .unwrap_or((None, None));
 
     conn.execute(
-        "INSERT INTO sessions (session_id, event_count, cached_at, time_range_start, time_range_end, specs_json)
+        "INSERT INTO sessions (session_id, event_count, cached_at, content_revision, time_range_start, time_range_end, specs_json)
          VALUES (?1,
                  (SELECT COUNT(*) FROM events WHERE session_id = ?1),
-                 ?2, ?3, ?4, NULL)
+                 ?2, 1, ?3, ?4, NULL)
          ON CONFLICT(session_id) DO UPDATE SET
              event_count = excluded.event_count,
              cached_at   = excluded.cached_at,
+             content_revision = sessions.content_revision + 1,
              time_range_start = excluded.time_range_start,
              time_range_end   = excluded.time_range_end",
         params![session_id, now, time_range.0, time_range.1],
@@ -660,9 +758,16 @@ pub fn save_session(session: &CachedSession) -> SqliteResult<()> {
 
         let now = Utc::now().timestamp();
         tx.execute(
-            "INSERT OR REPLACE INTO sessions
-                 (session_id, event_count, cached_at, time_range_start, time_range_end, specs_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO sessions
+                 (session_id, event_count, cached_at, content_revision, time_range_start, time_range_end, specs_json)
+             VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6)
+             ON CONFLICT(session_id) DO UPDATE SET
+                 event_count = excluded.event_count,
+                 cached_at = excluded.cached_at,
+                 content_revision = sessions.content_revision + 1,
+                 time_range_start = excluded.time_range_start,
+                 time_range_end = excluded.time_range_end,
+                 specs_json = excluded.specs_json",
             params![
                 session.session_id,
                 persisted_count,
@@ -810,6 +915,198 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&root);
         result
+    }
+
+    fn cached_event(session_id: &str, id: &str, created_at: &str) -> CachedEvent {
+        CachedEvent {
+            id: id.to_string(),
+            session_id: session_id.to_string(),
+            event_type: "raw".to_string(),
+            function_name: Some("user_message".to_string()),
+            thread_id: None,
+            args_json: "{}".to_string(),
+            result_json: "{}".to_string(),
+            content: id.to_string(),
+            created_at: created_at.to_string(),
+            meta_json: None,
+            history_sequence: None,
+        }
+    }
+
+    #[test]
+    fn save_events_incremental_batch_does_not_shrink_cached_time_range() {
+        with_temp_orgii_home(|| {
+            let conn = get_connection().expect("open sessions DB");
+            super::super::schema::init_session_tables(&conn).expect("init session schema");
+            drop(conn);
+
+            let session_id = "incremental-range-session";
+            let t1 = "2026-07-17T00:00:01.000Z";
+            let t2 = "2026-07-17T00:00:02.000Z";
+            let t3 = "2026-07-17T00:00:03.000Z";
+
+            save_events(
+                session_id,
+                &[
+                    cached_event(session_id, "event-1", t1),
+                    cached_event(session_id, "event-3", t3),
+                ],
+            )
+            .expect("seed oldest and newest events");
+            save_events(session_id, &[cached_event(session_id, "event-2", t2)])
+                .expect("save an incremental middle event");
+
+            let metadata = get_session_metadata(session_id)
+                .expect("load session metadata")
+                .expect("session metadata exists");
+            assert_eq!(metadata.event_count, 3);
+            assert_eq!(metadata.time_range_start.as_deref(), Some(t1));
+            assert_eq!(metadata.time_range_end.as_deref(), Some(t3));
+        });
+    }
+
+    #[test]
+    fn content_revision_advances_only_when_transcript_content_changes() {
+        with_temp_orgii_home(|| {
+            let conn = get_connection().expect("open sessions DB");
+            super::super::schema::init_session_tables(&conn).expect("init session schema");
+            drop(conn);
+
+            let session_id = "durable-content-revision-session";
+            let event = cached_event(session_id, "event-1", "2026-07-17T00:00:01.000Z");
+            save_events(session_id, std::slice::from_ref(&event)).expect("seed event");
+            let first = get_session_metadata(session_id)
+                .expect("read first revision")
+                .expect("metadata exists")
+                .content_revision;
+
+            save_events(session_id, std::slice::from_ref(&event))
+                .expect("resubmit unchanged event");
+            let unchanged = get_session_metadata(session_id)
+                .expect("read unchanged revision")
+                .expect("metadata exists")
+                .content_revision;
+            assert_eq!(unchanged, first);
+
+            let mut changed = event;
+            changed.content = "changed".to_string();
+            save_events(session_id, &[changed]).expect("update event content");
+            let updated = get_session_metadata(session_id)
+                .expect("read updated revision")
+                .expect("metadata exists")
+                .content_revision;
+            assert!(updated > unchanged);
+        });
+    }
+
+    #[test]
+    fn deferred_import_publishes_metadata_only_when_finalized() {
+        with_temp_orgii_home(|| {
+            let conn = get_connection().expect("open sessions DB");
+            super::super::schema::init_session_tables(&conn).expect("init session schema");
+            drop(conn);
+
+            let session_id = "deferred-import-session";
+            let t1 = "2026-07-17T00:00:01.000Z";
+            let t2 = "2026-07-17T00:00:02.000Z";
+            let t3 = "2026-07-17T00:00:03.000Z";
+
+            save_events_deferred(
+                session_id,
+                &[
+                    cached_event(session_id, "event-1", t1),
+                    cached_event(session_id, "event-2", t2),
+                ],
+            )
+            .expect("append first import page");
+            save_events_deferred(session_id, &[cached_event(session_id, "event-3", t3)])
+                .expect("append second import page");
+
+            assert!(
+                get_session_metadata(session_id)
+                    .expect("read unpublished metadata")
+                    .is_none(),
+                "partial imports must not become visible as complete sessions"
+            );
+
+            let finalized =
+                finalize_deferred_event_import(session_id).expect("finalize deferred import");
+            assert_eq!(finalized, 3);
+            let metadata = get_session_metadata(session_id)
+                .expect("load finalized metadata")
+                .expect("finalized metadata exists");
+            assert_eq!(metadata.event_count, 3);
+            assert_eq!(metadata.time_range_start.as_deref(), Some(t1));
+            assert_eq!(metadata.time_range_end.as_deref(), Some(t3));
+            assert_eq!(
+                load_events(session_id)
+                    .expect("load finalized events")
+                    .into_iter()
+                    .map(|event| event.id)
+                    .collect::<Vec<_>>(),
+                ["event-1", "event-2", "event-3"]
+            );
+        });
+    }
+
+    #[test]
+    fn count_events_counts_without_loading() {
+        with_temp_orgii_home(|| {
+            {
+                let conn = get_connection().expect("open sessions DB");
+                super::super::schema::init_session_tables(&conn).expect("init session schema");
+            }
+            let session_id = "count-events-session";
+            assert_eq!(count_events(session_id).expect("count empty"), 0);
+            save_events(
+                session_id,
+                &[
+                    cached_event(session_id, "event-1", "2026-07-17T00:00:01.000Z"),
+                    cached_event(session_id, "event-2", "2026-07-17T00:00:02.000Z"),
+                ],
+            )
+            .expect("seed events");
+            assert_eq!(count_events(session_id).expect("count seeded"), 2);
+            assert_eq!(
+                count_events("some-other-session").expect("count unrelated"),
+                0
+            );
+        });
+    }
+
+    #[test]
+    fn save_events_replacement_recomputes_cached_time_range_from_all_events() {
+        with_temp_orgii_home(|| {
+            let conn = get_connection().expect("open sessions DB");
+            super::super::schema::init_session_tables(&conn).expect("init session schema");
+            drop(conn);
+
+            let session_id = "replacement-range-session";
+            let t1 = "2026-07-17T00:00:01.000Z";
+            let t2 = "2026-07-17T00:00:02.000Z";
+            let t3 = "2026-07-17T00:00:03.000Z";
+            let t4 = "2026-07-17T00:00:04.000Z";
+
+            save_events(
+                session_id,
+                &[
+                    cached_event(session_id, "event-1", t1),
+                    cached_event(session_id, "event-2", t2),
+                    cached_event(session_id, "event-3", t3),
+                ],
+            )
+            .expect("seed three events");
+
+            save_events(session_id, &[cached_event(session_id, "event-1", t4)])
+                .expect("replace the oldest event with a newer timestamp");
+
+            let metadata = get_session_metadata(session_id)
+                .expect("load session metadata")
+                .expect("session metadata exists");
+            assert_eq!(metadata.event_count, 3);
+            assert_eq!(metadata.time_range_start.as_deref(), Some(t2));
+            assert_eq!(metadata.time_range_end.as_deref(), Some(t4));
+        });
     }
 
     #[test]
@@ -992,8 +1289,18 @@ mod tests {
             }
             let session_id = "upsert-noop-session";
             let batch = vec![
-                test_event("evt-a", session_id, "first message", "2026-07-16T00:00:00.000Z"),
-                test_event("evt-b", session_id, "second message", "2026-07-16T00:00:01.000Z"),
+                test_event(
+                    "evt-a",
+                    session_id,
+                    "first message",
+                    "2026-07-16T00:00:00.000Z",
+                ),
+                test_event(
+                    "evt-b",
+                    session_id,
+                    "second message",
+                    "2026-07-16T00:00:01.000Z",
+                ),
             ];
 
             save_events(session_id, &batch).expect("initial save");
@@ -1072,6 +1379,69 @@ mod tests {
             assert_eq!(all.len(), 1);
             assert_eq!(all[0].session_id, session_id);
             assert!(all[0].snippet.contains("<mark>discount</mark>"));
+        });
+    }
+
+    #[test]
+    fn cross_session_search_includes_human_session_notes() {
+        with_temp_orgii_home(|| {
+            let conn = get_connection().expect("open sessions DB");
+            conn.execute_batch(
+                "PRAGMA foreign_keys = ON;
+                 CREATE TABLE agent_sessions (session_id TEXT PRIMARY KEY);",
+            )
+            .expect("create canonical session parent");
+            super::super::schema::init_session_tables(&conn).expect("init session schema");
+            conn.execute(
+                "INSERT INTO agent_sessions (session_id) VALUES (?1)",
+                ["humansession-search-notes"],
+            )
+            .expect("insert Human session parent");
+            conn.execute(
+                "INSERT INTO human_session_entries
+                 (id, session_id, body, created_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    "humanentry-search-notes",
+                    "humansession-search-notes",
+                    "Remember to update index.ts before release",
+                    "2026-07-30T02:00:00.000Z"
+                ],
+            )
+            .expect("insert Human session note");
+            drop(conn);
+            save_events(
+                "humansession-search-notes",
+                &[test_event(
+                    "event-search-notes",
+                    "humansession-search-notes",
+                    "An older index.ts mention",
+                    "2026-07-30T01:00:00.000Z",
+                )],
+            )
+            .expect("insert older matching event");
+
+            let hits = search_all_sessions("index.ts", 10).expect("search Human session notes");
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0].session_id, "humansession-search-notes");
+            assert!(
+                hits[0]
+                    .snippet
+                    .contains("Remember to update <mark>index.ts</mark>"),
+                "the newest matching Human note should win over an older event"
+            );
+        });
+    }
+
+    #[test]
+    fn cross_session_search_skips_empty_and_non_positive_requests() {
+        with_temp_orgii_home(|| {
+            assert!(search_all_sessions("   ", 30)
+                .expect("skip blank search")
+                .is_empty());
+            assert!(search_all_sessions("content", 0)
+                .expect("skip zero-limit search")
+                .is_empty());
         });
     }
 }

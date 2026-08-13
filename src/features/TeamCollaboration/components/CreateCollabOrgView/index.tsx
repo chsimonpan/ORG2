@@ -1,57 +1,59 @@
-import { useAtom, useSetAtom } from "jotai";
-import React, { useCallback, useMemo, useState } from "react";
+import { useAtomValue, useSetAtom } from "jotai";
+import { Cloud, Laptop, LogIn, Plus } from "lucide-react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
 
 import { projectApi } from "@src/api/http/project";
 import type { ProjectOrg } from "@src/api/http/project";
 import Button from "@src/components/Button";
 import Input from "@src/components/Input";
 import Message from "@src/components/Message";
-import { buildSettingsPath } from "@src/config/mainAppPaths";
+import { DETAIL_PANEL_TOKENS } from "@src/config/detailPanelTokens";
+import { org2CloudAuthAtom } from "@src/features/Org2Cloud/org2CloudAuthAtom";
+import { cloudManagementErrorMessage } from "@src/features/Org2Cloud/org2CloudOrgManagement";
 import {
-  commitRefreshedAuth,
-  org2CloudAuthAtom,
-} from "@src/features/Org2Cloud/org2CloudAuthAtom";
-import { ensureFreshSession } from "@src/features/Org2Cloud/org2CloudClient";
+  CloudOrgMembershipActionFailure,
+  useCloudOrgMembershipActions,
+} from "@src/features/Org2Cloud/useCloudOrgMembershipActions";
+import { useOrg2CloudSignIn } from "@src/features/Org2Cloud/useOrg2CloudSignIn";
 import {
-  acceptCloudInvite,
-  createCloudInvite,
-  createCloudOrg,
-} from "@src/features/Org2Cloud/org2CloudManagementClient";
-import {
-  cloudManagementErrorMessage,
-  parseCloudInviteInput,
-} from "@src/features/Org2Cloud/org2CloudOrgManagement";
-import { useRefetchOrg2CloudOrgs } from "@src/features/Org2Cloud/org2CloudOrgsAtom";
-import { ensureProjectOrgForCloudOrg } from "@src/features/Org2Cloud/org2CloudProjectOrgAlias";
-import {
+  SECTION_ACTION_GAP_CLASSES,
   SectionContainer,
   SectionRow,
 } from "@src/modules/shared/layouts/SectionLayout";
-import { PANEL_FOOTER_TOKENS } from "@src/modules/shared/layouts/blocks";
+import { GUIDE_TARGETS } from "@src/scaffold/Tutorials/guideTargets";
 import SelectionGrid from "@src/scaffold/WizardSystem/primitives/SelectionGrid";
 import type { SelectionGridOption } from "@src/scaffold/WizardSystem/primitives/SelectionGrid";
-import { openCloudOrgManagementInChatPanelTabAtom } from "@src/store/chatPanel/chatPanelTabsAtom";
+import { openOrganizationInChatPanelTabAtom } from "@src/store/chatPanel/chatPanelTabsAtom";
 import {
-  INVITE_KIND,
-  createInviteDefaults,
-} from "@src/store/collaboration/inviteDefaults";
+  CHAT_PANEL_COLLAB_ORG_MODE,
+  CHAT_PANEL_COLLAB_ORG_SOURCE,
+  type ChatPanelCollabOrgMode,
+  type ChatPanelCollabOrgSource,
+  chatPanelCollabOrgCreateIntentAtom,
+} from "@src/store/ui/chatPanelAtom";
+import { clearGuideHighlightTargetAtom } from "@src/store/ui/guideHighlightAtom";
 
-const LOCAL_SOURCE = "local";
+const LOCAL_SOURCE = CHAT_PANEL_COLLAB_ORG_SOURCE.LOCAL;
 // Managed ORG2 Cloud org (create_org / accept_invite against the managed
 // backend — identity comes from the cloud account).
-const CLOUD_SOURCE = "cloud";
-const CREATE_MODE = "create";
-const JOIN_MODE = "join";
+const CLOUD_SOURCE = CHAT_PANEL_COLLAB_ORG_SOURCE.CLOUD;
+const CREATE_MODE = CHAT_PANEL_COLLAB_ORG_MODE.CREATE;
+const JOIN_MODE = CHAT_PANEL_COLLAB_ORG_MODE.JOIN;
 
 const COLLAB_FORM_CONTROL_STYLE = {
   width: "100%",
   maxWidth: "100%",
 } as const;
 
-type CreateOrgSource = typeof LOCAL_SOURCE | typeof CLOUD_SOURCE;
-type CreateCollabOrgMode = typeof CREATE_MODE | typeof JOIN_MODE;
+type CreateOrgSource = ChatPanelCollabOrgSource;
+type CreateCollabOrgMode = ChatPanelCollabOrgMode;
 
 export type CreatedOrgResult = {
   source: typeof LOCAL_SOURCE;
@@ -68,34 +70,68 @@ const CreateCollabOrgView: React.FC<CreateCollabOrgViewProps> = ({
   onCreated,
 }) => {
   const { t } = useTranslation(["navigation", "common"]);
-  const [cloudAuth, setCloudAuth] = useAtom(org2CloudAuthAtom);
-  const refetchCloudOrgs = useRefetchOrg2CloudOrgs();
+  const cloudAuth = useAtomValue(org2CloudAuthAtom);
+  const createIntent = useAtomValue(chatPanelCollabOrgCreateIntentAtom);
+  const setCreateIntent = useSetAtom(chatPanelCollabOrgCreateIntentAtom);
+  const clearGuideHighlightTarget = useSetAtom(clearGuideHighlightTargetAtom);
+  const { createOrganization, joinOrganization } =
+    useCloudOrgMembershipActions();
 
-  const [source, setSource] = useState<CreateOrgSource | null>(null);
-  const [mode, setMode] = useState<CreateCollabOrgMode>(CREATE_MODE);
+  const [source, setSource] = useState<CreateOrgSource | null>(
+    () => createIntent?.source ?? null
+  );
+  const [mode, setMode] = useState<CreateCollabOrgMode>(
+    () => createIntent?.mode ?? CREATE_MODE
+  );
   const [orgName, setOrgName] = useState("");
   const [inviteInput, setInviteInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
-  const openCloudOrgManagementTab = useSetAtom(
-    openCloudOrgManagementInChatPanelTabAtom
-  );
+  const openCloudSignIn = useOrg2CloudSignIn();
+  const openOrganizationTab = useSetAtom(openOrganizationInChatPanelTabAtom);
+  const orgNameInputRef = useRef<HTMLInputElement>(null);
 
-  // "Use ORG2 Cloud" opens the Collaboration section where managed sign-in lives.
-  const handleUseOrg2Cloud = useCallback(() => {
-    navigate(buildSettingsPath({ section: "collaboration" }));
-  }, [navigate]);
+  useEffect(() => {
+    if (!createIntent) return;
+    setSource(createIntent.source);
+    setMode(createIntent.mode);
+    setError(null);
+  }, [createIntent]);
+
+  useEffect(() => {
+    if (
+      !createIntent ||
+      source !== createIntent.source ||
+      mode !== createIntent.mode
+    ) {
+      return;
+    }
+    const input = orgNameInputRef.current;
+    if (!input) return;
+    input.focus();
+    setCreateIntent(null);
+  }, [createIntent, mode, setCreateIntent, source]);
+
+  const clearOrgNameGuide = useCallback(() => {
+    clearGuideHighlightTarget(GUIDE_TARGETS.COLLAB_ORG_NAME_INPUT);
+  }, [clearGuideHighlightTarget]);
+
+  const handleCancel = useCallback(() => {
+    clearOrgNameGuide();
+    onCancel();
+  }, [clearOrgNameGuide, onCancel]);
 
   const sourceOptions = useMemo<SelectionGridOption<CreateOrgSource>[]>(
     () => [
       {
         key: LOCAL_SOURCE,
         label: t("navigation:collaboration.localOrg"),
+        icon: Laptop,
       },
       {
         key: CLOUD_SOURCE,
         label: t("navigation:cloud.orgManagement.create.sourceCloud"),
+        icon: Cloud,
         dataTestId: "create-collab-org-source-cloud",
       },
     ],
@@ -107,11 +143,13 @@ const CreateCollabOrgView: React.FC<CreateCollabOrgViewProps> = ({
       {
         key: CREATE_MODE,
         label: t("navigation:collaboration.createOrg"),
+        icon: Plus,
         dataTestId: "create-collab-org-mode-create",
       },
       {
         key: JOIN_MODE,
         label: t("navigation:collaboration.joinOrg"),
+        icon: LogIn,
         dataTestId: "create-collab-org-mode-join",
       },
     ],
@@ -150,85 +188,38 @@ const CreateCollabOrgView: React.FC<CreateCollabOrgViewProps> = ({
   // management client (JWT from the cloud account), then refresh
   // org2CloudOrgsAtom so the sidebar selector picks the org up immediately.
   const handleCloudSubmit = useCallback(async () => {
-    const current = cloudAuth;
-    if (!current) return;
-    const fresh = await ensureFreshSession(current);
-    if (!fresh) throw new Error(t("navigation:cloud.orgPanel.loadError"));
-    commitRefreshedAuth(setCloudAuth, current, fresh);
-
     if (mode === CREATE_MODE) {
-      const { orgId } = await createCloudOrg(fresh.accessToken, orgName.trim());
-      // Project-org alias (cloud-parity Phase B): local project/work-item
-      // mutations under this org route into the collab outbox from the very
-      // first edit. Best-effort — the sync engine re-ensures it per start.
-      try {
-        await ensureProjectOrgForCloudOrg({ orgId, name: orgName.trim() });
-      } catch {
-        // Non-fatal: the engine's per-org pass self-heals the alias.
-      }
-      // Bootstrap invite (design §8.1): multi-use so pasting the link into a
-      // team channel doesn't lock out member #2. Listed in the org panel's
-      // Invites section, which opens right below.
-      try {
-        const defaults = createInviteDefaults(INVITE_KIND.BOOTSTRAP);
-        await createCloudInvite(fresh.accessToken, {
-          orgId,
-          role: defaults.role,
-          maxUses: defaults.usageLimit,
-          expiresAt: defaults.expiresAt,
-        });
-      } catch {
-        // Org creation already succeeded; invites can be minted later from
-        // the org panel.
-      }
-      await refetchCloudOrgs({
-        until: (orgs) => orgs.some((org) => org.orgId === orgId),
-      });
+      const created = await createOrganization(orgName);
       Message.success(t("navigation:cloud.orgManagement.create.createdToast"));
       // Land straight in the org management panel (invites, members, repo
       // scopes) instead of a dead-end success screen.
-      openCloudOrgManagementTab({
-        cloudOrg: { orgId },
+      openOrganizationTab({
+        organization: {
+          kind: "cloud",
+          cloudOrg: { orgId: created.orgId },
+        },
         title: t("navigation:collaboration.manageOrg"),
       });
+      clearOrgNameGuide();
       return;
     }
 
-    const inviteCode = parseCloudInviteInput(inviteInput);
-    if (!inviteCode) {
-      throw new Error(t("navigation:cloud.orgManagement.errors.inviteInvalid"));
-    }
-    const result = await acceptCloudInvite(fresh.accessToken, inviteCode);
-    const orgs = await refetchCloudOrgs({
-      until: (items) => items.some((org) => org.orgId === result.orgId),
-    });
-    const joined = orgs.find((org) => org.orgId === result.orgId);
-    if (joined) {
-      // Project-org alias on join (cloud-parity Phase B); best-effort, the
-      // engine re-ensures it per start (also covers `joined` not found).
-      try {
-        await ensureProjectOrgForCloudOrg(joined);
-      } catch {
-        // Non-fatal: the engine's per-org pass self-heals the alias.
-      }
-    }
+    const joined = await joinOrganization(inviteInput);
     Message.success(
-      joined
-        ? t("navigation:cloud.orgManagement.join.joinedToast", {
-            org: joined.name,
-          })
-        : t("navigation:cloud.orgManagement.join.joinedFallbackToast")
+      t("navigation:cloud.orgManagement.join.joinedToast", {
+        org: joined.name,
+      })
     );
     onCancel();
   }, [
-    cloudAuth,
+    createOrganization,
+    clearOrgNameGuide,
     inviteInput,
+    joinOrganization,
     mode,
     onCancel,
-    openCloudOrgManagementTab,
+    openOrganizationTab,
     orgName,
-    refetchCloudOrgs,
-    setCloudAuth,
     t,
   ]);
 
@@ -239,6 +230,7 @@ const CreateCollabOrgView: React.FC<CreateCollabOrgViewProps> = ({
     try {
       if (source === LOCAL_SOURCE) {
         const org = await projectApi.createOrg({ name: orgName });
+        clearOrgNameGuide();
         onCreated?.({ source: LOCAL_SOURCE, org });
         return;
       }
@@ -247,87 +239,109 @@ const CreateCollabOrgView: React.FC<CreateCollabOrgViewProps> = ({
     } catch (err) {
       // Cloud failures carry §22 ORG2_* codes (ORG2_INVITE_EXPIRED,
       // ORG2_QUOTA_EXCEEDED, …) — surface the specific translated message.
-      setError(
-        source === CLOUD_SOURCE
-          ? cloudManagementErrorMessage(err, t)
-          : err instanceof Error
-            ? err.message
-            : String(err)
-      );
+      if (
+        source === CLOUD_SOURCE &&
+        err instanceof CloudOrgMembershipActionFailure
+      ) {
+        setError(
+          err.code === "invalid_invite"
+            ? t("navigation:cloud.orgManagement.errors.inviteInvalid")
+            : err.code === "session_expired"
+              ? t("navigation:cloud.sessionExpired")
+              : t("navigation:cloud.orgPanel.loadError")
+        );
+      } else {
+        setError(
+          source === CLOUD_SOURCE
+            ? cloudManagementErrorMessage(err, t)
+            : err instanceof Error
+              ? err.message
+              : String(err)
+        );
+      }
     } finally {
       setLoading(false);
     }
-  }, [canSubmit, handleCloudSubmit, onCreated, orgName, source, t]);
+  }, [
+    canSubmit,
+    clearOrgNameGuide,
+    handleCloudSubmit,
+    onCreated,
+    orgName,
+    source,
+    t,
+  ]);
 
   return (
     <div className="flex h-full w-full min-w-0 flex-col overflow-hidden">
       <div className="min-h-0 flex-1 overflow-hidden">
         <div
-          className="mx-auto flex h-full w-full max-w-[932px] flex-col gap-4 overflow-y-auto px-4"
+          className={`${DETAIL_PANEL_TOKENS.headerWidth} flex h-full flex-col gap-4 overflow-y-auto px-4`}
           data-testid="create-collab-org-body"
         >
-          <>
-            <SectionContainer bare>
+          <SectionContainer>
+            <SectionRow
+              label={t("navigation:collaboration.orgSource")}
+              required
+              equalColumns
+            >
+              <SelectionGrid
+                options={sourceOptions}
+                selected={source}
+                columns={2}
+                cardVariant="subtle"
+                compactCards
+                onSelect={setSource}
+              />
+            </SectionRow>
+
+            {source === CLOUD_SOURCE && (
               <SectionRow
-                label={t("navigation:collaboration.orgSource")}
-                layout="vertical"
-                required
+                label={t("navigation:collaboration.setupMode")}
+                equalColumns
               >
                 <SelectionGrid
-                  options={sourceOptions}
-                  selected={source}
+                  options={modeOptions}
+                  selected={mode}
                   columns={2}
                   cardVariant="subtle"
                   compactCards
-                  onSelect={setSource}
+                  onSelect={setMode}
                 />
               </SectionRow>
-            </SectionContainer>
-
-            {source === CLOUD_SOURCE && (
-              <SectionContainer bare>
-                <SectionRow
-                  label={t("navigation:collaboration.setupMode")}
-                  layout="vertical"
-                >
-                  <SelectionGrid
-                    options={modeOptions}
-                    selected={mode}
-                    columns={2}
-                    cardVariant="subtle"
-                    compactCards
-                    onSelect={setMode}
-                  />
-                </SectionRow>
-              </SectionContainer>
             )}
 
             {source === CLOUD_SOURCE && !cloudAuth && (
-              <SectionContainer bare>
+              <SectionRow showHeader={false}>
                 <div
                   className="flex flex-wrap items-center gap-2 rounded-md border border-border-1 bg-fill-2 px-3 py-2"
                   data-testid="create-cloud-org-sign-in-hint"
                 >
-                  <span className="min-w-0 flex-1 text-[12px] leading-[18px] text-text-2">
+                  <span className="min-w-0 flex-1 text-xs leading-[18px] text-text-2">
                     {t("navigation:cloud.orgManagement.create.signInFirst")}
                   </span>
-                  <Button size="small" onClick={handleUseOrg2Cloud}>
-                    {t("navigation:cloud.orgManagement.create.openSettings")}
+                  <Button size="small" onClick={openCloudSignIn}>
+                    {t("navigation:cloud.signIn")}
                   </Button>
                 </div>
-              </SectionContainer>
+              </SectionRow>
             )}
 
-            {source !== null && (
-              <SectionContainer bare>
-                {mode === CREATE_MODE || source === LOCAL_SOURCE ? (
-                  <SectionRow
-                    label={t("navigation:collaboration.orgName")}
-                    layout="vertical"
-                    required
+            {source !== null &&
+              (mode === CREATE_MODE || source === LOCAL_SOURCE ? (
+                <SectionRow
+                  label={t("navigation:collaboration.orgName")}
+                  layout="vertical"
+                  required
+                >
+                  <div
+                    className="w-full"
+                    data-guide-target={GUIDE_TARGETS.COLLAB_ORG_NAME_INPUT}
                   >
                     <Input
+                      ref={orgNameInputRef}
                       data-testid="create-collab-org-name"
+                      aria-label={t("navigation:collaboration.orgName")}
                       value={orgName}
                       onChange={setOrgName}
                       placeholder={t(
@@ -335,50 +349,54 @@ const CreateCollabOrgView: React.FC<CreateCollabOrgViewProps> = ({
                       )}
                       style={COLLAB_FORM_CONTROL_STYLE}
                     />
-                  </SectionRow>
-                ) : (
-                  <SectionRow
-                    label={t("navigation:collaboration.inviteCode")}
-                    layout="vertical"
-                    required
-                  >
-                    <Input
-                      data-testid="create-collab-org-invite"
-                      value={inviteInput}
-                      onChange={setInviteInput}
-                      placeholder={t(
-                        "navigation:collaboration.inviteCodePlaceholder"
-                      )}
-                      style={COLLAB_FORM_CONTROL_STYLE}
-                    />
-                  </SectionRow>
-                )}
-              </SectionContainer>
+                  </div>
+                </SectionRow>
+              ) : (
+                <SectionRow
+                  label={t("navigation:collaboration.inviteCode")}
+                  layout="vertical"
+                  required
+                >
+                  <Input
+                    data-testid="create-collab-org-invite"
+                    value={inviteInput}
+                    onChange={setInviteInput}
+                    placeholder={t(
+                      "navigation:collaboration.inviteCodePlaceholder"
+                    )}
+                    style={COLLAB_FORM_CONTROL_STYLE}
+                  />
+                </SectionRow>
+              ))}
+
+            {error && (
+              <SectionRow showHeader={false}>
+                <p className="text-sm text-danger-6">{error}</p>
+              </SectionRow>
             )}
-          </>
 
-          {error && <p className="text-sm text-danger-6">{error}</p>}
+            <SectionRow
+              showHeader={false}
+              className={`${SECTION_ACTION_GAP_CLASSES} justify-end`}
+            >
+              <Button variant="secondary" size="small" onClick={handleCancel}>
+                {t("common:actions.cancel")}
+              </Button>
+              <Button
+                variant="primary"
+                size="small"
+                onClick={() => void handleSubmit()}
+                disabled={!canSubmit}
+                loading={loading}
+                data-testid="create-collab-org-submit"
+              >
+                {source === LOCAL_SOURCE || mode === CREATE_MODE
+                  ? t("navigation:collaboration.createOrg")
+                  : t("navigation:collaboration.joinOrg")}
+              </Button>
+            </SectionRow>
+          </SectionContainer>
         </div>
-      </div>
-
-      <div className={`${PANEL_FOOTER_TOKENS.container} justify-end`}>
-        <>
-          <Button variant="secondary" size="small" onClick={onCancel}>
-            {t("common:actions.cancel")}
-          </Button>
-          <Button
-            variant="primary"
-            size="small"
-            onClick={() => void handleSubmit()}
-            disabled={!canSubmit}
-            loading={loading}
-            data-testid="create-collab-org-submit"
-          >
-            {source === LOCAL_SOURCE || mode === CREATE_MODE
-              ? t("navigation:collaboration.createOrg")
-              : t("navigation:collaboration.joinOrg")}
-          </Button>
-        </>
       </div>
     </div>
   );

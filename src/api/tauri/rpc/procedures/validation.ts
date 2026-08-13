@@ -24,6 +24,28 @@ export const validation = {
     .output(schemas.validation.KeyInfoSchema.nullable())
     .build(),
 
+  getKeyQuotaRefreshStatus: defineProcedure("get_key_quota_refresh_status")
+    .input(schemas.validation.GetKeyQuotaRefreshStatusInput)
+    .output(schemas.validation.KeyQuotaRefreshStatusInfoSchema.nullable())
+    .build(),
+
+  cursorSyncBillingUsage: defineProcedure("cursor_sync_billing_usage")
+    .input(schemas.validation.CursorBillingUsageInput)
+    .output(schemas.validation.CursorBillingUsageSnapshotSchema)
+    .build(),
+
+  cursorReadBillingUsagePage: defineProcedure("cursor_read_billing_usage_page")
+    .input(schemas.validation.CursorBillingUsagePageInput)
+    .output(schemas.validation.CursorBillingUsagePageSchema)
+    .build(),
+
+  cursorArchiveBillingUsageCache: defineProcedure(
+    "cursor_archive_billing_usage_cache"
+  )
+    .input(schemas.validation.CursorArchiveBillingUsageCacheInput)
+    .output(schemas.validation.ArchivedCursorBillingUsageCacheSchema)
+    .build(),
+
   listKeys: defineProcedure("list_keys")
     .output(z.array(schemas.validation.KeyInfoSchema))
     .build(),
@@ -45,11 +67,6 @@ export const validation = {
 
   saveKey: defineProcedure("save_key")
     .input(schemas.validation.SaveKeyInput)
-    .output(schemas.validation.KeyInfoSchema)
-    .build(),
-
-  updateModelRuntimeSettings: defineProcedure("update_model_runtime_settings")
-    .input(schemas.validation.UpdateModelRuntimeSettingsInput)
     .output(schemas.validation.KeyInfoSchema)
     .build(),
 
@@ -108,6 +125,11 @@ export const validation = {
     .output(schemas.validation.AutoDetectResultSchema)
     .build(),
 
+  scanCliVersion: defineProcedure("scan_cli_version")
+    .input(schemas.validation.ScanCliVersionInput)
+    .output(schemas.validation.CliVersionSnapshotSchema)
+    .build(),
+
   getAvailableAgents: defineProcedure("get_available_agents")
     .output(z.array(schemas.validation.AvailableAgentSchema))
     .build(),
@@ -133,16 +155,6 @@ export const validation = {
   oauthModelCatalog: defineProcedure("oauth_model_catalog")
     .input(schemas.validation.OAuthModelCatalogInput)
     .output(schemas.validation.OAuthModelCatalogResponseSchema)
-    .build(),
-
-  claudeCodeOauthListModels: defineProcedure("claude_code_oauth_list_models")
-    .input(schemas.validation.ClaudeCodeOauthListModelsInput)
-    .output(z.array(z.string()))
-    .build(),
-
-  codexOauthListModels: defineProcedure("codex_oauth_list_models")
-    .input(schemas.validation.CodexOauthListModelsInput)
-    .output(z.array(z.string()))
     .build(),
 
   refreshOauthToken: defineProcedure("refresh_oauth_token")

@@ -1,5 +1,4 @@
-import { getViewModeForRoute } from "@src/config/routeViewModeConfig";
-import { ROUTES } from "@src/config/routes";
+import { ROUTES, isWorkbenchPath } from "@src/config/routes";
 import type { StationMode } from "@src/store/ui/simulatorAtom";
 import type {
   WorkStationTab,
@@ -9,8 +8,16 @@ import { getInstrumentedStore } from "@src/util/core/state/instrumentedStore";
 
 const getStore = () => getInstrumentedStore();
 
+function isWorkbenchRoute() {
+  return isWorkbenchPath(window.location.pathname);
+}
+
 function isWorkStationRoute() {
-  return getViewModeForRoute(window.location.pathname) === "workStation";
+  const pathname = window.location.pathname;
+  return (
+    pathname === ROUTES.workStation.base.path ||
+    pathname.startsWith(`${ROUTES.workStation.base.path}/`)
+  );
 }
 
 function isCodeEditorRoute() {
@@ -102,26 +109,24 @@ async function shouldToggleMaximizedForActiveTab(
 
 export const WorkStationViewService = {
   /**
-   * Toggle the chat-panel slot's maximized state. Slot mode (session vs.
-   * settings) is left untouched — un-maximize returns the user to whatever
-   * the underlying workbench was showing, without a "previous mode" round-trip.
+   * Toggle the chat-panel slot's maximized state when the active tab permits
+   * Station access. Slot mode (session vs. settings) is left untouched.
    */
   async toggleChatPanelMaximized(): Promise<boolean> {
-    if (!isWorkStationRoute()) return false;
+    if (!isWorkbenchRoute()) return false;
 
-    const [{ toggleChatPanelMaximizedAtom }] = await Promise.all([
-      import("@src/store/ui/chatPanelAtom"),
-    ]);
+    const { toggleActiveChatPanelMaximizedAtom } =
+      await import("@src/store/chatPanel/chatPanelTabsAtom");
 
     const store = getStore();
-    store.set(toggleChatPanelMaximizedAtom);
-    return true;
+    return store.set(toggleActiveChatPanelMaximizedAtom, window.innerWidth);
   },
 
   async showWorkStation(): Promise<boolean> {
-    if (!isWorkStationRoute()) return false;
+    if (!isWorkbenchRoute()) return false;
 
     const [
+      { activeChatPanelTabAtom, isChatPanelTabStationAvailable },
       { stationModeAtom },
       {
         activeStationChatVisibleAtom,
@@ -129,11 +134,20 @@ export const WorkStationViewService = {
         stationChatVisibilityAtom,
       },
     ] = await Promise.all([
+      import("@src/store/chatPanel/chatPanelTabsAtom"),
       import("@src/store/ui/simulatorAtom"),
       import("@src/store/ui/chatPanelAtom"),
     ]);
 
     const store = getStore();
+    if (
+      !isChatPanelTabStationAvailable(
+        store.get(activeChatPanelTabAtom),
+        window.innerWidth
+      )
+    ) {
+      return false;
+    }
     if (store.get(chatPanelMaximizedAtom)) {
       store.set(chatPanelMaximizedAtom, false);
     }
@@ -153,14 +167,14 @@ export const WorkStationViewService = {
       ]);
 
     const store = getStore();
-    const { openKanbanChatPanelTabAtom } =
+    const { openWorkManagementChatPanelTabAtom } =
       await import("@src/store/chatPanel/chatPanelTabsAtom");
     const currentMode = store.get(stationModeAtom);
     const chatStationMode =
       currentMode === "agent-station" ? "agent-station" : "my-station";
     store.set(stationModeAtom, chatStationMode);
     store.set(activeStationChatVisibleAtom, chatStationMode, true);
-    store.set(openKanbanChatPanelTabAtom, {});
+    store.set(openWorkManagementChatPanelTabAtom, {});
     if (!isWorkStationRoute()) {
       dispatchNavigate(ROUTES.workStation.base.path);
     }
@@ -168,26 +182,39 @@ export const WorkStationViewService = {
   },
 
   async openStationMode(mode: StationMode): Promise<boolean> {
-    const [{ activeStationChatVisibleAtom }, { stationModeAtom }] =
-      await Promise.all([
-        import("@src/store/ui/chatPanelAtom"),
-        import("@src/store/ui/simulatorAtom"),
-      ]);
+    const [
+      { activeChatPanelTabAtom, isChatPanelTabStationAvailable },
+      { activeStationChatVisibleAtom },
+      { stationModeAtom },
+    ] = await Promise.all([
+      import("@src/store/chatPanel/chatPanelTabsAtom"),
+      import("@src/store/ui/chatPanelAtom"),
+      import("@src/store/ui/simulatorAtom"),
+    ]);
 
     const store = getStore();
+    if (
+      isWorkbenchRoute() &&
+      !isChatPanelTabStationAvailable(
+        store.get(activeChatPanelTabAtom),
+        window.innerWidth
+      )
+    ) {
+      return false;
+    }
 
     store.set(stationModeAtom, mode);
 
     await unmaximizeChatPanel();
     store.set(activeStationChatVisibleAtom, mode, true);
-    if (!isWorkStationRoute()) {
+    if (!isWorkbenchRoute()) {
       dispatchNavigate(ROUTES.workStation.base.path);
     }
     return true;
   },
 
   async toggleStationMode(): Promise<boolean> {
-    if (!isWorkStationRoute()) return false;
+    if (!isWorkbenchRoute()) return false;
 
     const { stationModeAtom } = await import("@src/store/ui/simulatorAtom");
 
@@ -199,7 +226,7 @@ export const WorkStationViewService = {
   },
 
   async toggleWorkstationSidebar(): Promise<boolean> {
-    if (!isWorkStationRoute()) return false;
+    if (!isWorkbenchRoute()) return false;
 
     const [
       { activeStatusBarCallbacksAtom },
@@ -221,17 +248,20 @@ export const WorkStationViewService = {
   },
 
   async openCodeEditorTab(tabId: string): Promise<boolean> {
-    const [{ stationModeAtom }, { queuePendingCodeEditorTab }] =
-      await Promise.all([
-        import("@src/store/ui/simulatorAtom"),
-        import("@src/store/workstation/tabs"),
-      ]);
+    const [
+      { stationModeAtom },
+      { presentedWorkstationWorkspaceKeyAtom, queuePendingCodeEditorTab },
+    ] = await Promise.all([
+      import("@src/store/ui/simulatorAtom"),
+      import("@src/store/workstation/tabs"),
+    ]);
 
     const store = getStore();
     const isAlreadyOnCodeEditorRoute = isCodeEditorRoute();
     await unmaximizeChatPanel();
     store.set(stationModeAtom, "my-station");
-    queuePendingCodeEditorTab(tabId);
+    const workspace = store.get(presentedWorkstationWorkspaceKeyAtom);
+    queuePendingCodeEditorTab(workspace, tabId);
     dispatchNavigate(ROUTES.workStation.code.path);
     if (isAlreadyOnCodeEditorRoute) {
       dispatchOpenCodeTab(tabId);
@@ -352,7 +382,7 @@ export const WorkStationViewService = {
     ]);
 
     if (
-      isWorkStationRoute() &&
+      isWorkbenchRoute() &&
       store.get(stationModeAtom) === "agent-station" &&
       !options?.forceCodeEditorSurface
     ) {

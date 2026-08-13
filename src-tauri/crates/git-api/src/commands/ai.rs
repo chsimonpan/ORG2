@@ -103,7 +103,7 @@ fn default_model_for(agent_type: &ModelType) -> &'static str {
         ModelType::ZenmuxApi => "deepseek/deepseek-chat",
         ModelType::DashscopeApi => "qwen-turbo",
         ModelType::MoonshotApi => "moonshot-v1-8k",
-        ModelType::MinimaxApi => "abab6.5s-chat",
+        ModelType::MinimaxApi => "MiniMax-M3",
         ModelType::ZhipuApi => "glm-4-flash",
         ModelType::VllmApi => "default",
         _ => "gpt-4o-mini",
@@ -292,7 +292,7 @@ pub async fn generate_commit_message(
         ];
 
         let response = client
-            .chat(&messages, None, model, Some(256), 0.3)
+            .chat(&messages, None, model, 256, 0.3)
             .await
             .map_err(|err| format!("LLM request failed: {}", err))?;
 
@@ -374,7 +374,7 @@ mod tests {
         (ModelType::ZenmuxApi, "zenmux", "deepseek/deepseek-chat"),
         (ModelType::DashscopeApi, "dashscope", "qwen-turbo"),
         (ModelType::MoonshotApi, "moonshot", "moonshot-v1-8k"),
-        (ModelType::MinimaxApi, "minimax", "abab6.5s-chat"),
+        (ModelType::MinimaxApi, "minimax", "MiniMax-M3"),
         (ModelType::ZhipuApi, "zhipu", "glm-4-flash"),
         (ModelType::VllmApi, "vllm", "default"),
     ];
@@ -406,7 +406,7 @@ mod tests {
     fn provider_prompt_payloads_share_the_effective_instructions() {
         let system_prompt = build_system_prompt(Some("Include a detailed body."))
             .expect("custom instructions should be accepted");
-        let messages = vec![
+        let messages = [
             json!({ "role": "system", "content": &system_prompt }),
             json!({ "role": "user", "content": "diff summary" }),
         ];
@@ -445,7 +445,6 @@ mod tests {
             ModelType::AzureOpenaiApi,
             ModelType::AzureAnthropicApi,
             ModelType::OrgiiOrchestrator,
-            ModelType::EmbeddingApi,
             ModelType::CursorCli,
             ModelType::KimiCli,
             ModelType::OpenCode,

@@ -59,8 +59,6 @@ export interface CategoryTableContentProps {
   refreshingAllModels?: boolean;
   modelsActiveTab?: string;
   onModelsTabChange?: (tab: string) => void;
-  rulesActiveTab?: "rules" | "memory" | "evolution";
-  onRulesTabChange?: (tab: "rules" | "memory" | "evolution") => void;
   onToggleModel?: (
     model: string,
     agentType: string,
@@ -290,8 +288,6 @@ export const CategoryTableContent: React.FC<CategoryTableContentProps> = (
           onAdd={() => onAddAction("add-rule")}
           cursorRepos={props.rulesCursorRepos}
           onAfterImport={props.onRulesAfterImport}
-          activeTab={props.rulesActiveTab}
-          onActiveTabChange={props.onRulesTabChange}
         />
       );
     case "routines":
@@ -312,7 +308,6 @@ export const CategoryTableContent: React.FC<CategoryTableContentProps> = (
     case "computerUse":
     case "myRoles":
     case "housekeeper":
-    case "sessionMemoryEmbedding":
     case "devtools":
       return null;
   }

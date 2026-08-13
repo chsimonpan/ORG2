@@ -22,8 +22,9 @@ import {
 } from "@src/components/ComposerInput";
 import { getTerminalBuffer } from "@src/components/TerminalInteractive/bufferCache";
 import { storePillText } from "@src/config/pillTokens";
-import type { AgentExecMode } from "@src/config/sessionCreatorConfig";
+import type { ComposerModeEntry } from "@src/config/sessionCreatorConfig";
 import { useSlashCommand } from "@src/engines/ChatPanel/hooks/useInputArea/useSlashCommand";
+import { referenceInsertText } from "@src/features/Org2Cloud/referenceInsertText";
 import type { SlashItem } from "@src/types/extensions";
 import {
   capPillText,
@@ -159,8 +160,9 @@ export interface UseComposerInputReturn {
   handleSlashCommand: (query: string) => void;
   handleSlashCommandClose: () => void;
   handleSlashSelect: (item: SlashItem) => void;
-  handleModeSelect: (mode: AgentExecMode) => void;
-  currentMode: AgentExecMode;
+  handleModeSelect: (mode: ComposerModeEntry["id"]) => void;
+  currentMode: ComposerModeEntry["id"];
+  includeProjectMode: boolean;
   filteredSlashItems: SlashItem[];
   slashLoading: boolean;
   prefetchSlashItems: (query: string) => void;
@@ -217,6 +219,7 @@ export function useComposerInput(
     handleSlashSelect,
     handleModeSelect,
     currentMode,
+    includeProjectMode,
     filteredItems: filteredSlashItems,
     slashLoading,
     prefetchItems: prefetchSlashItems,
@@ -337,6 +340,15 @@ export function useComposerInput(
           return;
         }
         // No buffer available — fall through to default pill (navigation-only)
+      }
+
+      // A teammate's cloud session: plain reference text, not a pill. The
+      // pill path assumes a bare local session id, and the markdown
+      // renderer is what turns a reference into a chip.
+      if (type === "cloudSession") {
+        composerInputRef.current.insertMentionText(referenceInsertText(value));
+        handleAtMentionClose();
+        return;
       }
 
       // Session pills: pass session ID only — no transcript loading
@@ -505,6 +517,7 @@ export function useComposerInput(
     handleSlashSelect,
     handleModeSelect,
     currentMode,
+    includeProjectMode,
     filteredSlashItems,
     slashLoading,
     prefetchSlashItems,

@@ -9,6 +9,7 @@ import { useSetAtom } from "jotai";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { loadAvailableAgents } from "@src/api/services/availableAgents";
 import { rpc } from "@src/api/tauri/rpc";
 import type {
   AvailableAgent,
@@ -168,9 +169,9 @@ const PRIMARY_PROVIDER_KEYS = new Set([
   "modelscope_api",
   "aihubmix_api",
   "cherryin_api",
+  "atlascloud_api",
   "bedrock_api",
   "custom_api",
-  "embedding_api",
   "azure_openai_api",
   "azure_anthropic_api",
 ]);
@@ -199,7 +200,7 @@ async function loadRegistry(): Promise<RegistryCache> {
   if (loadingPromise) return loadingPromise;
 
   loadingPromise = Promise.all([
-    rpc.validation.getAvailableAgents(),
+    loadAvailableAgents(),
     rpc.validation.getAvailableApiProviders(),
   ]).then(([agents, apiProviders]) => {
     registryCache = { agents, apiProviders };
@@ -322,7 +323,9 @@ function buildUnifiedProviders(
           },
           {
             modelType: cli.name,
-            label: isOpenAiBrand ? "Codex" : `${cli.displayName} Plan`,
+            label: isOpenAiBrand
+              ? "Codex Subscription"
+              : `${cli.displayName} Plan`,
             mode: "cli",
             apiKeyEnvVar: cli.envConfig?.apiKeyEnvVar ?? "",
             supportsBaseUrl: cli.envConfig?.supportsBaseUrl ?? false,

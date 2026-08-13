@@ -9,26 +9,27 @@
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { useCallback, useEffect } from "react";
 
-import { enterAgentOrgSessionIntervention } from "@src/api/tauri/agent";
 import type { AgentExecMode } from "@src/config/sessionCreatorConfig";
+import { resolveSessionAgentExecMode } from "@src/config/sessionCreatorConfig";
 import {
   beginOptimisticTurn,
   failOptimisticTurn,
 } from "@src/engines/SessionCore/control/optimisticTurnStatus";
+import { publishTurnIntentDispatch } from "@src/engines/SessionCore/control/turnIntentDispatchLifecycle";
 import {
   beginTurnDispatch,
   getTurnPhase,
   markTurnTerminal,
 } from "@src/engines/SessionCore/control/turnLifecycle";
+import { eventStoreProxy } from "@src/engines/SessionCore/core/store/EventStoreProxy";
 import { mintTurnIntentId } from "@src/engines/SessionCore/sync/adapters/shared/eventFactories";
-import { createLogger } from "@src/hooks/logger";
 import {
   type SessionRuntimeStatusSource,
+  closePostStopDispatchEpisodeAtom,
   isSessionActiveAtom,
   lastUserMessageAtom,
-  userInitiatedCancelAtom,
+  postStopDispatchSessionsAtom,
 } from "@src/store/session/cliSessionStatusAtom";
-import { creatorDefaultExecModeAtom } from "@src/store/session/creatorDefaultExecModeAtom";
 import { creatorDefaultModelSelectionAtom } from "@src/store/session/creatorDefaultModelAtom";
 import { sessionMapAtom } from "@src/store/session/sessionAtom";
 import {
@@ -43,8 +44,6 @@ import {
   consumeRestoredStopSubmitSuppression,
 } from "./stopSubmitGuard";
 import { useMessageDispatch } from "./useMessageDispatch";
-
-const log = createLogger("useUserIntentSubmit");
 
 const sharedSubmitGuard = { current: false };
 const sharedSubmitPayload = { current: null as string | null };
@@ -81,9 +80,10 @@ export interface SubmitUserIntentOptions {
   applyStopSubmitGuards?: boolean;
   dedupeDirectSubmit?: boolean;
   clearUserInitiatedCancelOnQueue?: boolean;
-  swallowErrorAfterUserEventAppend?: boolean;
   onQueued?: () => void;
   onBeforeDirectDispatch?: () => void;
+  /** Stable caller-owned identity for observing a queued/direct dispatch. */
+  turnIntentId?: string;
 }
 
 interface UseUserIntentSubmitOptions {
@@ -98,10 +98,10 @@ export function useUserIntentSubmit({
   const enqueueMessage = useSetAtom(enqueueMessageAtom);
   const setQueueFlushRequest = useSetAtom(queueFlushRequestAtom);
   const setLastUserMessage = useSetAtom(lastUserMessageAtom);
-  const setUserInitiatedCancel = useSetAtom(userInitiatedCancelAtom);
-  const { addUserMessage, dispatchMessageBySessionType } = useMessageDispatch({
-    getSessionId,
-  });
+  const closePostStopDispatchEpisode = useSetAtom(
+    closePostStopDispatchEpisodeAtom
+  );
+  const { addUserMessage, dispatchMessageBySessionType } = useMessageDispatch();
 
   useEffect(() => {
     if (!isSessionActive) {
@@ -120,9 +120,9 @@ export function useUserIntentSubmit({
       applyStopSubmitGuards = false,
       dedupeDirectSubmit = false,
       clearUserInitiatedCancelOnQueue = false,
-      swallowErrorAfterUserEventAppend = false,
       onQueued,
       onBeforeDirectDispatch,
+      turnIntentId: providedTurnIntentId,
     }: SubmitUserIntentOptions): Promise<void> => {
       const sessionId = explicitSessionId ?? getSessionId();
       if (!sessionId) {
@@ -138,7 +138,7 @@ export function useUserIntentSubmit({
         agentContent,
         imageDataUrls
       );
-      const turnIntentId = mintTurnIntentId();
+      const turnIntentId = providedTurnIntentId ?? mintTurnIntentId();
 
       if (
         applyStopSubmitGuards &&
@@ -159,7 +159,8 @@ export function useUserIntentSubmit({
           })
         : false;
       const explicitPostStopSubmit =
-        restoredStopDraftSubmit || store.get(userInitiatedCancelAtom);
+        restoredStopDraftSubmit ||
+        store.get(postStopDispatchSessionsAtom)[sessionId] === true;
 
       if (
         dedupeDirectSubmit &&
@@ -189,12 +190,12 @@ export function useUserIntentSubmit({
           session,
           creatorDefaultSelection
         );
-        const snapshotMode: AgentExecMode =
-          (session?.agentExecMode as AgentExecMode | undefined) ??
-          store.get(creatorDefaultExecModeAtom);
+        const snapshotMode: AgentExecMode = resolveSessionAgentExecMode(
+          session?.agentExecMode
+        );
 
         if (clearUserInitiatedCancelOnQueue && explicitPostStopSubmit) {
-          setUserInitiatedCancel(false);
+          closePostStopDispatchEpisode(sessionId);
         }
 
         enqueueMessage({
@@ -226,21 +227,26 @@ export function useUserIntentSubmit({
         imageDataUrls: restoreImageDataUrls,
       });
       const dispatchGeneration = beginTurnDispatch(sessionId);
+      publishTurnIntentDispatch(turnIntentId, {
+        sessionId,
+        generation: dispatchGeneration,
+      });
       beginOptimisticTurn(sessionId, source);
       if (dedupeDirectSubmit) {
         sharedSubmitGuard.current = true;
         sharedSubmitPayload.current = submitPayloadKey;
       }
 
-      let userEventAppended = false;
+      let userEventId: string | null = null;
       let dispatchStarted = false;
       try {
         onBeforeDirectDispatch?.();
-        await addUserMessage(displayContent, imageDataUrls, turnIntentId);
-        userEventAppended = true;
-        void enterAgentOrgSessionIntervention(sessionId).catch((error) => {
-          log.warn("[useUserIntentSubmit] intervention failed:", error);
-        });
+        userEventId = await addUserMessage(
+          sessionId,
+          displayContent,
+          imageDataUrls,
+          turnIntentId
+        );
         const displayTextForDispatch =
           contentForAgent !== displayContent ? displayContent : undefined;
         dispatchStarted = true;
@@ -265,19 +271,25 @@ export function useUserIntentSubmit({
             generation: dispatchGeneration,
           });
         }
-        if (!userEventAppended || !swallowErrorAfterUserEventAppend) {
-          throw error;
+        if (userEventId) {
+          try {
+            await eventStoreProxy.removeByIdPrefix(userEventId, sessionId);
+          } catch {
+            // Preserve the original dispatch error. A failed cleanup must not
+            // turn an already-failed submit into a misleading success.
+          }
         }
+        throw error;
       }
     },
     [
       addUserMessage,
+      closePostStopDispatchEpisode,
       dispatchMessageBySessionType,
       enqueueMessage,
       getSessionId,
       setLastUserMessage,
       setQueueFlushRequest,
-      setUserInitiatedCancel,
       store,
     ]
   );

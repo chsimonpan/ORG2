@@ -25,9 +25,10 @@ export {
   closeIssue,
   reopenIssue,
   addIssueComment,
-  fetchIssueComments,
+  fetchIssueTimeline,
+  issueCommentToTimelineItem,
   fetchRepoLabels,
-  fetchRepoCollaborators,
+  fetchRepoAssignees,
 } from "./githubIssues";
 export type {
   IssueResult,
@@ -36,4 +37,5 @@ export type {
   GitHubIssueLabel,
   GitHubIssueUser,
   GitHubIssueListResponse,
+  GitHubIssueTimelineItem,
 } from "./githubIssues";

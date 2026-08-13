@@ -25,7 +25,7 @@ import {
   horizontalListSortingStrategy,
   sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
-import { useAtomValue } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import React, {
   Fragment,
   memo,
@@ -35,18 +35,32 @@ import React, {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 
 import { useActionSystemOptional } from "@src/ActionSystem";
 import FileTypeIcon from "@src/components/FileTypeIcon";
+import { NoDragRegion } from "@src/components/WindowChrome";
+import SessionRawTranscriptDialog from "@src/engines/ChatPanel/components/SessionRawTranscriptDialog";
 import {
-  COLLAPSED_SIDEBAR_CHROME_OFFSET,
+  getCollapsedSidebarChromeOffset,
   useShouldOffsetWorkStationTopBar,
 } from "@src/hooks/ui/sidebar/useCollapsedSidebarChromeOffset";
+import { requestTeamInboxSessionHandoffAtom } from "@src/modules/MainApp/TeamInbox/store";
 import { CollapsedSidebarButton } from "@src/scaffold/NavigationSidebar/CollapsedSidebarButton";
+import {
+  SESSION_TAB_DROP_TARGET_HIGHLIGHT_CLASS,
+  type SessionReferenceOpen,
+  type SessionTabTransfer,
+} from "@src/shared/dnd/sessionTabDrag";
+import { useSessionTabDropTarget } from "@src/shared/dnd/useSessionTabDropTarget";
+import { openTeamInboxInChatPanelTabAtom } from "@src/store/chatPanel/chatPanelTabOpenAtoms";
 import { type GitFileInfo, gitFileStatusMapAtom } from "@src/store/git";
+import {
+  moveSessionTabAtom,
+  openSessionInWorkstationAtom,
+} from "@src/store/session/sessionTabPlacementAtom";
 import { tabScrollRevealAtom } from "@src/store/workstation/tabs";
 
-import { NoDragRegion } from "../NoDragRegion";
 import TabContextMenu from "./TabContextMenu";
 import {
   SortableTab,
@@ -204,6 +218,7 @@ export const TabBar: React.FC<TabBarProps> = memo(
     collapseInactiveTabLabelsOnOverflow = false,
     dataTourTarget,
   }) => {
+    const { t } = useTranslation();
     const actionSystem = useActionSystemOptional();
     const dispatch = actionSystem?.dispatch;
     const shouldOffsetLeftChrome = useShouldOffsetWorkStationTopBar();
@@ -214,6 +229,30 @@ export const TabBar: React.FC<TabBarProps> = memo(
 
     const tabsContainerRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const moveSessionTab = useSetAtom(moveSessionTabAtom);
+    const openSessionInWorkstation = useSetAtom(openSessionInWorkstationAtom);
+    const openTeamInbox = useSetAtom(openTeamInboxInChatPanelTabAtom);
+    const requestSessionHandoff = useSetAtom(
+      requestTeamInboxSessionHandoffAtom
+    );
+    const handleSessionTabDrop = useCallback(
+      (transfer: SessionTabTransfer) => moveSessionTab(transfer),
+      [moveSessionTab]
+    );
+    const handleSessionReferenceDrop = useCallback(
+      (reference: SessionReferenceOpen) =>
+        openSessionInWorkstation({
+          sessionId: reference.sessionId,
+          title: reference.title,
+        }),
+      [openSessionInWorkstation]
+    );
+    const isSessionDragOver = useSessionTabDropTarget({
+      target: "workstation",
+      containerRef,
+      onDrop: handleSessionTabDrop,
+      onOpenSessionReference: handleSessionReferenceDrop,
+    });
 
     const sensors = useSensors(
       useSensor(PointerSensor, {
@@ -248,6 +287,9 @@ export const TabBar: React.FC<TabBarProps> = memo(
       position: { x: number; y: number };
       tab: WorkStationTab;
     } | null>(null);
+    const [rawTranscriptSessionId, setRawTranscriptSessionId] = useState<
+      string | null
+    >(null);
 
     const hideInactiveTabLabels = useTabLabelCollapse({
       enabled: collapseInactiveTabLabelsOnOverflow,
@@ -278,6 +320,38 @@ export const TabBar: React.FC<TabBarProps> = memo(
     );
 
     const handleCloseContextMenu = useCallback(() => setContextMenu(null), []);
+    const handleMoveSessionToChatPanel = useCallback(
+      (tab: WorkStationTab) => {
+        const sessionId = tab.data.sessionId;
+        if (tab.type !== "chat-session" || typeof sessionId !== "string") {
+          return;
+        }
+        moveSessionTab({
+          source: "workstation",
+          sourceTabId: tab.id,
+          sessionId,
+          title: tab.title,
+        });
+      },
+      [moveSessionTab]
+    );
+    const handleViewRawTranscript = useCallback((sessionId: string) => {
+      setRawTranscriptSessionId(sessionId);
+    }, []);
+    const handleCreateWorkItemFromSession = useCallback(
+      (tab: WorkStationTab) => {
+        const sessionId = tab.data.sessionId;
+        if (tab.type !== "chat-session" || typeof sessionId !== "string") {
+          return;
+        }
+        requestSessionHandoff({ sessionId, title: tab.title });
+        openTeamInbox(t("navigation:labels.inbox"));
+      },
+      [openTeamInbox, requestSessionHandoff, t]
+    );
+    const handleCloseRawTranscript = useCallback(() => {
+      setRawTranscriptSessionId(null);
+    }, []);
     const noopTabAction = useCallback((_tabId: string) => {}, []);
     const noopAction = useCallback(() => {}, []);
 
@@ -296,6 +370,7 @@ export const TabBar: React.FC<TabBarProps> = memo(
       <div
         ref={containerRef}
         data-pane-id={paneId}
+        data-session-tab-drop-target="workstation"
         data-tour-target={dataTourTarget}
         data-is-dragging={draggingTabId ? "true" : undefined}
         className={`work-station-tab-bar relative flex shrink-0 overflow-hidden ${surfaceClassName}`}
@@ -304,12 +379,18 @@ export const TabBar: React.FC<TabBarProps> = memo(
           {
             height: `${TAB_BAR_HEIGHT + 8}px`,
             paddingLeft: shouldOffsetLeftChrome
-              ? COLLAPSED_SIDEBAR_CHROME_OFFSET
+              ? getCollapsedSidebarChromeOffset()
               : undefined,
             WebkitAppRegion: "drag",
           } as React.CSSProperties
         }
       >
+        {isSessionDragOver ? (
+          <div
+            className={`${SESSION_TAB_DROP_TARGET_HIGHLIGHT_CLASS} inset-1`}
+            aria-hidden
+          />
+        ) : null}
         <div className="mt-2 flex h-9 min-w-0 flex-1 items-center">
           {shouldOffsetLeftChrome ? <CollapsedSidebarButton /> : null}
           {leadingSlot ? (
@@ -407,9 +488,19 @@ export const TabBar: React.FC<TabBarProps> = memo(
             onCloseTab={onTabClose}
             onCloseOtherTabs={onCloseOtherTabs ?? noopTabAction}
             onCloseSavedTabs={onCloseSavedTabs ?? noopAction}
+            onMoveSessionToChatPanel={handleMoveSessionToChatPanel}
+            onViewRawTranscript={handleViewRawTranscript}
+            onCreateWorkItemFromSession={handleCreateWorkItemFromSession}
             dispatch={dispatch}
           />
         )}
+        {rawTranscriptSessionId ? (
+          <SessionRawTranscriptDialog
+            visible
+            sessionId={rawTranscriptSessionId}
+            onClose={handleCloseRawTranscript}
+          />
+        ) : null}
       </div>
     );
   }

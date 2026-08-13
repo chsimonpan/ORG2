@@ -54,6 +54,7 @@ import {
   parseFileCardResult,
   parseManageLspResult,
   parseManageWorkspaceResult,
+  parseOrgtrackEnvelope,
   parseProjectCardResult,
   parseProjectToolListResult,
   parseSearchFilesResult,
@@ -71,7 +72,7 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = React.memo(
     args = {},
     result: rawResult,
     isLoading = false,
-    defaultCollapsed = false,
+    defaultCollapsed = true,
     eventId,
     iconOverride,
     callId,
@@ -117,9 +118,7 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = React.memo(
       const text = extractResultText(result);
       return text !== null && SEARCH_NO_RESULT_MESSAGES.has(text);
     }, [hasResult, result]);
-    const effectiveDefaultCollapsed = isError
-      ? false
-      : isNoResultSearch || defaultCollapsed;
+    const effectiveDefaultCollapsed = isNoResultSearch || defaultCollapsed;
 
     const {
       isCollapsed,
@@ -255,6 +254,9 @@ const ToolCallBlock: React.FC<ToolCallBlockProps> = React.memo(
         return { type: "agentMessageCard" as const, card };
       }
       if (isShellTool(toolName) && hasResult) {
+        const envelope = parseOrgtrackEnvelope(args, result);
+        if (envelope)
+          return { type: "orgtrackEnvelope" as const, card: envelope };
         const card = parseCommandResult(args, result);
         if (card) return { type: "commandResult" as const, card };
       }

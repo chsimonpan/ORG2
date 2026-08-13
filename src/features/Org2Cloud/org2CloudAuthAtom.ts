@@ -14,9 +14,14 @@
 import { atomWithStorage } from "jotai/utils";
 import { z } from "zod/v4";
 
+import {
+  SHARED_AUTH_SYNCHRONIZED_EVENT,
+  SHARED_ORG2_CLOUD_AUTH_STORAGE_KEY,
+  mirrorSharedServiceAuthValue,
+} from "@src/api/http/auth/sharedAuthStorage";
 import { createZodJsonStorage } from "@src/util/core/storage/zodStorage";
 
-export const ORG2_CLOUD_AUTH_STORAGE_KEY = "orgii:org2-cloud-v1:auth";
+export const ORG2_CLOUD_AUTH_STORAGE_KEY = SHARED_ORG2_CLOUD_AUTH_STORAGE_KEY;
 
 export const Org2CloudProfileSchema = z.object({
   displayName: z.string().optional(),
@@ -40,12 +45,64 @@ export const Org2CloudAuthStateSchema = z.object({
 
 export type Org2CloudAuthState = z.infer<typeof Org2CloudAuthStateSchema>;
 
+/**
+ * Stable privacy/cache boundary for managed-cloud state. Access-token refresh
+ * and profile enrichment replace the auth object without changing identity;
+ * endpoint or account switches must produce a different key.
+ */
+export function org2CloudAuthIdentityKey(
+  auth: Pick<Org2CloudAuthState, "supabaseUrl" | "userId">
+): string {
+  return `${auth.supabaseUrl.trim().replace(/\/+$/, "")}|${auth.userId}`;
+}
+
 const StoredAuthSchema = Org2CloudAuthStateSchema.nullable();
+const localOrg2CloudAuthStorage = createZodJsonStorage(StoredAuthSchema);
+
+/** Parse the exact serialized representation stored by the auth atom. */
+export function parseStoredOrg2CloudAuth(
+  raw: string | null
+): Org2CloudAuthState | null {
+  if (raw === null) return null;
+  return StoredAuthSchema.parse(JSON.parse(raw));
+}
+
+const sharedOrg2CloudAuthStorage = {
+  getItem(key: string, initialValue: Org2CloudAuthState | null) {
+    return localOrg2CloudAuthStorage.getItem(key, initialValue);
+  },
+  setItem(key: string, value: Org2CloudAuthState | null) {
+    localOrg2CloudAuthStorage.setItem(key, value);
+    mirrorSharedServiceAuthValue(
+      ORG2_CLOUD_AUTH_STORAGE_KEY,
+      JSON.stringify(value)
+    );
+  },
+  removeItem(key: string) {
+    localOrg2CloudAuthStorage.removeItem(key);
+    mirrorSharedServiceAuthValue(ORG2_CLOUD_AUTH_STORAGE_KEY, null);
+  },
+  subscribe(
+    key: string,
+    callback: (value: Org2CloudAuthState | null) => void,
+    initialValue: Org2CloudAuthState | null
+  ) {
+    const handleSynchronized = () => {
+      callback(localOrg2CloudAuthStorage.getItem(key, initialValue));
+    };
+    window.addEventListener(SHARED_AUTH_SYNCHRONIZED_EVENT, handleSynchronized);
+    return () =>
+      window.removeEventListener(
+        SHARED_AUTH_SYNCHRONIZED_EVENT,
+        handleSynchronized
+      );
+  },
+};
 
 export const org2CloudAuthAtom = atomWithStorage<Org2CloudAuthState | null>(
   ORG2_CLOUD_AUTH_STORAGE_KEY,
   null,
-  createZodJsonStorage(StoredAuthSchema),
+  sharedOrg2CloudAuthStorage,
   { getOnInit: true }
 );
 org2CloudAuthAtom.debugLabel = "org2CloudAuthAtom";
@@ -75,4 +132,47 @@ export function commitRefreshedAuth(
     return fresh;
   });
   return committed;
+}
+
+/**
+ * Sign the user out locally after GoTrue DEFINITIVELY rejects a refresh
+ * credential (400/401 `invalid_grant` — never a transient network/timeout
+ * failure, see `ensureFreshSession`'s `onRefreshRejected`). Guarded by a
+ * compare-and-set, but deliberately on STABLE IDENTITY (`userId` +
+ * `refreshToken`) rather than object reference.
+ *
+ * Reference equality is NOT safe here: `org2CloudAuthAtom` is an
+ * `atomWithStorage` with `{ getOnInit: true }`, whose `onMount` re-reads
+ * `storage.getItem(...)` and calls `setAtom(...)` on every mount (jotai's
+ * `atomWithStorage` idiom — see `node_modules/jotai/.../utils.mjs`). Because
+ * `createZodJsonStorage`'s `getItem` runs `JSON.parse` + `schema.parse` on
+ * every call, it returns a BRAND-NEW object each time even when the
+ * persisted bytes are byte-for-byte unchanged. A `current` snapshot
+ * captured just before that re-hydration settles is therefore never
+ * `===` the atom's live value again, even though it is the exact same
+ * session — so a reference-equality CAS silently never fires and the
+ * rejected session is never cleared (the reported zombie-signed-in bug).
+ * Comparing `userId`/`refreshToken` survives that re-hydration while still
+ * refusing to clobber a newer sign-in or a concurrently rotated token
+ * (different `userId` and/or `refreshToken`).
+ */
+export function clearRejectedAuth(
+  setAuth: (
+    updater: (prev: Org2CloudAuthState | null) => Org2CloudAuthState | null
+  ) => void,
+  rejected: Org2CloudAuthState
+): boolean {
+  let cleared = false;
+  setAuth((current) => {
+    if (
+      !current ||
+      current.userId !== rejected.userId ||
+      current.refreshToken !== rejected.refreshToken
+    ) {
+      return current;
+    }
+    cleared = true;
+    return null;
+  });
+  return cleared;
 }

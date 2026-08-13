@@ -26,16 +26,6 @@ use crate::turn_executor::{self, PermissionProvider, TurnConfig, TurnIterationHo
 use super::super::event_handler::UnifiedEventHandler;
 use super::super::streaming::broadcast_agent_warning;
 
-fn is_context_too_long_error(error: &str) -> bool {
-    let lower = error.to_ascii_lowercase();
-    lower.contains("contexttoolong")
-        || lower.contains("context_length_exceeded")
-        || lower.contains("maximum context length")
-        || lower.contains("prompt is too long")
-        || (lower.contains("http 400") && lower.contains("context"))
-        || (lower.contains("http status 400") && lower.contains("token"))
-}
-
 impl UnifiedMessageProcessor {
     /// Executes one LLM turn, transparently re-compacting up to twice if
     /// the provider returns `ContextTooLong`.
@@ -49,6 +39,8 @@ impl UnifiedMessageProcessor {
         turn_id: &str,
         messages: &mut Vec<Value>,
         reasoning_trigger: Option<crate::providers::thinking_mode::ReasoningLevel>,
+        turn_intent_id: &str,
+        projected_inbox_ids: Vec<i64>,
     ) -> Result<(TurnResult, UnifiedEventHandler), String> {
         let effective_policy = self.effective_tool_policy();
 
@@ -79,6 +71,8 @@ impl UnifiedMessageProcessor {
         };
 
         let turn_config = TurnConfig {
+            turn_intent_id: turn_intent_id.to_string(),
+            projected_inbox_ids,
             model: turn_model,
             account_id: self.runtime.account_id.clone(),
             context_window_override: self
@@ -107,6 +101,19 @@ impl UnifiedMessageProcessor {
 
         let mut event_handler_config = self.event_handler_config.clone();
         event_handler_config.turn_id = Some(turn_id.to_string());
+        event_handler_config.agent_org_task_lifecycle = self
+            .runtime
+            .agent_org_context
+            .as_ref()
+            .zip(self.runtime.agent_org_current_member_id.as_ref())
+            .and_then(|(context, member_id)| {
+                (member_id != crate::coordination::agent_org_runs::COORDINATOR_MEMBER_ID).then(
+                    || super::super::event_handler::AgentOrgTaskLifecycleContext {
+                        run_id: context.run_id.clone(),
+                        member_id: member_id.clone(),
+                    },
+                )
+            });
         let handler = UnifiedEventHandler::new(event_handler_config);
 
         // Set per-turn context for streaming/cancellable tools.
@@ -173,7 +180,7 @@ impl UnifiedMessageProcessor {
         {
             Ok(turn_result) => turn_result,
             Err(err)
-                if is_context_too_long_error(&err) && self.runtime.resolved.compaction.enabled =>
+                if err.contains("ContextTooLong") && self.runtime.resolved.compaction.enabled =>
             {
                 self.execute_with_reactive_compact(
                     session_id,
@@ -214,22 +221,6 @@ impl UnifiedMessageProcessor {
             self.session
                 .last_context_tokens
                 .store(result.context_tokens, std::sync::atomic::Ordering::SeqCst);
-        }
-
-        // Accumulate weighted spend for the cost-based compaction trigger.
-        // prompt_tokens is billable (uncached) input in Anthropic accounting;
-        // cached prefix arrives in cache_read/cache_write. Stored x1000 so the
-        // fractional weights survive the integer atomic.
-        {
-            let weighted_milli = result.prompt_tokens.saturating_mul(1_000)
-                + result.cache_read_tokens.saturating_mul(100)
-                + result.cache_write_tokens.saturating_mul(1_250)
-                + result.completion_tokens.saturating_mul(5_000);
-            if weighted_milli > 0 {
-                self.session
-                    .cumulative_weighted_tokens_milli
-                    .fetch_add(weighted_milli, std::sync::atomic::Ordering::SeqCst);
-            }
         }
 
         Ok((result, handler))
@@ -336,7 +327,7 @@ impl UnifiedMessageProcessor {
                     break;
                 }
                 Err(retry_err)
-                    if is_context_too_long_error(&retry_err) && attempt < MAX_REACTIVE_RETRIES =>
+                    if retry_err.contains("ContextTooLong") && attempt < MAX_REACTIVE_RETRIES =>
                 {
                     last_err = retry_err;
                     continue;

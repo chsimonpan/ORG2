@@ -9,17 +9,12 @@
  */
 import i18next from "i18next";
 import { useAtomValue } from "jotai";
-import { AlertCircle, Chrome, FileSymlink, Globe } from "lucide-react";
+import { Chrome, FileSymlink, Globe } from "lucide-react";
 import React from "react";
 
 import ToolCallBlock from "@src/engines/ChatPanel/blocks/ToolCallBlock";
-import {
-  EventBlockHeaderIcon,
-  EventBlockHeaderTitle,
-  SESSION_UI_TOKENS,
-  StackedBlock,
-} from "@src/engines/ChatPanel/blocks/primitives";
-import { streamingDeltaContentAtom } from "@src/engines/SessionCore";
+import { StackedBlock } from "@src/engines/ChatPanel/blocks/primitives";
+import { useStreamingDeltaForSession } from "@src/engines/SessionCore";
 import { sessionIdAtom } from "@src/engines/SessionCore/core/atoms";
 import type { SessionEvent } from "@src/engines/SessionCore/core/types";
 import { createLogger } from "@src/hooks/logger";
@@ -42,22 +37,11 @@ function isSyntheticLiveActivity(event: SessionEvent): boolean {
   return event.args?.syntheticLive === true;
 }
 
-const ActivityRow: React.FC<{
+const ActivityRowShell: React.FC<{
   event: SessionEvent;
   index: number;
   itemKey: string;
-  totalOccurrences?: number;
-}> = ({ event, index, itemKey, totalOccurrences }) => {
-  const sessionId = useAtomValue(sessionIdAtom);
-  const streamingMap = useAtomValue(streamingDeltaContentAtom);
-  const liveDelta = sessionId ? streamingMap.get(sessionId) : undefined;
-  const streamingContent =
-    liveDelta?.kind === "message" ? liveDelta.content : undefined;
-
-  if (isSyntheticLiveActivity(event) && !streamingContent?.trim()) {
-    return null;
-  }
-
+}> = ({ event, index, itemKey }) => {
   const isTextActivity = event.actionType === "assistant";
 
   return (
@@ -72,26 +56,27 @@ const ActivityRow: React.FC<{
         itemIndex={index}
         isStreaming={event.isDelta === true}
       />
-      {totalOccurrences !== undefined && totalOccurrences >= 2 && (
-        <div className={SESSION_UI_TOKENS.ROW.INLINE}>
-          <EventBlockHeaderIcon
-            icon={
-              <AlertCircle
-                size={SESSION_UI_TOKENS.ICON.SIZE_SM}
-                className="text-warning-6"
-              />
-            }
-            hasContent={false}
-          />
-          <EventBlockHeaderTitle className="text-warning-6">
-            {i18next.t("sessions:tools.repeatedErrorNotice", {
-              count: totalOccurrences,
-            })}
-          </EventBlockHeaderTitle>
-        </div>
-      )}
     </ChatItemWrap>
   );
+};
+
+// Only the synthetic-live activity row consumes the streaming delta — and only
+// to decide whether any text has arrived yet. Isolating the subscription here
+// stops a token flush from re-rendering every other (static) activity row in
+// the visible window.
+const LiveActivityRow: React.FC<{
+  event: SessionEvent;
+  index: number;
+  itemKey: string;
+}> = ({ event, index, itemKey }) => {
+  const sessionId = useAtomValue(sessionIdAtom);
+  const liveDelta = useStreamingDeltaForSession(sessionId);
+  const streamingContent =
+    liveDelta?.kind === "message" ? liveDelta.content : undefined;
+
+  if (!streamingContent?.trim()) return null;
+
+  return <ActivityRowShell event={event} index={index} itemKey={itemKey} />;
 };
 
 // ============================================
@@ -109,18 +94,23 @@ export function renderActivity(
   }
   if (!event) return null;
 
-  // repeatedErrorCount stores extra occurrences beyond the first, so total = count + 1.
-  const extraRepeats = chatItem.repeatedErrorCount;
-  const totalOccurrences =
-    extraRepeats !== undefined ? extraRepeats + 1 : undefined;
+  if (isSyntheticLiveActivity(event)) {
+    return (
+      <LiveActivityRow
+        key={itemKey}
+        event={event}
+        index={index}
+        itemKey={itemKey}
+      />
+    );
+  }
 
   return (
-    <ActivityRow
+    <ActivityRowShell
       key={itemKey}
       event={event}
       index={index}
       itemKey={itemKey}
-      totalOccurrences={totalOccurrences}
     />
   );
 }

@@ -283,3 +283,31 @@ impl Tool for SuggestModeSwitchTool {
         *self.context.session_id.lock().await = Some(session_key.to_string());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timeout_choice_defaults_to_skip() {
+        let choice = mode_switch_timeout_choice(PresencePolicy::default(), "plan");
+
+        assert!(matches!(choice, ModeSwitchChoice::Skip));
+    }
+
+    #[test]
+    fn timeout_choice_switches_to_plan_when_presence_allows_it() {
+        let choice = mode_switch_timeout_choice(
+            PresencePolicy {
+                mode_switch_auto_plan: true,
+                ..PresencePolicy::default()
+            },
+            "plan",
+        );
+
+        match choice {
+            ModeSwitchChoice::Switch(mode) => assert_eq!(mode, "plan"),
+            ModeSwitchChoice::Skip => panic!("expected auto switch"),
+        }
+    }
+}

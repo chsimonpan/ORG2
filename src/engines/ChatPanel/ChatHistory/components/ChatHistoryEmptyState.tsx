@@ -8,10 +8,15 @@
 import React, { memo } from "react";
 import { useTranslation } from "react-i18next";
 
+import { ChatLoadingBlock } from "@src/engines/ChatPanel/blocks/primitives";
 import type { SessionLoadStatus } from "@src/engines/SessionCore";
+import CloudSessionDownloadProgressCard from "@src/features/Org2Cloud/CloudSessionDownloadProgressCard";
+import { useCloudSessionHasDownloadSurface } from "@src/features/Org2Cloud/useCloudSessionDownloadSurface";
 import { Placeholder } from "@src/modules/shared/layouts/blocks";
 
 interface ChatHistoryEmptyStateProps {
+  /** Session this surface renders; drives the cloud download progress card. */
+  sessionId?: string | null;
   /** `"loaded"` when the session history has finished loading. */
   sessionLoadStatus: SessionLoadStatus;
   /** Last session load error, if loading failed. */
@@ -31,8 +36,15 @@ interface ChatHistoryEmptyStateProps {
   onReload: () => void;
 }
 
+const ChatHistoryLoadingState: React.FC = () => (
+  <div className="p-2">
+    <ChatLoadingBlock />
+  </div>
+);
+
 const ChatHistoryEmptyState: React.FC<ChatHistoryEmptyStateProps> = memo(
   ({
+    sessionId,
     sessionLoadStatus,
     sessionLoadError,
     emptyConfirmed,
@@ -42,6 +54,25 @@ const ChatHistoryEmptyState: React.FC<ChatHistoryEmptyStateProps> = memo(
     onReload,
   }) => {
     const { t } = useTranslation();
+    // A live/paused cloud download — or a big session waiting on its Start
+    // click — owns the whole pane, and it outranks EVERY branch below: a
+    // paused fresh download has zero local events, and the confirmed-empty
+    // placeholder would otherwise evict the paused card into a bewildering
+    // "No activity yet".
+    const hasDownloadSurface = useCloudSessionHasDownloadSurface(sessionId);
+
+    if (hasDownloadSurface) {
+      return (
+        <CloudSessionDownloadProgressCard
+          sessionId={sessionId}
+          variant="centered"
+        />
+      );
+    }
+
+    if (projectionPending) {
+      return <ChatHistoryLoadingState />;
+    }
 
     if (projectionPending) {
       return <Placeholder variant="loading" placement="sidebar" />;
@@ -63,7 +94,7 @@ const ChatHistoryEmptyState: React.FC<ChatHistoryEmptyStateProps> = memo(
     }
 
     if (sessionLoadStatus !== "loaded") {
-      return <Placeholder variant="loading" placement="sidebar" />;
+      return <ChatHistoryLoadingState />;
     }
 
     if (shouldShowEmpty && emptyConfirmed && !isRolledBack) {
@@ -82,7 +113,7 @@ const ChatHistoryEmptyState: React.FC<ChatHistoryEmptyStateProps> = memo(
     }
 
     if (shouldShowEmpty) {
-      return <Placeholder variant="loading" placement="sidebar" />;
+      return <ChatHistoryLoadingState />;
     }
 
     return (

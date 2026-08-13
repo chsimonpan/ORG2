@@ -18,8 +18,9 @@
 
 use super::super::io;
 use super::super::types::{
-    BatchDeleteResult, BatchUpdateResult, EnrichedWorkItem, WorkItemData, WorkItemFrontmatter,
-    WorkItemPartialUpdate, WorkItemsViewData,
+    BatchDeleteResult, BatchUpdateResult, EnqueueWorkItemRunRequest, EnrichedWorkItem,
+    WorkItemData, WorkItemFrontmatter, WorkItemHandoffTransition, WorkItemPartialUpdate,
+    WorkItemReadBucket, WorkItemRun, WorkItemRunStatus, WorkItemsViewData, WorkspaceWorkItemsData,
 };
 
 // ---------------------------------------------------------------------
@@ -50,17 +51,36 @@ pub async fn project_read_work_items(
 pub async fn project_read_work_items_enriched(
     project_slug: String,
     org_id: Option<String>,
+    read_bucket: Option<WorkItemReadBucket>,
 ) -> Result<Vec<EnrichedWorkItem>, String> {
     tokio::task::spawn_blocking(move || {
-        io::read_all_work_items_enriched_scoped(&project_slug, org_id.as_deref())
+        io::read_all_work_items_enriched_scoped_filtered(
+            &project_slug,
+            org_id.as_deref(),
+            read_bucket,
+        )
+    })
+    .await
+    .map_err(|err| format!("Task join error: {}", err))?
+}
+
+/// One backend task for the workspace list instead of one command and one
+/// blocking SQLite task per project.
+#[tauri::command]
+pub async fn project_read_workspace_work_items_data(
+    org_id: Option<String>,
+    read_bucket: Option<WorkItemReadBucket>,
+) -> Result<WorkspaceWorkItemsData, String> {
+    tokio::task::spawn_blocking(move || {
+        io::read_workspace_work_items_data(org_id.as_deref(), read_bucket)
     })
     .await
     .map_err(|err| format!("Task join error: {}", err))?
 }
 
 /// One-shot endpoint for the WorkItems page: enriched items + status
-/// counts (computed BEFORE filtering, for the filter badges) +
-/// Kanban / Gantt / Calendar projections + items grouped by status.
+/// counts (computed BEFORE filtering, for the filter badges) + only the
+/// requested view projection.
 ///
 /// Optional `status_filter` and `search_query` are applied
 /// server-side so we don't ship items the UI is going to discard
@@ -71,13 +91,15 @@ pub async fn project_read_work_items_view_data(
     org_id: Option<String>,
     status_filter: Option<String>,
     search_query: Option<String>,
+    view: Option<String>,
 ) -> Result<WorkItemsViewData, String> {
     tokio::task::spawn_blocking(move || {
-        io::read_work_items_view_data_scoped(
+        io::read_work_items_view_data_scoped_for_view(
             &project_slug,
             org_id.as_deref(),
             status_filter.as_deref(),
             search_query.as_deref(),
+            view.as_deref(),
         )
     })
     .await
@@ -98,13 +120,32 @@ pub async fn project_read_work_item(
     .map_err(|err| format!("Task join error: {}", err))?
 }
 
+/// Read one work item with its labels, members, project, and milestone already
+/// resolved. Detail surfaces should prefer this over reading the entire project
+/// collection and filtering it in JavaScript.
+#[tauri::command]
+pub async fn project_read_work_item_enriched(
+    project_slug: String,
+    short_id: String,
+    org_id: Option<String>,
+) -> Result<EnrichedWorkItem, String> {
+    tokio::task::spawn_blocking(move || {
+        io::read_work_item_enriched_scoped(&project_slug, &short_id, org_id.as_deref())
+    })
+    .await
+    .map_err(|err| format!("Task join error: {}", err))?
+}
+
 #[tauri::command]
 pub async fn work_item_read_standalone_items(
     org_id: Option<String>,
+    read_bucket: Option<WorkItemReadBucket>,
 ) -> Result<Vec<WorkItemData>, String> {
-    tokio::task::spawn_blocking(move || io::read_standalone_work_items(org_id.as_deref()))
-        .await
-        .map_err(|err| format!("Task join error: {}", err))?
+    tokio::task::spawn_blocking(move || {
+        io::read_standalone_work_items_filtered(org_id.as_deref(), read_bucket)
+    })
+    .await
+    .map_err(|err| format!("Task join error: {}", err))?
 }
 
 #[tauri::command]
@@ -136,7 +177,13 @@ pub async fn project_write_work_item(
     body: String,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        io::write_work_item(&project_slug, &short_id, &frontmatter, &body)
+        crate::work_service::overwrite_project_work_item(
+            &project_slug,
+            &short_id,
+            &frontmatter,
+            &body,
+            None,
+        )
     })
     .await
     .map_err(|err| format!("Task join error: {}", err))?
@@ -150,7 +197,13 @@ pub async fn work_item_write_standalone_item(
     body: String,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        io::write_standalone_work_item(org_id.as_deref(), &short_id, &frontmatter, &body)
+        crate::work_service::overwrite_standalone_work_item(
+            org_id.as_deref(),
+            &short_id,
+            &frontmatter,
+            &body,
+            None,
+        )
     })
     .await
     .map_err(|err| format!("Task join error: {}", err))?
@@ -190,6 +243,84 @@ pub async fn project_purge_expired_deleted_work_items(
         .map_err(|err| format!("Task join error: {}", err))?
 }
 
+/// Canonical `work.create` for a project-scoped item: the caller
+/// supplies a creation DTO plus a pre-allocated short id (collab orgs
+/// mint ids server-side, design §16.5); frontmatter construction is
+/// service-owned. Replaces UI-side `WorkItemFrontmatter` literals fed
+/// into the whole-row write.
+#[tauri::command]
+pub async fn project_create_work_item(
+    project_slug: String,
+    short_id: String,
+    request: crate::work_service::CreateWorkItemRequest,
+) -> Result<WorkItemData, String> {
+    tokio::task::spawn_blocking(move || {
+        crate::work_service::create_project_work_item(&project_slug, &short_id, &request, None)
+    })
+    .await
+    .map_err(|err| format!("Task join error: {}", err))?
+}
+
+/// Canonical `work.create` for an org-scoped standalone item.
+#[tauri::command]
+pub async fn work_item_create_standalone(
+    org_id: Option<String>,
+    short_id: String,
+    request: crate::work_service::CreateWorkItemRequest,
+) -> Result<WorkItemData, String> {
+    tokio::task::spawn_blocking(move || {
+        crate::work_service::create_standalone_work_item(
+            org_id.as_deref(),
+            &short_id,
+            &request,
+            None,
+        )
+    })
+    .await
+    .map_err(|err| format!("Task join error: {}", err))?
+}
+
+/// Strict, audited status transition through the work application
+/// service (`work.transition`, design §9.3/§13.2): portable-FSM
+/// validation is a hard reject here, `expected_revision` enables
+/// optimistic concurrency against `local_version`, and the reason is
+/// recorded in the audit stream. Non-lifecycle fields stay on the
+/// partial-update path.
+#[tauri::command]
+pub async fn project_transition_work_item(
+    project_slug: String,
+    short_id: String,
+    to_status: String,
+    reason: Option<String>,
+    expected_revision: Option<i64>,
+) -> Result<WorkItemData, String> {
+    tokio::task::spawn_blocking(move || {
+        if matches!(to_status.as_str(), "completed" | "closed") {
+            crate::work_item_features::readiness::guard_completion(
+                &crate::work_item_features::WorkItemScope {
+                    project_slug: Some(project_slug.clone()),
+                    org_id: "personal-org".to_string(),
+                    work_item_id: short_id.clone(),
+                },
+            )?;
+        }
+        let actor = crate::projects::types::WorkItemMutationActor {
+            id: "human:desktop".to_string(),
+            name: "Desktop".to_string(),
+        };
+        crate::work_service::transition_project_work_item(
+            &project_slug,
+            &short_id,
+            &to_status,
+            reason.as_deref(),
+            Some(&actor),
+            expected_revision,
+        )
+    })
+    .await
+    .map_err(|err| format!("Task join error: {}", err))?
+}
+
 /// Atomic read-modify-write for a single field-set patch. Runs
 /// inside a `BEGIN IMMEDIATE` transaction so concurrent partial
 /// updates serialize at the SQLite level. Returns the *enriched*
@@ -203,6 +334,114 @@ pub async fn project_update_work_item_partial(
 ) -> Result<EnrichedWorkItem, String> {
     tokio::task::spawn_blocking(move || {
         io::update_work_item_partial_enriched(&project_slug, &short_id, &updates)
+    })
+    .await
+    .map_err(|err| format!("Task join error: {}", err))?
+}
+
+/// Enqueue a durable Work Item execution episode. Producers use this instead
+/// of sending directly to a Session so delivery survives process exit.
+#[tauri::command]
+pub async fn project_enqueue_work_item_run(
+    request: EnqueueWorkItemRunRequest,
+) -> Result<WorkItemRun, String> {
+    tokio::task::spawn_blocking(move || crate::work_run_service::enqueue(request))
+        .await
+        .map_err(|err| format!("Task join error: {err}"))?
+}
+
+#[tauri::command]
+pub async fn project_list_work_item_runs(
+    project_slug: Option<String>,
+    org_id: Option<String>,
+    short_id: String,
+    limit: Option<usize>,
+) -> Result<Vec<WorkItemRun>, String> {
+    tokio::task::spawn_blocking(move || {
+        crate::work_run_service::list_for_work_item(
+            project_slug.as_deref(),
+            org_id.as_deref().unwrap_or("personal-org"),
+            &short_id,
+            limit.unwrap_or(50),
+        )
+    })
+    .await
+    .map_err(|err| format!("Task join error: {err}"))?
+}
+
+#[tauri::command]
+pub async fn project_retry_latest_work_item_run(
+    project_slug: Option<String>,
+    org_id: Option<String>,
+    short_id: String,
+    session_id: String,
+    idempotency_key: String,
+) -> Result<WorkItemRun, String> {
+    tokio::task::spawn_blocking(move || {
+        let runs = crate::work_run_service::list_for_work_item(
+            project_slug.as_deref(),
+            org_id.as_deref().unwrap_or("personal-org"),
+            &short_id,
+            200,
+        )?;
+        let failed = runs
+            .into_iter()
+            .find(|run| {
+                run.status == WorkItemRunStatus::Failed
+                    && run.session_id.as_deref() == Some(session_id.as_str())
+            })
+            .ok_or_else(|| {
+                format!(
+                    "{}:no failed Run for Session {}",
+                    crate::work_run_service::error::NOT_FOUND,
+                    session_id
+                )
+            })?;
+        crate::work_run_service::retry(&failed.id, &idempotency_key)
+    })
+    .await
+    .map_err(|err| format!("Task join error: {err}"))?
+}
+
+/// Atomic partial update for an org-scoped Work Item without a project row.
+#[tauri::command]
+pub async fn work_item_update_standalone_partial(
+    org_id: Option<String>,
+    short_id: String,
+    updates: WorkItemPartialUpdate,
+) -> Result<WorkItemData, String> {
+    tokio::task::spawn_blocking(move || {
+        io::update_standalone_work_item_partial(org_id.as_deref(), &short_id, &updates)
+    })
+    .await
+    .map_err(|err| format!("Task join error: {}", err))?
+}
+
+/// Accept or return a pending human handoff using the Work Item's atomic
+/// mutation boundary. Read/unread is intentionally independent from this
+/// explicit response.
+#[tauri::command]
+pub async fn project_transition_work_item_handoff(
+    project_slug: String,
+    short_id: String,
+    transition: WorkItemHandoffTransition,
+) -> Result<WorkItemData, String> {
+    tokio::task::spawn_blocking(move || {
+        io::transition_work_item_handoff(&project_slug, &short_id, &transition)
+    })
+    .await
+    .map_err(|err| format!("Task join error: {}", err))?
+}
+
+/// Accept or return a pending org-scoped handoff without requiring a project.
+#[tauri::command]
+pub async fn work_item_transition_standalone_handoff(
+    org_id: Option<String>,
+    short_id: String,
+    transition: WorkItemHandoffTransition,
+) -> Result<WorkItemData, String> {
+    tokio::task::spawn_blocking(move || {
+        io::transition_standalone_work_item_handoff(org_id.as_deref(), &short_id, &transition)
     })
     .await
     .map_err(|err| format!("Task join error: {}", err))?

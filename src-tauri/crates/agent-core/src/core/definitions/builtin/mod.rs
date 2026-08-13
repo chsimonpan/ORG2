@@ -19,10 +19,10 @@
 //!
 //! The old gateway router and specialist-agent wrappers were retired:
 //! - The gateway router pattern rejected general conversational traffic.
-//! - Specialist wrappers only wrapped 2-3 tools each (`manage_project`,
-//!   `manage_work_item`, `manage_agent_def`); making them parent-callable
-//!   tools on OS Agent removes a delegation hop and lets users
-//!   toggle them on/off per agent like any other built-in tool.
+//! - Specialist wrappers only wrapped 2-3 tools each (e.g.
+//!   `manage_agent_def`); making them parent-callable tools on OS Agent
+//!   removes a delegation hop and lets users toggle them on/off per
+//!   agent like any other built-in tool.
 
 mod ade_manager;
 mod ai_research;
@@ -34,7 +34,6 @@ mod os;
 mod sde;
 mod subagents;
 mod wingman;
-mod work_item_manager;
 
 pub use ade_manager::*;
 pub use ai_research::*;
@@ -46,7 +45,6 @@ pub use os::*;
 pub use sde::*;
 pub use subagents::*;
 pub use wingman::*;
-pub use work_item_manager::*;
 
 use super::schema::AgentDefinition;
 
@@ -117,7 +115,6 @@ pub fn get_builtin_agents() -> Vec<AgentDefinition> {
         os_agent(),
         ai_research_agent(),
         wingman_agent(),
-        work_item_manager_agent(),
         // Subagents (used by the unified `agent` tool)
         explore_agent(),
         general_agent(),
@@ -139,7 +136,7 @@ mod tests {
     #[test]
     fn test_builtin_agents_count() {
         let agents = get_builtin_agents();
-        assert_eq!(agents.len(), 12); // ADE Manager, base, os, sde, ds, ai-research, wingman, work-item-manager + 2 subagents + 2 memory subagents
+        assert_eq!(agents.len(), 11); // ADE Manager, base, os, sde, ds, ai-research, wingman + 2 subagents + 2 memory subagents
     }
 
     #[test]
@@ -151,7 +148,6 @@ mod tests {
         assert!(is_builtin_agent(DS_AGENT_ID));
         assert!(is_builtin_agent(AI_RESEARCH_AGENT_ID));
         assert!(is_builtin_agent(WINGMAN_AGENT_ID));
-        assert!(is_builtin_agent(WORK_ITEM_MANAGER_AGENT_ID));
         assert!(is_builtin_agent(EXPLORE_AGENT_ID));
         assert!(is_builtin_agent(GENERAL_AGENT_ID));
         assert!(is_builtin_agent(MEMORY_EXTRACTOR_ID));

@@ -3,8 +3,6 @@
  *
  * Detects internal vs external drag operations
  */
-import type { MutableRefObject } from "react";
-
 import { reorderActiveRef } from "@src/engines/ChatPanel/InputArea/components/QueuedMessages";
 import {
   isInternalFileTreeDragActive,
@@ -15,11 +13,7 @@ import { getNativeFrameScale } from "@src/util/platform/tauri/nativeFrame";
 /**
  * Check if a drag event is internal (from our app) vs external (from OS/IDE)
  */
-export function isInternalDrag(
-  event: Event,
-  appGridEditModeRef: MutableRefObject<boolean>,
-  workflowDragActiveRef: MutableRefObject<boolean>
-): boolean {
+export function isInternalDrag(event: Event): boolean {
   const dragEvent = event as DragEvent;
 
   // Queue reorder drag is always internal
@@ -27,11 +21,9 @@ export function isInternalDrag(
     return true;
   }
 
-  // If app grid is in edit mode, assume any drag could be internal
-  // If workflow is dragging, assume any drag could be internal
-  if (appGridEditModeRef.current || workflowDragActiveRef.current) {
-    return true;
-  }
+  // (The old workflow-canvas drag flag is gone: the visual workflow
+  // editor that set it was removed in Phase 1 of the Orgtrack migration,
+  // so the atom could never become true again.)
 
   // Check global flag for internal file tree drags (reliable in Tauri WebView
   // where custom MIME types may not appear in dataTransfer.types)
@@ -77,7 +69,6 @@ export function isInternalDrag(
   if (types.length > 0) {
     // Known internal drag types
     if (
-      types.includes("application/x-app-grid-item") ||
       types.includes("application/x-workflow-node") ||
       types.includes("application/x-file-reference")
     ) {
@@ -96,7 +87,8 @@ export function isInternalDrag(
   return false;
 }
 
-const CHAT_DROP_TARGET_SELECTOR = "[data-chat-drop-target]";
+const CHAT_DROP_TARGET_SELECTOR =
+  "[data-chat-drop-target]:not([data-chat-file-drop-disabled])";
 const CHAT_DROP_TARGET_HIT_SLOP_PX = 240;
 
 function getExpandedChatDropTarget(

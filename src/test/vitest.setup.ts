@@ -730,6 +730,7 @@ const CLI_ALIAS_MAP_FIXTURE: Map<string, AliasEntry> = new Map([
   ["manage_session", subagentMsg("subagent", "subagent")],
   ["agent", subagentMsg("subagent", "subagent")],
   ["spawn", subagentMsg("subagent", "subagent")],
+  ["spawn_agent", subagentMsg("subagent", "subagent")],
   ["spawn_sub_agent", subagentMsg("subagent", "subagent")],
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -891,6 +892,7 @@ _setCliToolAliasMap(CLI_ALIAS_MAP_FIXTURE);
 
 if (!i18next.isInitialized) {
   i18next.init({
+    showSupportNotice: false,
     lng: "en",
     fallbackLng: "en",
     ns: ["sessions"],

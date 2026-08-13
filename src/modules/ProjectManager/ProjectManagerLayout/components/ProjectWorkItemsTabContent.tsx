@@ -1,99 +1,66 @@
-import { emit } from "@tauri-apps/api/event";
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { ListTodo } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import {
-  type MemberEntry,
-  type WorkItemPartialUpdate,
-  enrichedWorkItemToUI,
-  projectApi,
-  workItemDataToUI,
-} from "@src/api/http/project";
+import Checkbox from "@src/components/Checkbox";
+import IntegrationIcon from "@src/components/IntegrationIcon";
+import type { SettingsTableSelectFilter } from "@src/components/SettingsTable";
 import TabPill from "@src/components/TabPill";
 import type { TabPillItem } from "@src/components/TabPill";
-import KanbanBoard from "@src/features/KanbanBoard";
-import type { KanbanTask, TaskStatus } from "@src/features/KanbanBoard";
-import {
-  useCurrentUserMemberIds,
-  useProjectDataChanged,
-} from "@src/hooks/project";
-import type { WorkstationTabHeaderHost } from "@src/hooks/workStation";
-import type { LinearProjectSelection } from "@src/modules/ProjectManager/Panels/ProjectManagerSidebar/content/WorkspaceTreeContent";
+import { HEADER_ICON_SIZE } from "@src/config/workstation/tokens";
 import { MultiSelectBar } from "@src/modules/ProjectManager/WorkItems/components/WorkItemsFooterBars";
-import WorkItemsListSurface from "@src/modules/ProjectManager/WorkItems/components/WorkItemsListSurface";
 import WorkItemsPageHeader from "@src/modules/ProjectManager/WorkItems/components/WorkItemsPageHeader";
-import type { StatusCounts } from "@src/modules/ProjectManager/WorkItems/components/WorkItemsPageHeader";
-import type { StatusFilterType } from "@src/modules/ProjectManager/WorkItems/types";
+import WorkItemsStatusFilterSelect from "@src/modules/ProjectManager/WorkItems/components/WorkItemsStatusFilterSelect";
+import type {
+  StatusCounts,
+  StatusFilterType,
+} from "@src/modules/ProjectManager/WorkItems/types";
+import {
+  formatWorkItemShortId,
+  getWorkItemSourceIntegration,
+  isGitHubIssueStatus,
+} from "@src/modules/ProjectManager/WorkItems/workItemIdentity";
 import {
   WORK_ITEMS_KANBAN_GROUP,
   type WorkItemsKanbanGroup,
-  countWorkItemsByStatus,
-  filterWorkItemsByStatus,
-  getStatusFilterKeysForWorkItems,
-  getWorkItemsKanbanColumns,
-  groupWorkItemsForStatusFilter,
-  workItemsToKanbanTasks,
+  countWorkspaceWorkItemsByStatus,
+  filterWorkItemsBySearchQuery,
+  filterWorkspaceWorkItemsByStatus,
+  getWorkItemStatus,
+  getWorkspaceStatusFilterKeysForWorkItems,
 } from "@src/modules/ProjectManager/WorkItems/workItemsViewModel";
+import {
+  GITHUB_ISSUE_STATUS_OPTIONS,
+  WORK_ITEM_STATUS_OPTIONS,
+} from "@src/modules/ProjectManager/config/manage";
 import { useProjectManagerWorkItemsTabBarRegistration } from "@src/modules/ProjectManager/hooks/useProjectManagerWorkItemsTabBarRegistration";
 import { PROJECT_MANAGER_PLACEHOLDER_PLACEMENT } from "@src/modules/ProjectManager/shared/placeholderTokens";
+import { WORKSPACE_SOURCE } from "@src/modules/ProjectManager/workspaceAggregate";
+import { WorkstationHeaderSectionSeparator } from "@src/modules/WorkStation/shared";
+import { WorkManagementAssigneeCell } from "@src/modules/shared/components/WorkManagementAssigneeCell";
 import {
-  WORKSPACE_SOURCE,
-  type WorkspaceWorkItem,
-  loadWorkspaceLinearWorkItems,
-} from "@src/modules/ProjectManager/workspaceAggregate";
+  WorkManagementTable,
+  type WorkManagementTableRow,
+} from "@src/modules/shared/components/WorkManagementTable";
 import { Placeholder } from "@src/modules/shared/layouts/blocks";
-import type { WorkItem as WorkItemExtended } from "@src/types/core/workItem";
+import type { WorkItemStatus } from "@src/types/core/workItem";
+import { formatRelativeTime } from "@src/util/time/formatRelativeTime";
 
-interface ProjectWorkItemsTabContentProps {
-  breadcrumbSegments?: readonly { label: string }[];
-  workStationTabId?: string;
-  workstationHeaderHost?: WorkstationTabHeaderHost;
-  onCreateProject?: () => void;
-  onCreateWorkItem?: () => void;
-  onOpenLinearProject?: (selection: LinearProjectSelection) => void;
-  orgId?: string;
-  allowExternalSources?: boolean;
-  onOpenWorkItem: (selection: ProjectWorkItemSelection) => void;
-  /** Org hub surface pills shown after the breadcrumb (Overview / Projects / …). */
-  orgSurfaceControls?: React.ReactNode;
-}
+import { STORY_WORK_ITEMS_VISIBLE_TABS } from "./ProjectWorkItemsTabContentConstants";
+import type {
+  ProjectWorkItemsTabContentProps,
+  ProjectWorkItemsViewTab,
+  WorkspaceSourceMode,
+} from "./ProjectWorkItemsTabContentTypes";
+import { useProjectWorkItemsTabContentInteractions } from "./useProjectWorkItemsTabContentInteractions";
+import { useProjectWorkItemsTabContentWorkspaceData } from "./useProjectWorkItemsTabContentWorkspaceData";
 
-interface AggregatedWorkItemProject {
-  meta: {
-    id: string;
-    name: string;
-  };
-  slug: string;
-}
+const KanbanBoard = React.lazy(() => import("@src/features/KanbanBoard"));
 
-interface AggregatedWorkItem {
-  project?: AggregatedWorkItemProject;
-  item: WorkspaceWorkItem;
-  shortId: string;
-  orgId: string;
-  orgName?: string;
-}
-
-export interface ProjectWorkItemSelection {
-  workItem: WorkspaceWorkItem;
-  shortId: string;
-  orgId: string;
-  orgName?: string;
-  projectId?: string;
-  projectName?: string;
-  projectSlug?: string;
-}
-
-type WorkspaceSourceMode = "local_only" | "include_external";
-type ProjectWorkItemsViewTab = "List" | "Kanban";
-
-const STORY_WORK_ITEMS_VISIBLE_TABS = ["List", "Kanban"] as const;
+export type {
+  ProjectWorkItemSelection,
+  ProjectWorkItemsTabContentProps,
+} from "./ProjectWorkItemsTabContentTypes";
 
 export const ProjectWorkItemsTabContent: React.FC<
   ProjectWorkItemsTabContentProps
@@ -101,6 +68,7 @@ export const ProjectWorkItemsTabContent: React.FC<
   breadcrumbSegments,
   workStationTabId,
   workstationHeaderHost = "project",
+  onOpenProjects,
   onCreateProject,
   onCreateWorkItem,
   onOpenLinearProject,
@@ -110,441 +78,241 @@ export const ProjectWorkItemsTabContent: React.FC<
   orgSurfaceControls,
 }) => {
   const { t } = useTranslation("projects");
-  const [workItemsByProject, setWorkItemsByProject] = useState<
-    AggregatedWorkItem[]
-  >([]);
-  const [projectOptions, setProjectOptions] = useState<
-    Array<{
-      id: string;
-      name: string;
-      slug: string;
-      orgId: string;
-      orgName?: string;
-    }>
-  >([]);
-  const [loading, setLoading] = useState(true);
-  const [loaded, setLoaded] = useState(false);
-  const loadedRef = useRef(false);
-  const [error, setError] = useState<string | null>(null);
   const [activeViewTab, setActiveViewTab] =
     useState<ProjectWorkItemsViewTab>("List");
   const [statusFilter, setStatusFilter] = useState<StatusFilterType>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [kanbanGroupBy, setKanbanGroupBy] = useState<WorkItemsKanbanGroup>(
     WORK_ITEMS_KANBAN_GROUP.STATUS
   );
-  const [collapseAllSignal, setCollapseAllSignal] = useState(0);
-  const [selectedWorkItemIds, setSelectedWorkItemIds] = useState<Set<string>>(
-    new Set()
-  );
-  const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [workspaceSourceMode, setWorkspaceSourceMode] =
-    useState<WorkspaceSourceMode>("local_only");
 
-  const includeExternalSources =
-    allowExternalSources && workspaceSourceMode === "include_external";
+  const {
+    workItemsByProject,
+    setWorkItemsByProject,
+    projectOptions,
+    loading,
+    loaded,
+    error,
+    completedItemsLoading,
+    completedItemsError,
+    loadWorkItems,
+    loadCompletedWorkItems,
+    workspaceSourceMode,
+    setWorkspaceSourceMode,
+  } = useProjectWorkItemsTabContentWorkspaceData({
+    orgId,
+    allowExternalSources,
+    t,
+  });
 
   useEffect(() => {
-    if (!allowExternalSources) {
-      setWorkspaceSourceMode("local_only");
+    if (statusFilter === "done" || statusFilter === "closed") {
+      void loadCompletedWorkItems();
     }
-  }, [allowExternalSources]);
-
-  const loadWorkItems = useCallback(
-    async (cancelled?: () => boolean) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [projects, orgs] = await Promise.all([
-          projectApi.readProjects({ orgId }),
-          projectApi.readOrgs(),
-        ]);
-        const orgNameById = new Map(orgs.map((org) => [org.id, org.name]));
-        const [localEntryGroups, standaloneWorkItems, linearWorkItems] =
-          await Promise.all([
-            Promise.all(
-              projects.map(async (project) => {
-                const projectWorkItems = await projectApi.readWorkItemsEnriched(
-                  project.slug,
-                  { orgId }
-                );
-                return projectWorkItems.map((workItem) => ({
-                  project,
-                  shortId: workItem.shortId,
-                  orgId: project.meta.org_id,
-                  orgName: orgNameById.get(project.meta.org_id),
-                  item: {
-                    ...enrichedWorkItemToUI(workItem),
-                    project: {
-                      id: project.meta.id,
-                      name: project.meta.name,
-                    },
-                  },
-                }));
-              })
-            ),
-            projectApi.readStandaloneWorkItems({ orgId }),
-            includeExternalSources ? loadWorkspaceLinearWorkItems() : [],
-          ]);
-        if (cancelled?.()) return;
-        setProjectOptions(
-          projects.map((project) => ({
-            id: project.meta.id,
-            name: project.meta.name,
-            slug: project.slug,
-            orgId: project.meta.org_id,
-            orgName: orgNameById.get(project.meta.org_id),
-          }))
-        );
-        const standaloneOrgId = orgId ?? "personal-org";
-        const standaloneEntries = standaloneWorkItems.map((workItem) => ({
-          shortId: workItem.frontmatter.short_id ?? workItem.frontmatter.id,
-          orgId: standaloneOrgId,
-          orgName: orgNameById.get(standaloneOrgId),
-          item: workItemDataToUI(workItem, {
-            labelMap: new Map(),
-            memberMap: new Map(),
-            projectNameMap: new Map(),
-          }),
-        }));
-        const linearEntries = linearWorkItems.map((workItem) => ({
-          project: {
-            meta: {
-              id: workItem.workspaceSource?.projectId ?? "linear",
-              name: workItem.workspaceSource?.projectName ?? "Linear",
-            },
-            slug: workItem.workspaceSource?.projectId ?? "linear",
-          },
-          shortId: workItem.session_id,
-          orgId: "",
-          item: workItem,
-        }));
-        setWorkItemsByProject([
-          ...localEntryGroups.flat(),
-          ...standaloneEntries,
-          ...linearEntries,
-        ]);
-        loadedRef.current = true;
-        setLoaded(true);
-      } catch (err) {
-        if (cancelled?.()) return;
-        if (!loadedRef.current) {
-          setWorkItemsByProject([]);
-        }
-        setError(
-          err instanceof Error ? err.message : t("projects.loadProjectsFailed")
-        );
-      } finally {
-        if (!cancelled?.()) setLoading(false);
-      }
-    },
-    [includeExternalSources, orgId, t]
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    void loadWorkItems(() => cancelled);
-    return () => {
-      cancelled = true;
-    };
-  }, [loadWorkItems]);
-
-  useProjectDataChanged(
-    useCallback(() => {
-      void loadWorkItems();
-    }, [loadWorkItems])
-  );
+  }, [loadCompletedWorkItems, statusFilter]);
 
   const workItems = useMemo(
     () => workItemsByProject.map((entry) => entry.item),
     [workItemsByProject]
   );
 
-  const availableProjects = useMemo(
-    () => projectOptions.map(({ id, name }) => ({ id, name })),
-    [projectOptions]
-  );
-
   const statusCounts = useMemo<StatusCounts>(
-    () => countWorkItemsByStatus(workItems),
+    () => countWorkspaceWorkItemsByStatus(workItems),
     [workItems]
   );
 
   const statusFilterKeys = useMemo(
-    () => getStatusFilterKeysForWorkItems(workItems),
+    () => getWorkspaceStatusFilterKeysForWorkItems(workItems),
     [workItems]
   );
   useEffect(() => {
     if (!statusFilterKeys.includes(statusFilter)) {
+      // Pre-existing reset behavior, unchanged by the file split. The analyzer
+      // only surfaces this now that the component is small enough to fully
+      // analyze; fixing it would be an out-of-scope behavior change.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setStatusFilter("all");
     }
   }, [statusFilter, statusFilterKeys]);
 
   const filteredWorkItems = useMemo(
-    () => filterWorkItemsByStatus(workItems, statusFilter),
+    () => filterWorkspaceWorkItemsByStatus(workItems, statusFilter),
     [statusFilter, workItems]
   );
 
-  const groupedWorkItems = useMemo(
-    () => groupWorkItemsForStatusFilter(filteredWorkItems, statusFilter),
-    [filteredWorkItems, statusFilter]
+  const visibleWorkItems = useMemo(
+    () => filterWorkItemsBySearchQuery(filteredWorkItems, searchQuery),
+    [filteredWorkItems, searchQuery]
   );
+  const completedStatusSelected =
+    statusFilter === "done" || statusFilter === "closed";
 
-  const workItemPeople = useMemo<MemberEntry[]>(() => {
-    const people = new Map<string, MemberEntry>();
-    for (const workItem of workItems) {
-      for (const person of [workItem.assignee, workItem.createdBy]) {
-        if (!person) continue;
-        people.set(person.id, {
-          id: person.id,
-          name: person.name,
-          avatar: person.avatar,
-          active: true,
-        });
-      }
-    }
-    return [...people.values()];
-  }, [workItems]);
-  const { memberIds: currentUserMemberIds } =
-    useCurrentUserMemberIds(workItemPeople);
-  const pinnedKanbanColumnIds = useMemo(
-    () => [...currentUserMemberIds].map((memberId) => `person:${memberId}`),
-    [currentUserMemberIds]
-  );
+  const {
+    kanbanTasks,
+    kanbanColumns,
+    workItemPeople,
+    selectableFilteredWorkItemCount,
+    selectedWorkItemIds,
+    bulkDeleting,
+    handleSelectWorkItem,
+    handleUpdateWorkItem,
+    handleKanbanTaskMove,
+    handleKanbanTaskClick,
+    handleAddKanbanTask,
+    handleRefresh,
+    handleCheckedChange,
+    handleSelectAll,
+    handleUnselectAll,
+    handleBulkDelete,
+  } = useProjectWorkItemsTabContentInteractions({
+    workItems,
+    workItemsByProject,
+    setWorkItemsByProject,
+    filteredWorkItems: visibleWorkItems,
+    projectOptions,
+    kanbanGroupBy,
+    loadWorkItems,
+    onOpenLinearProject,
+    onOpenWorkItem,
+    onCreateWorkItem,
+    t,
+  });
 
-  const kanbanTasks = useMemo<KanbanTask[]>(
-    () => workItemsToKanbanTasks(filteredWorkItems, kanbanGroupBy),
-    [filteredWorkItems, kanbanGroupBy]
-  );
-  const kanbanColumns = useMemo(
+  const settingsRows = useMemo<WorkManagementTableRow[]>(
     () =>
-      getWorkItemsKanbanColumns(
-        filteredWorkItems,
-        kanbanGroupBy,
-        t("workItems.properties.noAssignee"),
-        pinnedKanbanColumnIds
-      ),
-    [filteredWorkItems, kanbanGroupBy, pinnedKanbanColumnIds, t]
-  );
-
-  const selectableFilteredWorkItemCount = useMemo(
-    () =>
-      filteredWorkItems.filter(
-        (workItem) =>
-          workItem.workspaceSource?.source !== WORKSPACE_SOURCE.LINEAR
-      ).length,
-    [filteredWorkItems]
-  );
-
-  const workItemById = useMemo(() => {
-    const map = new Map<string, AggregatedWorkItem>();
-    for (const workItem of workItemsByProject) {
-      map.set(workItem.item.session_id, workItem);
-    }
-    return map;
-  }, [workItemsByProject]);
-
-  const handleSelectWorkItem = useCallback(
-    (workItemId: string) => {
-      const workItem = workItemById.get(workItemId);
-      if (!workItem) return;
-      if (
-        workItem.item.workspaceSource?.source === WORKSPACE_SOURCE.LINEAR &&
-        onOpenLinearProject
-      ) {
-        onOpenLinearProject({
-          connectionId: workItem.item.workspaceSource.connectionId,
-          projectId: workItem.item.workspaceSource.projectId,
-          projectName: workItem.item.workspaceSource.projectName,
-          teamId: workItem.item.workspaceSource.teamId,
-          teamName: workItem.item.workspaceSource.teamName,
-        });
-        return;
-      }
-      onOpenWorkItem({
-        workItem: workItem.item,
-        shortId: workItem.shortId,
-        orgId: workItem.orgId,
-        orgName: workItem.orgName,
-        projectId: workItem.project?.meta.id,
-        projectName: workItem.project?.meta.name,
-        projectSlug: workItem.project?.slug,
-      });
-    },
-    [workItemById, onOpenLinearProject, onOpenWorkItem]
-  );
-
-  const handleUpdateWorkItem = useCallback(
-    async (workItemId: string, updates: Partial<WorkItemExtended>) => {
-      const entry = workItemById.get(workItemId);
-      if (!entry?.project?.slug) return;
-      if (entry.item.workspaceSource?.source === WORKSPACE_SOURCE.LINEAR)
-        return;
-
-      if ("project" in updates) {
-        const targetProject = updates.project
-          ? projectOptions.find((project) => project.id === updates.project?.id)
-          : null;
-        if (!targetProject || targetProject.slug === entry.project.slug) return;
-        await projectApi.moveWorkItem(
-          entry.item.session_id,
-          entry.project.slug,
-          targetProject.slug
+      visibleWorkItems.map((workItem) => {
+        const status = getWorkItemStatus(workItem);
+        const isSelected = selectedWorkItemIds.has(workItem.session_id);
+        const statusOptions = isGitHubIssueStatus(status)
+          ? GITHUB_ISSUE_STATUS_OPTIONS
+          : WORK_ITEM_STATUS_OPTIONS;
+        const statusOption = statusOptions.find(
+          (option) => option.value === status
         );
-        setWorkItemsByProject((currentEntries) =>
-          currentEntries.map((currentEntry) =>
-            currentEntry.item.session_id === workItemId
-              ? {
-                  ...currentEntry,
-                  project: {
-                    meta: {
-                      id: targetProject.id,
-                      name: targetProject.name,
-                    },
-                    slug: targetProject.slug,
-                  },
-                  orgId: targetProject.orgId,
-                  orgName: targetProject.orgName,
-                  item: {
-                    ...currentEntry.item,
-                    project: {
-                      id: targetProject.id,
-                      name: targetProject.name,
-                    },
-                  },
-                }
-              : currentEntry
-          )
+        const storedId = workItem.shortId || workItem.session_id;
+        const displayId =
+          formatWorkItemShortId(storedId, status, workItem.project?.name) ??
+          storedId;
+        const sourceIntegration = getWorkItemSourceIntegration(
+          status,
+          workItem.workspaceSource?.source
         );
-        return;
-      }
+        const tags = Array.from(
+          new Set((workItem.labels ?? []).map((label) => label.name))
+        );
 
-      const payload: WorkItemPartialUpdate = {};
-      if (updates.name !== undefined) payload.title = updates.name;
-      if (updates.spec !== undefined) payload.body = updates.spec;
-      if (updates.workItemStatus !== undefined) {
-        payload.status = updates.workItemStatus;
-      }
-      if (updates.priority !== undefined) payload.priority = updates.priority;
-      if ("endDate" in updates) payload.targetDate = updates.endDate ?? null;
-      if (Object.keys(payload).length === 0) return;
-
-      const updated = await projectApi.updateWorkItemPartial(
-        entry.project.slug,
-        entry.item.session_id,
-        payload
-      );
-      const updatedItem = {
-        ...enrichedWorkItemToUI(updated),
-        project: entry.item.project,
-      };
-      setWorkItemsByProject((currentEntries) =>
-        currentEntries.map((currentEntry) =>
-          currentEntry.item.session_id === workItemId
-            ? { ...currentEntry, item: updatedItem }
-            : currentEntry
-        )
-      );
-    },
-    [projectOptions, workItemById]
+        return {
+          key: workItem.session_id,
+          selection: (
+            <Checkbox
+              checked={isSelected}
+              size="small"
+              className={`shrink-0 ${
+                isSelected ? "" : "[&_[data-checkbox-icon]]:!bg-bg-2"
+              }`}
+              ariaLabel={t("common:workManagementTable.selectRow", {
+                id: displayId,
+              })}
+              onChange={(checked) =>
+                handleCheckedChange(workItem.session_id, checked)
+              }
+            />
+          ),
+          idSortValue: displayId,
+          id: (
+            <div className="flex min-w-0 items-center gap-1.5">
+              {sourceIntegration ? (
+                <IntegrationIcon
+                  type={sourceIntegration}
+                  size={14}
+                  className="shrink-0 text-text-2"
+                />
+              ) : null}
+              <span className="min-w-0 truncate">{displayId}</span>
+            </div>
+          ),
+          title: workItem.name || t("workItems.untitledWorkItem"),
+          titleLinkOnRowHover: true,
+          metadata: workItem.project?.name
+            ? [workItem.project.name]
+            : undefined,
+          tags,
+          assignee: (
+            <WorkManagementAssigneeCell
+              currentAssigneeIds={
+                workItem.assignee ? [workItem.assignee.id] : []
+              }
+              options={workItemPeople.map((person) => ({
+                id: person.id,
+                label: person.name,
+                avatar: person.avatar,
+              }))}
+              noneLabel={t("workItems.properties.noAssignee")}
+              loadingLabel={t("common:status.loading")}
+              searchPlaceholder={t("properties.searchAssignee")}
+              readonlyReason={t("common:errors.messages.forbidden")}
+              disabled={
+                workItem.workspaceSource?.source === WORKSPACE_SOURCE.LINEAR ||
+                !workItem.project
+              }
+              dataTestId={`work-item-assignee-${workItem.session_id}`}
+              onChangeAssigneeIds={(assigneeIds) => {
+                const assignee = workItemPeople.find(
+                  (person) => person.id === assigneeIds[0]
+                );
+                return handleUpdateWorkItem(workItem.session_id, {
+                  assignee,
+                  assigneeType: assignee ? "human" : undefined,
+                });
+              }}
+            />
+          ),
+          statusSelect: statusOption
+            ? {
+                value: status,
+                label: t(`workItems.statusLabels.${statusOption.value}`, {
+                  defaultValue: statusOption.label,
+                }),
+                icon: statusOption.icon,
+                iconColor: statusOption.color,
+                options: statusOptions.map((option) => ({
+                  value: option.value,
+                  label: t(`workItems.statusLabels.${option.value}`, {
+                    defaultValue: option.label,
+                  }),
+                  icon: option.icon,
+                  iconColor: option.color,
+                })),
+                onChange: (nextStatus) =>
+                  handleUpdateWorkItem(workItem.session_id, {
+                    workItemStatus: nextStatus as WorkItemStatus,
+                  }),
+                readonly:
+                  workItem.workspaceSource?.source === WORKSPACE_SOURCE.LINEAR,
+                dataTestId: `work-item-status-${displayId}`,
+              }
+            : undefined,
+          status: statusOption ? undefined : (
+            <span className="capitalize text-text-2">{status}</span>
+          ),
+          updated: (
+            <span title={workItem.updated_time}>
+              {formatRelativeTime(workItem.updated_time, "nano") || "—"}
+            </span>
+          ),
+          onClick: () => handleSelectWorkItem(workItem.session_id),
+        };
+      }),
+    [
+      handleCheckedChange,
+      handleSelectWorkItem,
+      handleUpdateWorkItem,
+      selectedWorkItemIds,
+      t,
+      visibleWorkItems,
+      workItemPeople,
+    ]
   );
-
-  const handleKanbanTaskMove = useCallback(
-    (taskId: string, newStatus: TaskStatus) => {
-      if (kanbanGroupBy !== WORK_ITEMS_KANBAN_GROUP.STATUS) return;
-      void handleUpdateWorkItem(taskId, {
-        workItemStatus: newStatus as WorkItemExtended["workItemStatus"],
-      });
-    },
-    [handleUpdateWorkItem, kanbanGroupBy]
-  );
-
-  const handleKanbanTaskClick = useCallback(
-    (task: KanbanTask) => {
-      handleSelectWorkItem(task.id);
-    },
-    [handleSelectWorkItem]
-  );
-
-  const handleAddKanbanTask = useCallback(
-    (_status: TaskStatus) => {
-      onCreateWorkItem?.();
-    },
-    [onCreateWorkItem]
-  );
-
-  const handleRefresh = useCallback(() => {
-    void loadWorkItems();
-  }, [loadWorkItems]);
-
-  const handleCheckedChange = useCallback(
-    (workItemId: string, checked: boolean) => {
-      setSelectedWorkItemIds((previous) => {
-        const next = new Set(previous);
-        if (checked) {
-          next.add(workItemId);
-        } else {
-          next.delete(workItemId);
-        }
-        return next;
-      });
-    },
-    []
-  );
-
-  const handleSelectAll = useCallback(() => {
-    setSelectedWorkItemIds(
-      new Set(
-        filteredWorkItems
-          .filter(
-            (workItem) =>
-              workItem.workspaceSource?.source !== WORKSPACE_SOURCE.LINEAR
-          )
-          .map((workItem) => workItem.session_id)
-      )
-    );
-  }, [filteredWorkItems]);
-
-  const handleUnselectAll = useCallback(() => {
-    setSelectedWorkItemIds(new Set());
-  }, []);
-
-  const handleBulkDelete = useCallback(async () => {
-    const selectedLocalEntries = [...selectedWorkItemIds]
-      .map((workItemId) => workItemById.get(workItemId))
-      .filter(
-        (entry): entry is AggregatedWorkItem =>
-          !!entry &&
-          entry.item.workspaceSource?.source !== WORKSPACE_SOURCE.LINEAR
-      );
-    if (selectedLocalEntries.length === 0) return;
-
-    setBulkDeleting(true);
-    try {
-      const entriesByProjectSlug = new Map<string, string[]>();
-      for (const entry of selectedLocalEntries) {
-        if (!entry.project?.slug) continue;
-        const currentShortIds =
-          entriesByProjectSlug.get(entry.project.slug) ?? [];
-        currentShortIds.push(entry.item.session_id);
-        entriesByProjectSlug.set(entry.project.slug, currentShortIds);
-      }
-
-      await Promise.all(
-        [...entriesByProjectSlug].map(([projectSlug, shortIds]) =>
-          projectApi.batchDeleteWorkItems(projectSlug, shortIds)
-        )
-      );
-      await emit("orgii-data-changed");
-      setSelectedWorkItemIds(new Set());
-      await loadWorkItems();
-    } finally {
-      setBulkDeleting(false);
-    }
-  }, [loadWorkItems, selectedWorkItemIds, workItemById]);
-
-  const handleCollapseAll = useCallback(() => {
-    setCollapseAllSignal((currentSignal) => currentSignal + 1);
-  }, []);
 
   const workspaceSourceTabs = useMemo<TabPillItem[]>(
     () => [
@@ -619,9 +387,12 @@ export const ProjectWorkItemsTabContent: React.FC<
     );
   }, [activeViewTab, kanbanGroupBy, kanbanGroupTabs]);
 
-  const handleWorkspaceSourceModeChange = useCallback((key: string) => {
-    setWorkspaceSourceMode(key as WorkspaceSourceMode);
-  }, []);
+  const handleWorkspaceSourceModeChange = useCallback(
+    (key: string) => {
+      setWorkspaceSourceMode(key as WorkspaceSourceMode);
+    },
+    [setWorkspaceSourceMode]
+  );
 
   const sourceModeSwitch = useMemo(() => {
     if (!allowExternalSources) return null;
@@ -643,27 +414,93 @@ export const ProjectWorkItemsTabContent: React.FC<
     workspaceSourceTabs,
   ]);
 
+  const tableSelectFilters = useMemo<SettingsTableSelectFilter[]>(() => {
+    const filters: SettingsTableSelectFilter[] = [
+      {
+        key: "status",
+        value: statusFilter,
+        defaultValue: "all",
+        options: statusFilterKeys.map((key) => {
+          const label = t(`workItems.statusFilters.${key}`);
+          return {
+            value: key,
+            label: (
+              <span className="flex items-center gap-2 whitespace-nowrap">
+                <span>{label}</span>
+                <span className="tabular-nums text-text-3">
+                  {statusCounts[key] ?? 0}
+                </span>
+              </span>
+            ),
+            triggerLabel: label,
+          };
+        }),
+        onChange: (value) => setStatusFilter(value as StatusFilterType),
+        minWidth: 172,
+        appearance: "default",
+      },
+    ];
+    if (allowExternalSources) {
+      filters.push({
+        key: "source",
+        value: workspaceSourceMode,
+        defaultValue: "local_only",
+        options: workspaceSourceTabs.map((tab) => ({
+          value: tab.key,
+          label: tab.label,
+        })),
+        onChange: (value) =>
+          setWorkspaceSourceMode(value as WorkspaceSourceMode),
+        minWidth: 150,
+        appearance: "default",
+      });
+    }
+    return filters;
+  }, [
+    allowExternalSources,
+    setWorkspaceSourceMode,
+    statusCounts,
+    statusFilter,
+    statusFilterKeys,
+    t,
+    workspaceSourceMode,
+    workspaceSourceTabs,
+  ]);
+
   const headerLeadingControls = useMemo(
     () => (
-      <div className="flex min-w-0 items-center gap-1.5">
-        {orgSurfaceControls}
-        {orgSurfaceControls && <span className="text-xs text-text-4">/</span>}
+      <div className="contents">
+        {activeViewTab === "Kanban" ? (
+          <>
+            <WorkItemsStatusFilterSelect
+              value={statusFilter}
+              onChange={setStatusFilter}
+              statusCounts={statusCounts}
+              filterKeys={statusFilterKeys}
+              dropdownAlign="left"
+            />
+            <WorkstationHeaderSectionSeparator />
+            {orgSurfaceControls}
+            {orgSurfaceControls && <WorkstationHeaderSectionSeparator />}
+          </>
+        ) : null}
         {workItemsViewSwitch}
-        {kanbanGroupSwitch && <span className="text-xs text-text-4">/</span>}
+        {kanbanGroupSwitch && <WorkstationHeaderSectionSeparator />}
         {kanbanGroupSwitch}
-        {sourceModeSwitch && (
-          <span
-            className="pointer-events-none mx-1 h-4 w-px shrink-0 bg-border-2"
-            aria-hidden
-          />
-        )}
-        {sourceModeSwitch}
+        {activeViewTab === "Kanban" && sourceModeSwitch ? (
+          <WorkstationHeaderSectionSeparator />
+        ) : null}
+        {activeViewTab === "Kanban" ? sourceModeSwitch : null}
       </div>
     ),
     [
+      activeViewTab,
       kanbanGroupSwitch,
       orgSurfaceControls,
       sourceModeSwitch,
+      statusCounts,
+      statusFilter,
+      statusFilterKeys,
       workItemsViewSwitch,
     ]
   );
@@ -696,6 +533,7 @@ export const ProjectWorkItemsTabContent: React.FC<
         variant="error"
         placement={PROJECT_MANAGER_PLACEHOLDER_PLACEMENT}
         title={error}
+        onRetry={handleRefresh}
         fillParentHeight
       />
     );
@@ -706,79 +544,100 @@ export const ProjectWorkItemsTabContent: React.FC<
       <WorkItemsPageHeader
         projectName={t("projects.columns.workItems")}
         breadcrumbSegments={breadcrumbSegments}
-        activeTab={activeViewTab}
-        onTabChange={(tab) => {
-          if (tab === "List" || tab === "Kanban") {
-            setActiveViewTab(tab);
-          }
-        }}
-        statusFilter={statusFilter}
-        onStatusFilterChange={(value) =>
-          setStatusFilter(value as StatusFilterType)
+        identityIcon={
+          <ListTodo size={HEADER_ICON_SIZE.sm} strokeWidth={1.75} />
         }
+        onOpenProjects={onOpenProjects}
+        activeTab={activeViewTab}
         statusCounts={statusCounts}
-        statusFilterKeys={statusFilterKeys}
-        onCollapseAll={handleCollapseAll}
         onAddProject={onCreateProject}
         onAddWorkItem={onCreateWorkItem}
         onRefresh={handleRefresh}
         refreshLoading={loading}
-        visibleTabs={STORY_WORK_ITEMS_VISIBLE_TABS}
         leadingControls={headerLeadingControls}
         publishToWorkstationHeader={!!workStationTabId}
         workstationHeaderHost={workstationHeaderHost}
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden scrollbar-hide">
+      <div className="min-h-0 flex-1 overflow-hidden">
         {activeViewTab === "Kanban" ? (
           <div className="h-full min-h-0">
-            <KanbanBoard
-              tasks={kanbanTasks}
-              columnOrder={kanbanColumns}
-              allowColumnReorder={false}
-              allowTaskDrag={kanbanGroupBy === WORK_ITEMS_KANBAN_GROUP.STATUS}
-              onTaskMove={handleKanbanTaskMove}
-              onTaskClick={handleKanbanTaskClick}
-              onAddTask={handleAddKanbanTask}
-              showAddButton={
-                kanbanGroupBy === WORK_ITEMS_KANBAN_GROUP.STATUS &&
-                Boolean(onCreateWorkItem)
-              }
-              className="kanban-board--linear"
-            />
+            <React.Suspense
+              fallback={<Placeholder variant="loading" fillParentHeight />}
+            >
+              <KanbanBoard
+                tasks={kanbanTasks}
+                columnOrder={kanbanColumns}
+                allowColumnReorder={false}
+                allowTaskDrag={kanbanGroupBy === WORK_ITEMS_KANBAN_GROUP.STATUS}
+                onTaskMove={handleKanbanTaskMove}
+                onTaskClick={handleKanbanTaskClick}
+                onAddTask={handleAddKanbanTask}
+                showAddButton={
+                  kanbanGroupBy === WORK_ITEMS_KANBAN_GROUP.STATUS &&
+                  Boolean(onCreateWorkItem)
+                }
+                className="kanban-board--linear"
+              />
+            </React.Suspense>
           </div>
         ) : (
-          <WorkItemsListSurface
-            groupedWorkItems={groupedWorkItems}
-            filteredWorkItems={filteredWorkItems}
-            selectedWorkItem={null}
-            selectedWorkItemId={null}
-            workItems={workItems}
-            availableMembers={[]}
-            availableProjects={availableProjects}
-            checkedWorkItemIds={selectedWorkItemIds}
-            onCheckedChange={handleCheckedChange}
-            onSelectWorkItem={handleSelectWorkItem}
-            onUpdateWorkItem={handleUpdateWorkItem}
-            collapseAllSignal={collapseAllSignal}
-            emptyListPlaceholder={
-              <Placeholder
-                variant="empty"
-                placement={PROJECT_MANAGER_PLACEHOLDER_PLACEMENT}
-                title={t("workItems.noWorkItems")}
-                subtitle={t("workItems.noWorkItemsSubtitle")}
-                action={
-                  onCreateWorkItem
-                    ? {
-                        label: t("workItems.addFirstWorkItem"),
-                        onClick: onCreateWorkItem,
-                      }
-                    : undefined
-                }
-                fillParentHeight
-              />
+          <WorkManagementTable
+            rows={settingsRows}
+            searchBar={{
+              searchValue: searchQuery,
+              searchPlaceholder: t("workItems.searchPlaceholder"),
+              onSearchChange: setSearchQuery,
+              onSearchClear: () => setSearchQuery(""),
+            }}
+            selectFilters={tableSelectFilters}
+            selectFiltersExtra={orgSurfaceControls}
+            pageSize={25}
+            pageSizeOptions={[10, 25, 50, 100]}
+            maxWidth="wide"
+            loading={completedStatusSelected && completedItemsLoading}
+            testId="workspace-work-items-table"
+            noDataElement={
+              completedStatusSelected && completedItemsLoading ? (
+                <Placeholder
+                  variant="loading"
+                  placement={PROJECT_MANAGER_PLACEHOLDER_PLACEMENT}
+                  title={t("projects.loading")}
+                  fillParentHeight
+                />
+              ) : completedStatusSelected && completedItemsError ? (
+                <Placeholder
+                  variant="error"
+                  placement={PROJECT_MANAGER_PLACEHOLDER_PLACEMENT}
+                  title={completedItemsError}
+                  onRetry={() => void loadCompletedWorkItems()}
+                  fillParentHeight
+                />
+              ) : workItems.length === 0 ? (
+                <Placeholder
+                  variant="empty"
+                  placement={PROJECT_MANAGER_PLACEHOLDER_PLACEMENT}
+                  title={t("workItems.noWorkItems")}
+                  subtitle={t("workItems.noWorkItemsSubtitle")}
+                  action={
+                    onCreateWorkItem
+                      ? {
+                          label: t("workItems.addFirstWorkItem"),
+                          onClick: onCreateWorkItem,
+                        }
+                      : undefined
+                  }
+                  fillParentHeight
+                />
+              ) : (
+                <Placeholder
+                  variant="no-results"
+                  placement={PROJECT_MANAGER_PLACEHOLDER_PLACEMENT}
+                  title={t("workItems.noResults")}
+                  fillParentHeight
+                />
+              )
             }
-            hidePropertiesPanel
           />
         )}
       </div>

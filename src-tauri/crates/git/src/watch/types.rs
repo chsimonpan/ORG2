@@ -89,7 +89,7 @@ impl RepoState {
 // Git Status
 // ============================================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitStatus {
     pub branch: String,
     pub current_upstream_branch: Option<String>,
@@ -126,7 +126,7 @@ pub struct GitStatus {
 }
 
 /// Lightweight file status for event payloads
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GitStatusFile {
     pub path: String,
     pub status: String, // M, A, D, R, C, U, ?, !

@@ -142,7 +142,7 @@
     "timezoneAuto": "Auto (Browser)",
     "timezoneSearchPlaceholder": "Search closest cities",
     "sendOnEnter": "Send messages with Enter",
-    "sendOnEnterDesc": "When enabled, Enter sends and Shift+Enter inserts a new line. When disabled, Ctrl/Cmd+Enter sends",
+    "sendOnEnterDesc": "When enabled, Enter sends; Shift+Enter and Ctrl/Cmd+Enter insert a new line. When disabled, Ctrl/Cmd+Enter sends",
     "language": "Language",
     "languageSearchPlaceholder": "Search languages...",
     "languageNames": {
@@ -227,7 +227,10 @@
     "presenceGuidanceOnlineDefault": "I am at the keyboard. Feel free to ask me clarifying questions at any time and confirm any destructive actions with me before running them",
     "presenceGuidanceInvisibleDefault": "I am around but appearing offline. Default to autonomous execution and only notify me for high-risk actions or significant refactoring work; batch any other questions into a single summary instead of asking one by one",
     "presenceGuidanceAwayDefault": "I am away from the keyboard. Do not block on me — make the best decision you can with the information you have, finish what you can finish, and leave a concise summary of what happened and any open questions for when I return",
-    "followSystem": "Follow system"
+    "followSystem": "Follow system",
+    "preferences": "Preferences",
+    "usePointerCursors": "Use pointer cursors",
+    "usePointerCursorsDesc": "Change the cursor to a pointer when hovering over interactive elements"
   },
   "background": {
     "title": "Background",
@@ -703,8 +706,35 @@
     "test": {
       "sent": "Test notification sent",
       "permissionWarning": "Failed to send test notification. Check permissions.",
-      "sendFailed": "Unable to send test notification. Please check your notification permissions and try again."
-    }
+      "sendFailed": "Unable to send test notification. Please check your notification permissions and try again.",
+      "soundFailed": "Unable to play the notification sound. Check your system volume."
+    },
+    "soundPreset": "Notification sound",
+    "soundPresetDesc": "Choose the sound played for audible notifications",
+    "previewSound": "Preview",
+    "soundPresets": {
+      "classic": "Classic",
+      "gentle": "Gentle",
+      "ascending": "Ascending",
+      "bell": "Bell"
+    },
+    "criticalOnly": "Critical alerts only",
+    "criticalOnlyDesc": "Only notify when an action needs approval or a task fails",
+    "quietHours": "Do not disturb schedule",
+    "quietHoursDesc": "Silence routine notifications during a daily time window",
+    "quietHoursSchedule": "Quiet hours",
+    "quietHoursScheduleDesc": "Uses your device local time. Identical start and end times disable the window.",
+    "quietHoursStart": "From",
+    "quietHoursEnd": "To",
+    "allowCriticalDuringQuietHours": "Allow critical alerts",
+    "allowCriticalDuringQuietHoursDesc": "Approval requests and failures may show a system notification, but never play sound",
+    "backgroundCompletionSummary": "Summarize background completions",
+    "backgroundCompletionSummaryDesc": "Send one combined alert when quiet hours end",
+    "mutedSessions": "Muted sessions",
+    "mutedSessionsDesc": "{{count}} sessions are muted on this device",
+    "clearMutedSessions": "Clear all",
+    "teamInbox": "Team Inbox",
+    "teamInboxDesc": "Assignments, mentions, and handoffs from teammates"
   },
   "editor": {
     "tabEditor": "Editor",
@@ -811,10 +841,14 @@
     "installConfirmDesc": "Version {{version}} has been downloaded. Save any ongoing work before installing and restarting ORGII.",
     "installAndRestart": "Install and restart",
     "autoDownloadUpdates": "Automatically download future updates",
-    "skipVersion": "Skip this version"
+    "skipVersion": "Skip this version",
+    "installOfficialConfirmTitle": "Official app ready to install",
+    "installOfficialConfirmDesc": "Install official version {{version}} at /Applications/ORG2.app. This local build stays open and unchanged.",
+    "installOfficial": "Install official app",
+    "localBuild": "Local"
   },
   "monitor": {
-    "categoryTerminal": "Terminal/tool process",
+    "categoryTerminal": "Terminal process",
     "categoryWebview": "WebView renderer",
     "categoryGpu": "WebKit GPU",
     "categoryNetwork": "WebKit networking",
@@ -943,7 +977,24 @@
     "diskCategory_agentWorktrees": "Agent Session Worktrees",
     "diskCategory_lspBin": "LSP Server Binaries",
     "diskCategory_sidecarBin": "Downloaded Sidecar Binaries",
-    "loadZeroRows": "Click to load {{count}} more"
+    "loadZeroRows": "Click to load {{count}} more",
+    "appMemory": "App memory",
+    "appBackend": "ORG2 backend",
+    "appWebviewHelpers": "Owned WebView helpers",
+    "rssMappedDiagnostic": "RSS / mapped memory (diagnostic)",
+    "measurement": "Measurement",
+    "measurementKinds": {
+      "native": "Native effective memory",
+      "compatibility": "Compatibility metric",
+      "mixed": "Mixed native / fallback metrics",
+      "rss_fallback": "RSS fallback",
+      "unavailable": "Unavailable"
+    },
+    "toolProcessDiagnostics": "Terminal, CLI & tool processes (RSS diagnostic)",
+    "excludedFromAppMemory": "excluded from App memory",
+    "noToolProcesses": "No terminal, CLI, MCP, or tool processes detected",
+    "categoryAgentCli": "CLI agent",
+    "categoryMcpOrTool": "MCP / tool process"
   },
   "dependencies": {
     "systemDependencies": "System Dependencies",
@@ -997,7 +1048,13 @@
     "tableSize": "Size",
     "tablePercentage": "Perc.",
     "scanFailed": "Failed to scan disk usage",
-    "openFolderFailed": "Failed to open folder"
+    "openFolderFailed": "Failed to open folder",
+    "browserCache": "Browser cache",
+    "browserCacheDesc": "{{used}} used · {{cleanable}} can be safely cleaned",
+    "cleanBrowserCache": "Clean up",
+    "browserCacheCleaned": "Freed {{size}} of browser storage",
+    "browserCacheAlreadyClean": "Browser cache is already clean",
+    "browserCacheCleanFailed": "Failed to clean browser cache"
   },
   "agentSessions": {
     "title": "Agent Sessions",
@@ -1011,7 +1068,7 @@
     "decryptEffect": "Typewriter Effect",
     "decryptEffectDesc": "Reveal Agent messages character by character",
     "sendOnEnter": "Send messages with Enter",
-    "sendOnEnterDesc": "When enabled, Enter sends and Shift+Enter inserts a new line. When disabled, Ctrl/Cmd+Enter sends"
+    "sendOnEnterDesc": "When enabled, Enter sends; Shift+Enter and Ctrl/Cmd+Enter insert a new line. When disabled, Ctrl/Cmd+Enter sends"
   },
   "languageServers": {
     "languageServersDesc": "Manage LSP servers for autocomplete, diagnostics, and code intelligence",

@@ -4,35 +4,30 @@
  * Orchestrates providers and delegates layout to AppLayout.
  * All layout logic consolidated in layouts/shared/AppLayout.tsx
  *
- * CRITICAL ARCHITECTURE for View Mode Persistence:
- * - WorkStation (Workstation view): Always mounted, visibility controlled by CSS
- *   (includes Code Editor, Browser, Database, Chat, Project Manager)
- * - MainApp: Rendered via Outlet (route-based)
- * - This ensures WorkStation state survives view mode switches
+ * The router mounts this shell only for WorkStation and Settings routes.
+ * WorkStation remains mounted while Settings occupies the chat-panel slot.
  *
  * Performance:
  * - SidebarSelector: DYNAMIC layer - changes per route
- * - ChatPanel: STABLE layer - stays mounted across view switches
+ * - ChatPanel: STABLE layer - stays mounted across Workbench routes
  */
-import { registerAppActions } from "@/src/ActionSystem/registerAppActions";
 import { useAtomValue, useSetAtom } from "jotai";
 import React, {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
-import { useRouteViewMode } from "@src/config/routeViewModeConfig";
 import { ROUTES } from "@src/config/routes";
 import {
   HOST_DESKTOP,
   resolveHostDesktop,
 } from "@src/config/windowChromeRadius";
 import { BrowserProvider, TerminalProvider } from "@src/contexts/workstation";
+import { useViewportWidth } from "@src/engines/ChatPanel/hooks/useViewportWidth";
 import { useAgentADEActions } from "@src/engines/SessionCore/hooks/useAgentADEActions";
 import { useProjectDataChangedListener } from "@src/hooks/project";
 import { useBackgroundImage } from "@src/hooks/theme/useBackgroundImage";
@@ -48,6 +43,10 @@ import {
 import { GUIDE_TARGETS } from "@src/scaffold/Tutorials/guideTargets";
 import { TUTORIALS_OPEN_EVENT } from "@src/scaffold/Tutorials/tutorialRegistry";
 import { resolvedBackgroundConfigAtom } from "@src/store";
+import {
+  activeChatPanelTabAtom,
+  resolveChatPanelMaximizedForLayout,
+} from "@src/store/chatPanel/chatPanelTabsAtom";
 import { useSyncStatusBridge } from "@src/store/sync";
 import {
   type ChatPanelMode,
@@ -56,6 +55,7 @@ import {
   restoreChatWidthAtom,
   stationChatVisibilityAtom,
 } from "@src/store/ui/chatPanelAtom";
+import { settingsReturnPathAtom } from "@src/store/ui/settingsNavigationAtom";
 import {
   DEFAULT_SIDEBAR_WIDTH,
   sidebarCollapsedAtom,
@@ -73,11 +73,6 @@ import { FloatingSidebar } from "./shared/components/FloatingSidebar";
 import { SidebarSelector } from "./shared/components/SidebarSelector";
 import { useRouteLayoutType, useWorkspaceEvents } from "./shared/hooks";
 import { AppLayout } from "./shared/layouts";
-import {
-  LAYOUT_CONTAIN_STYLE,
-  VIEW_CONTAINER_CLASSES,
-  getViewToggleStyle,
-} from "./shared/layouts/viewContainerTokens";
 import { useWorkStationPipelineBridge } from "./useWorkStationPipelineBridge";
 
 const WorkStationPage = React.lazy(
@@ -122,17 +117,12 @@ const CodeEditorTour = React.lazy(
 /**
  * Main Orgii Component
  *
- * View Mode Persistence Architecture:
- * - WorkStation (Workstation view): Always mounted, visibility controlled by CSS
- * - MainApp/other routes: Rendered via Outlet (route-based)
- *
  * Performance Architecture:
  * 1. SidebarSelector: DYNAMIC (changes per route, memoized)
- * 2. WorkStation: PERSISTENT (mounted once, visibility toggled)
+ * 2. WorkStation: PERSISTENT while the Workbench route branch is mounted
  *
  * This ensures:
- * - WorkStation stays mounted across route switches
- * - WorkStation state survives view mode switches
+ * - WorkStation stays mounted across WorkStation and Settings route switches
  */
 
 /** Mounts useOpenUrlInBrowser inside BrowserProvider so the hook can access BrowserContext. */
@@ -145,16 +135,13 @@ const WorkStationLoadingFallback: React.FC = () => (
   <div className="h-full w-full bg-workstation-bg" />
 );
 
-const IS_MACOS_HOST = resolveHostDesktop() === HOST_DESKTOP.MACOS;
+const HOST_DESKTOP_VALUE = resolveHostDesktop();
+const HOST_USES_NATIVE_BACKDROP =
+  HOST_DESKTOP_VALUE === HOST_DESKTOP.MACOS ||
+  HOST_DESKTOP_VALUE === HOST_DESKTOP.WINDOWS;
 
-interface ConfiguredBackgroundLayerProps {
-  sidebarInset: number;
-}
-
-/** Legacy wallpaper/color background, retained for non-macOS hosts. */
-const ConfiguredBackgroundLayer: React.FC<ConfiguredBackgroundLayerProps> = ({
-  sidebarInset,
-}) => {
+/** Legacy wallpaper/color background, retained for browser and Linux hosts. */
+const ConfiguredBackgroundLayer: React.FC = () => {
   const backgroundConfig = useAtomValue(resolvedBackgroundConfigAtom);
   const currentBackgroundImage = useBackgroundImage();
 
@@ -169,7 +156,6 @@ const ConfiguredBackgroundLayer: React.FC<ConfiguredBackgroundLayerProps> = ({
       blurAmount={backgroundConfig.blurAmount ?? 0}
       backgroundColor={backgroundConfig.backgroundColor}
       glass={backgroundConfig.glass}
-      sidebarInset={sidebarInset}
     />
   );
 };
@@ -177,39 +163,13 @@ const ConfiguredBackgroundLayer: React.FC<ConfiguredBackgroundLayerProps> = ({
 const AppShell = () => {
   const location = useLocation();
 
-  const viewMode = useRouteViewMode();
-
-  // === App-Level Action Registration ===
-  // Registers navigation, theme, sidebar, tabs, spotlight actions globally
-  // via zodActionRegistry — available to the OS agent and all components.
-  useEffect(() => {
-    const cleanup = registerAppActions();
-    return cleanup;
-  }, []);
-
   // === Global Browser Webview Layering ===
   // Drops inline browser WKWebViews behind React portals whenever any
   // overlay (dropdown, modal, spotlight) is visible. See
   // `docs/workstation/Browser/webview-layering--0418.md`.
   useGlobalBrowserWebviewLayering();
 
-  // === Navigation Bridge ===
-  // App-level navigation actions dispatch CustomEvents because they can't use
-  // React Router hooks (they run outside component context). This listener
-  // bridges the event to the real router.
   const navigate = useNavigate();
-  useEffect(() => {
-    function handleNavigate(evt: Event) {
-      const { path, replace } = (
-        evt as CustomEvent<{ path: string; replace?: boolean }>
-      ).detail;
-      navigate(path, { replace });
-    }
-    window.addEventListener("action-system-navigate", handleNavigate);
-    return () => {
-      window.removeEventListener("action-system-navigate", handleNavigate);
-    };
-  }, [navigate]);
 
   useWorkspaceEvents();
   useUrlPreviewEvents();
@@ -234,6 +194,7 @@ const AppShell = () => {
 
   const stationMode = useAtomValue(stationModeAtom);
   const chatPanelMaximized = useAtomValue(chatPanelMaximizedAtom);
+  const viewportWidth = useViewportWidth();
   const stationChatVisibility = useAtomValue(stationChatVisibilityAtom);
   const sidebarCollapsed = useAtomValue(sidebarCollapsedAtom);
   const sidebarWidth = useAtomValue(sidebarWidthAtom);
@@ -248,6 +209,7 @@ const AppShell = () => {
   const setStationMode = useSetAtom(stationModeAtom);
   const setSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
   const setStationChatVisibility = useSetAtom(stationChatVisibilityAtom);
+  const setSettingsReturnPath = useSetAtom(settingsReturnPathAtom);
   const [tutorialsModalOpen, setTutorialsModalOpen] = useState(false);
   const [generalLayoutTourOpen, setGeneralLayoutTourOpen] = useState(false);
   const [generalLayoutTourRunId, setGeneralLayoutTourRunId] = useState(0);
@@ -263,6 +225,11 @@ const AppShell = () => {
   // single source of truth.
   const isSettingsRoute = location.pathname.startsWith("/orgii/app/settings");
   const chatPanelMode: ChatPanelMode = isSettingsRoute ? "settings" : "session";
+
+  useEffect(() => {
+    if (!location.pathname.startsWith(ROUTES.workStation.base.path)) return;
+    setSettingsReturnPath(`${location.pathname}${location.search}`);
+  }, [location.pathname, location.search, setSettingsReturnPath]);
 
   const handleOpenTutorials = useCallback(() => {
     setTutorialsModalOpen(true);
@@ -342,14 +309,7 @@ const AppShell = () => {
     handleStartGeneralLayoutTour,
   ]);
 
-  const showChatPanel = useMemo(() => {
-    const path = location.pathname;
-    if (isSettingsRoute) return true;
-    return path.includes("/workstation");
-  }, [location.pathname, isSettingsRoute]);
-
   useEffect(() => {
-    if (viewMode !== "workStation") return;
     if (chatPanelMaximized) return;
     // Don't touch chat width while Settings-in-slot owns the slot — its
     // own fallback width (DEFAULT_CHAT_WIDTH) shouldn't be overwritten.
@@ -366,7 +326,6 @@ const AppShell = () => {
     isSettingsRoute,
     restoreChatWidth,
     setChatWidth,
-    viewMode,
   ]);
 
   // Auto-maximize the chat-panel slot when the user navigates into
@@ -410,17 +369,14 @@ const AppShell = () => {
     }
   }, [chatPanelMaximized, isSettingsRoute, setChatPanelMaximized]);
 
-  const isWorkStationViewActive = viewMode === "workStation";
-  // Skip bridging when Settings-in-slot is active — it doesn't run a real chat session.
+  const activeChatPanelTab = useAtomValue(activeChatPanelTabAtom);
+  // Only a visible primary Session tab may restore WorkStation memory into the
+  // live pipeline. Launchpad and management tabs deliberately release it.
   const shouldBridgeWorkStationPipeline =
-    isWorkStationViewActive && !isSettingsRoute;
+    !isSettingsRoute && activeChatPanelTab?.type === "session";
 
-  useNarrowChatFocus({ enabled: isWorkStationViewActive });
+  useNarrowChatFocus({ enabled: true });
   useWorkStationPipelineBridge(shouldBridgeWorkStationPipeline);
-
-  // Settings-in-slot owns the slot while its route is active; the Outlet stays
-  // mounted but hidden so deeplinks / refresh still work.
-  const shouldShowOutlet = !isWorkStationViewActive;
 
   const workStationChatPosition = useAtomValue(workStationChatPositionAtom);
   const sessionChatPosition = useAtomValue(sessionChatPositionAtom);
@@ -435,17 +391,17 @@ const AppShell = () => {
       ? sidebarWidth || DEFAULT_SIDEBAR_WIDTH
       : 0;
 
-  const effectiveChatFocus = chatPanelMaximized && isWorkStationViewActive;
-  // A session entry starts with the chat slot focused. At that point the
-  // workstation must be closed, not merely compressed behind a zero-width
-  // flex track, so no previous session's pane remains mounted.
-  const shouldRenderWorkStation =
-    isWorkStationViewActive && !effectiveChatFocus;
+  const effectiveChatFocus = resolveChatPanelMaximizedForLayout(
+    chatPanelMaximized,
+    activeChatPanelTab,
+    viewportWidth
+  );
 
   return (
     <TerminalProvider>
       <BrowserProvider>
         <BrowserEventBridge />
+        <Outlet />
         <React.Suspense fallback={null}>
           <SharedBrowserApp />
         </React.Suspense>
@@ -453,56 +409,31 @@ const AppShell = () => {
           className="relative flex h-full"
           data-guide-target={GUIDE_TARGETS.APP_ROOT}
         >
-          {!IS_MACOS_HOST && (
-            <ConfiguredBackgroundLayer
-              sidebarInset={sidebarCollapsed ? 0 : sidebarWidth}
-            />
-          )}
+          {!HOST_USES_NATIVE_BACKDROP && <ConfiguredBackgroundLayer />}
 
           {/* Main layout with sidebar, toolbar, content, and chat panel */}
           <AppLayout
+            viewportWidth={viewportWidth}
             sidebar={<SidebarSelector />}
             floatingSidebar={<FloatingSidebar />}
-            showChatPanel={showChatPanel}
+            showChatPanel
             chatPosition={chatPosition}
             chatPanelMaximized={effectiveChatFocus}
             chatPanelMode={chatPanelMode}
             sessionSidebarWidth={sessionSidebarWidth}
           >
             <div className="relative h-full w-full min-w-0">
-              {/* WorkStation — deferred until first visit, then kept mounted */}
-              {shouldRenderWorkStation && (
-                <div
-                  className={VIEW_CONTAINER_CLASSES.withBg}
-                  style={getViewToggleStyle(isWorkStationViewActive)}
-                  data-guide-target={
-                    isWorkStationViewActive
-                      ? GUIDE_TARGETS.WORKSTATION
-                      : undefined
-                  }
-                  data-tour-target={
-                    isWorkStationViewActive
-                      ? GENERAL_LAYOUT_TOUR_TARGETS.workstation
-                      : undefined
-                  }
-                >
-                  <React.Suspense fallback={<WorkStationLoadingFallback />}>
-                    <WorkStationPage
-                      isActive={isWorkStationViewActive}
-                      chatPanelFocused={effectiveChatFocus}
-                    />
-                  </React.Suspense>
-                </div>
-              )}
-
               <div
-                className="h-full w-full min-w-0"
-                style={{
-                  ...getViewToggleStyle(shouldShowOutlet),
-                  ...LAYOUT_CONTAIN_STYLE,
-                }}
+                className="absolute inset-0 bg-workstation-bg"
+                data-guide-target={GUIDE_TARGETS.WORKSTATION}
+                data-tour-target={GENERAL_LAYOUT_TOUR_TARGETS.workstation}
               >
-                <Outlet />
+                <React.Suspense fallback={<WorkStationLoadingFallback />}>
+                  <WorkStationPage
+                    isActive
+                    chatPanelFocused={effectiveChatFocus}
+                  />
+                </React.Suspense>
               </div>
             </div>
           </AppLayout>

@@ -25,7 +25,7 @@ impl LLMProvider for CodexNativeClient {
         messages: &[JsonValue],
         tools: Option<&[JsonValue]>,
         model: &str,
-        _max_tokens: Option<u32>,
+        _max_tokens: u32,
         _temperature: f32,
     ) -> Result<LLMResponse, ProviderError> {
         let on_delta = |_delta: StreamDelta| {};
@@ -46,15 +46,14 @@ impl LLMProvider for CodexNativeClient {
         messages: &[JsonValue],
         tools: Option<&[JsonValue]>,
         model: &str,
-        _max_tokens: Option<u32>,
+        _max_tokens: u32,
         _temperature: f32,
         on_delta: &(dyn Fn(StreamDelta) + Send + Sync),
         cancel_flag: Option<&std::sync::atomic::AtomicBool>,
     ) -> Result<LLMResponse, ProviderError> {
         use futures_util::StreamExt;
 
-        let request_body =
-            Self::build_responses_request(messages, tools, model, true, self.account_id.as_deref());
+        let request_body = Self::build_responses_request(messages, tools, model, true);
 
         let url = self.responses_url();
         info!(
@@ -303,13 +302,11 @@ impl LLMProvider for CodexNativeClient {
                                 let has_partial_data = !accumulated_text.is_empty()
                                     || stream_normalizer.has_pending_tool_calls()
                                     || !tool_calls.is_empty();
-                                if error.is_auth_error() {
-                                    if !auth_retry_used && !has_partial_data {
-                                        warn!("[codex-native] Access token rejected inside stream before output; refreshing and retrying once");
-                                        self.refresh_auth_after_unauthorized().await?;
-                                        auth_retry_used = true;
-                                        continue 'request_attempt;
-                                    }
+                                if error.is_auth_error() && !auth_retry_used && !has_partial_data {
+                                    warn!("[codex-native] Access token rejected inside stream before output; refreshing and retrying once");
+                                    self.refresh_auth_after_unauthorized().await?;
+                                    auth_retry_used = true;
+                                    continue 'request_attempt;
                                 }
                                 return Err(error.into_provider_error());
                             }

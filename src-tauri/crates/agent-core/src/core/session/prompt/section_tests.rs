@@ -1,16 +1,20 @@
 use super::section_builders::{
-    build_agent_org_context_section, build_imported_context_section, build_project_environment,
-    build_rules_section, cap_rule_content, format_user_profile,
+    build_agent_org_context_section, build_project_environment, build_rules_section,
+    cap_rule_content, format_user_profile,
 };
-use crate::coordination::agent_org_runs::{AgentOrgContextMember, AgentOrgRunContext};
+use crate::coordination::agent_org_runs::{
+    AgentOrgContextMember, AgentOrgRunContext, AgentOrgRunEntryMode, AgentOrgRunStatus,
+    AgentOrgRunStore, CreateAgentOrgRunParams, COORDINATOR_MEMBER_ID,
+};
 use crate::coordination::agent_org_tasks::{AgentOrgTaskStore, CreateTaskParams, TaskStatus};
-use crate::definitions::orgs::HierarchyMode;
+use crate::definitions::orgs::{HierarchyMode, OrgDefinition, OrgMember, PlanApprovalPolicy};
 use serial_test::serial;
 use test_helpers::test_env;
 
 fn prompt_task_sandbox() -> test_env::SandboxGuard {
     let sandbox = test_env::sandbox();
     let conn = database::db::get_connection().expect("test sqlite connection");
+    crate::coordination::agent_org_runs::init_schema(&conn).expect("agent org run schema");
     crate::coordination::agent_org_tasks::init_schema(&conn).expect("agent org task schema");
     sandbox
 }
@@ -52,8 +56,45 @@ fn prompt_test_agent_org_context() -> AgentOrgRunContext {
             parent_member_id: None,
         }],
         hierarchy_mode: HierarchyMode::Flat,
+        plan_approval_policy: PlanApprovalPolicy::Coordinator,
         root_session_id: Some("root-prompt-test".to_string()),
     }
+}
+
+fn materialize_prompt_test_run(context: &AgentOrgRunContext) -> String {
+    AgentOrgRunStore::create(CreateAgentOrgRunParams {
+        org_id: context.org_id.clone(),
+        coordinator_agent_id: context.coordinator_agent_id.clone(),
+        root_session_id: context.root_session_id.clone(),
+        org_snapshot: OrgDefinition {
+            id: context.org_id.clone(),
+            name: context.org_name.clone(),
+            role: context.org_role.clone(),
+            agent_id: context.coordinator_agent_id.clone(),
+            description: None,
+            hierarchy_mode: context.hierarchy_mode,
+            plan_approval_policy: context.plan_approval_policy,
+            children: context
+                .members
+                .iter()
+                .map(|member| OrgMember {
+                    id: member.member_id.clone(),
+                    name: member.name.clone(),
+                    role: member.role.clone(),
+                    agent_id: member.agent_id.clone(),
+                    runtime_config: None,
+                    children: Vec::new(),
+                })
+                .collect(),
+        },
+        entry_mode: AgentOrgRunEntryMode::StandaloneSession,
+        status: AgentOrgRunStatus::Running,
+        work_item_id: None,
+        project_slug: None,
+        routine_fire_id: None,
+    })
+    .expect("materialize prompt test run")
+    .id
 }
 
 #[test]
@@ -80,32 +121,44 @@ fn agent_org_prompt_uses_only_runtime_member_id_for_identity() {
 
 #[test]
 fn agent_org_prompt_uses_task_board_for_roster_delegation() {
-    let section =
-        build_agent_org_context_section(&prompt_test_agent_org_context(), "agent-coord", None);
+    let section = build_agent_org_context_section(
+        &prompt_test_agent_org_context(),
+        "agent-coord",
+        Some(COORDINATOR_MEMBER_ID),
+    );
 
     assert!(
         section.contains("Do NOT use the generic `agent` tool to delegate work to roster members"),
         "prompt must prevent the old generic-agent roster path: {section}"
     );
     assert!(
-        section.contains("Use `task_create` to add worker-sized subtasks"),
-        "prompt must point at production task_create path: {section}"
-    );
-    assert!(
-        section.contains("use `task_update` to reassign"),
-        "prompt must point at production task_update path: {section}"
+        section.contains("Use `task_create` and `task_update` only within the task authority"),
+        "prompt must point at the authority-checked production task path: {section}"
     );
     assert!(
         section.contains("Task assignment wakes idle members"),
         "prompt must describe member-session reaction semantics: {section}"
     );
     assert!(
-        section.contains("eligible_member_ids` is the hard claim whitelist"),
-        "prompt must describe eligible_member_ids as hard whitelist: {section}"
+        section.contains("set `eligible_member_ids` to the exact candidates"),
+        "prompt must describe eligible_member_ids as a coordinator-validated candidate list: {section}"
     );
     assert!(
         section.contains("required_role` is only a human-readable hint"),
         "prompt must not treat required_role as authorization: {section}"
+    );
+    assert!(
+        section.contains("Every `task_create` must also make a separate scheduling decision"),
+        "prompt must require an explicit dispatch policy: {section}"
+    );
+    assert!(
+        section.contains("after_dependencies"),
+        "prompt must explain how consumer tasks wait for upstream output: {section}"
+    );
+    assert!(
+        section.contains("requires_dependency_confirmation")
+            && section.contains("allow_parallel_with_unlisted_open_tasks=true"),
+        "prompt must explain the dependency confirmation handshake: {section}"
     );
     assert!(
         section.contains("role/name, not the member_id prefix alone"),
@@ -123,13 +176,55 @@ fn agent_org_prompt_uses_task_board_for_roster_delegation() {
         !section.contains("delegate worker-sized subtasks with the `agent` tool"),
         "prompt must not preserve stale generic-agent delegation instruction: {section}"
     );
+    assert!(
+        section.contains("Your task authority:** coordinator")
+            && section.contains("being allowed to message a peer never grants permission")
+            && section.contains("may NOT impersonate another member's work"),
+        "prompt must separate communication reachability from task authority: {section}"
+    );
+    assert!(
+        section
+            .contains("first call `task_update` for that exact task id with `status=in_progress`")
+            && section.contains("`output={summary, content?, artifact_ids?}`")
+            && section.contains("`summary` is required"),
+        "prompt must state the owner-authored task lifecycle contract: {section}"
+    );
+    assert!(
+        section.contains("Messaging is not delegation")
+            && section.contains("route the proposal to the coordinator"),
+        "prompt must prevent plain-message task-authority bypass: {section}"
+    );
+    assert!(
+        section.contains(
+            "Only the coordinator may use `allow_parallel_with_unlisted_open_tasks=true`"
+        ),
+        "prompt must reserve global dependency override for the coordinator: {section}"
+    );
+}
+
+#[test]
+fn agent_org_prompt_worker_cannot_confuse_soft_chat_with_peer_delegation() {
+    let mut context = prompt_test_agent_org_context();
+    context.hierarchy_mode = HierarchyMode::Soft;
+    let section = build_agent_org_context_section(&context, "agent-worker", Some("member-worker"));
+    assert!(
+        section.contains("Your task authority:** worker")
+            && section.contains("may not assign or rewrite their work")
+            && section.contains("Only you may record `in_progress`, `completed`, and `output`"),
+        "worker prompt must explain self-only task authority: {section}"
+    );
+    assert!(
+        section.contains("you may message any peer directly"),
+        "Soft routing should still permit peer discussion: {section}"
+    );
 }
 
 #[test]
 #[serial]
 fn agent_org_prompt_includes_bounded_task_snapshot() {
     let _sandbox = prompt_task_sandbox();
-    let context = prompt_test_agent_org_context();
+    let mut context = prompt_test_agent_org_context();
+    context.run_id = materialize_prompt_test_run(&context);
     AgentOrgTaskStore::create(CreateTaskParams {
         id: "prompt-open".to_string(),
         org_run_id: context.run_id.clone(),
@@ -172,8 +267,10 @@ fn agent_org_prompt_snapshot_warns_before_duplicate_task_creation() {
     let section = build_agent_org_context_section(&context, "agent-coord", None);
     assert!(section.contains("No tasks currently exist on this run."));
     assert!(section.contains("update it instead of creating a duplicate"));
-    assert!(section.contains("Ownerless tasks are claimed through the autonomous claim path"));
-    assert!(section.contains("caller's member_id is listed in `eligible_member_ids`"));
+    assert!(section.contains(
+        "Ownerless means waiting for explicit coordinator assignment, never an automatic claim pool"
+    ));
+    assert!(section.contains("Workers must not set themselves as owner"));
 }
 
 #[test]
@@ -191,8 +288,8 @@ fn agent_org_prompt_lists_llm_callable_message_kinds() {
         "plan approval response kind missing: {section}"
     );
     assert!(
-        section.contains("`exec_mode_set_request`"),
-        "exec mode request kind missing: {section}"
+        !section.contains("`exec_mode_set_request`"),
+        "obsolete remote mode switch must not be advertised: {section}"
     );
 }
 
@@ -206,23 +303,23 @@ fn agent_org_prompt_explains_member_plan_protocol() {
         "planning workflow section missing: {section}"
     );
     assert!(
-            section.contains("kind = \"exec_mode_set_request\"")
-                && section.contains("mode = \"plan\""),
-            "coordinator prompt must explain how to set a member to Plan mode before planning: {section}"
-        );
-    assert!(
-        section.contains("Planner-like members should be switched to Plan mode"),
-        "coordinator prompt must make Planner-style mode selection explicit: {section}"
+        section.contains("execution_mode=plan")
+            && section.contains("enters Plan mode automatically"),
+        "coordinator prompt must explain assignment-driven Plan mode: {section}"
     );
     assert!(
-        section.contains("kind = \"plan_approval_response\"")
-            && section.contains("accepted = true")
-            && section.contains("accepted = false"),
+        section.contains("kind=\"plan_approval_response\"")
+            && section.contains("`accepted=true`")
+            && section.contains("`accepted=false`"),
         "coordinator prompt must explain approving and rejecting member plans: {section}"
     );
     assert!(
-        section.contains("Coordinator or top-level Plan mode is different"),
+        section.contains("explicitly launched by the user in Plan mode"),
         "prompt must preserve user-facing coordinator/top-level plan semantics: {section}"
+    );
+    assert!(
+        section.contains("never switch the Group chat or coordinator session into Plan mode"),
+        "active org planning must use member Plan tasks instead of a root mode switch: {section}"
     );
 }
 
@@ -255,7 +352,7 @@ fn project_env_omits_additional_dirs_when_empty() {
     // otherwise the prompt cache ping-pongs and every turn
     // pays cold-cache cost.
     let tmp = std::env::temp_dir();
-    let out = build_project_environment(&tmp, &[], &[]);
+    let out = build_project_environment(&tmp, &[]);
     assert!(
         !out.contains("Additional working directories"),
         "empty additional_dirs must not emit the block: {out}"
@@ -271,67 +368,11 @@ fn project_env_lists_each_additional_dir() {
     let a = std::path::PathBuf::from("/tmp/pr-f-alpha");
     let b = std::path::PathBuf::from("/tmp/pr-f-beta");
     let dirs: Vec<&std::path::Path> = vec![a.as_path(), b.as_path()];
-    let out = build_project_environment(&tmp, &dirs, &[]);
+    let out = build_project_environment(&tmp, &dirs);
     assert!(
         out.contains("- Additional working directories:"),
         "header must be present: {out}"
     );
     assert!(out.contains("/tmp/pr-f-alpha"), "first path missing: {out}");
     assert!(out.contains("/tmp/pr-f-beta"), "second path missing: {out}");
-}
-
-#[test]
-fn project_env_omits_global_paths_when_empty() {
-    let tmp = std::env::temp_dir();
-    let out = build_project_environment(&tmp, &[], &[]);
-    assert!(
-        !out.contains("Globally permitted paths"),
-        "empty global grants must not emit a block: {out}"
-    );
-}
-
-#[test]
-fn project_env_lists_global_paths_separately_from_session_dirs() {
-    let tmp = std::env::temp_dir();
-    let session_path = std::path::PathBuf::from("/tmp/pr-f-session-extra");
-    let global_path = std::path::PathBuf::from("/tmp/pr-f-global-grant");
-    let out = build_project_environment(&tmp, &[session_path.as_path()], &[global_path]);
-
-    assert!(out.contains("- Additional working directories:"));
-    assert!(out.contains("- Globally permitted paths:"));
-    assert!(out.contains("/tmp/pr-f-global-grant"));
-    assert!(out.contains("Workspace-external paths authorized for structured tools"));
-}
-
-#[test]
-fn imported_context_section_hydrates_explicit_snippets() {
-    let snapshot = crate::session::context_import::ContextSnapshotMeta::new_with_snippet(
-        "target-session",
-        crate::session::context_import::ContextSourceKind::Session,
-        "source-session",
-        Some("Source Session".to_string()),
-        12,
-        true,
-        Some("Important decision: imports must be explicit.".to_string()),
-    );
-
-    let section = build_imported_context_section(&[snapshot]).expect("section");
-    assert!(section.contains("# Imported Context"));
-    assert!(section.contains("Source Session"));
-    assert!(section.contains("session:source-session"));
-    assert!(section.contains("Important decision: imports must be explicit."));
-}
-
-#[test]
-fn imported_context_section_omits_metadata_only_snapshots() {
-    let snapshot = crate::session::context_import::ContextSnapshotMeta::new(
-        "target-session",
-        crate::session::context_import::ContextSourceKind::Session,
-        "source-session",
-        Some("Source Session".to_string()),
-        12,
-        true,
-    );
-
-    assert!(build_imported_context_section(&[snapshot]).is_none());
 }

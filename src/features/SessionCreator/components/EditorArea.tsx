@@ -16,8 +16,12 @@ import ComposerInput, { ComposerInputRef } from "@src/components/ComposerInput";
 import ComposerShell from "@src/components/ComposerShell";
 import Message from "@src/components/Message";
 import { VoiceInputButton, VoiceRecordingBar } from "@src/components/Voice";
+import {
+  INPUT_AREA_EDITOR_CLASS,
+  INPUT_AREA_EDITOR_HEIGHT,
+} from "@src/config/inputAreaTokens";
 import { capPillText, storePillText } from "@src/config/pillTokens";
-import type { AgentExecMode } from "@src/config/sessionCreatorConfig";
+import type { ComposerModeEntry } from "@src/config/sessionCreatorConfig";
 import ContextMenuPortal from "@src/engines/ChatPanel/InputArea/components/ContextMenuPortal";
 import SlashCommandPortal from "@src/engines/ChatPanel/InputArea/components/SlashCommandPortal";
 import { type VoiceInputError, useVoiceInput } from "@src/hooks/voice";
@@ -33,7 +37,6 @@ import type { RepoKind } from "@src/store/repo/types";
 import type { ChatImageAttachment } from "@src/store/ui/chatImageAtom";
 import type { SlashItem } from "@src/types/extensions";
 
-import { SESSION_CONFIG } from "../config";
 import { useTabDragDrop } from "../hooks/useTabDragDrop";
 import type { AdvancedConfig, UploadedFile } from "../types";
 import ControlButtons, { type DropdownDirection } from "./ControlButtons";
@@ -122,14 +125,10 @@ export interface EditorAreaProps {
   onRemoveImage?: (id: string) => void;
   /** Whether the launch button should be disabled */
   launchDisabled?: boolean;
-  /** Optional visible launch button label */
-  launchLabel?: string;
+  /** Optional accessible label for the icon-only launch button. */
+  launchAriaLabel?: string;
   /** Optional extra className for the outer composer shell */
   shellClassName?: string;
-  /** Optional minimum height for the ComposerInput editor region. */
-  editorMinHeight?: number;
-  /** Optional maximum height for the ComposerInput editor region. */
-  editorMaxHeight?: number;
   /** When true, auto-opens the model selector (e.g. after an incompatible agent switch) */
   requestModelOpen?: boolean;
   /** Called after the auto-open request has been consumed */
@@ -158,8 +157,9 @@ export interface EditorAreaProps {
   onSlashCommand?: (query: string) => void;
   onSlashCommandClose?: () => void;
   onSlashSelect?: (item: SlashItem) => void;
-  onModeSelect?: (mode: AgentExecMode) => void;
-  currentMode?: AgentExecMode;
+  onModeSelect?: (mode: ComposerModeEntry["id"]) => void;
+  currentMode?: ComposerModeEntry["id"];
+  includeProjectMode?: boolean;
   filteredSlashItems?: SlashItem[];
   slashLoading?: boolean;
   /** Fetch+filter slash items without opening the inline "/" menu. */
@@ -203,10 +203,8 @@ const EditorArea: React.FC<EditorAreaProps> = ({
   attachedImages,
   onRemoveImage,
   launchDisabled,
-  launchLabel,
+  launchAriaLabel,
   shellClassName,
-  editorMinHeight,
-  editorMaxHeight,
   requestModelOpen,
   onModelOpenHandled,
   hideModelSourcePill,
@@ -223,13 +221,13 @@ const EditorArea: React.FC<EditorAreaProps> = ({
   onSlashCommandClose,
   onSlashSelect,
   onModeSelect,
+  includeProjectMode,
   currentMode = "build",
   filteredSlashItems = [],
   slashLoading = false,
   onPrefetchSlashItems,
 }) => {
   const isChatPanelFullScreen = variant === "chatPanelFullScreen";
-  const isCompact = isChatPanelFullScreen;
   const resolvedDropdownDirection =
     dropdownDirection ?? (isChatPanelFullScreen ? "up" : "down");
 
@@ -523,6 +521,7 @@ const EditorArea: React.FC<EditorAreaProps> = ({
           isDragOver
             ? "!border-primary-6 !bg-[color-mix(in_srgb,var(--color-primary-6)_5%,var(--color-chat-input))] !shadow-[0_0_0_2px_color-mix(in_srgb,var(--color-primary-6)_20%,transparent)]"
             : "",
+          headerContent ? "!pt-1.5" : "",
           shellClassName ?? "",
         ]
           .filter(Boolean)
@@ -530,9 +529,6 @@ const EditorArea: React.FC<EditorAreaProps> = ({
         onDragOver={handleReferenceDragOver}
         onDragLeave={handleReferenceDragLeave}
         onDropCapture={handleReferenceDrop}
-        style={{
-          height: isCompact ? "auto" : `${SESSION_CONFIG.EDITOR_HEIGHT}px`,
-        }}
       >
         {headerContent}
 
@@ -581,9 +577,9 @@ const EditorArea: React.FC<EditorAreaProps> = ({
           onSubmit={onSubmit}
           requireCmdEnter={!sendOnEnter}
           autoFocus={autoFocus}
-          className="session-editor flex-1 cursor-text overflow-y-auto rounded-md text-[14px] text-text-1"
-          minHeight={editorMinHeight ?? (isChatPanelFullScreen ? 60 : 100)}
-          maxHeight={editorMaxHeight ?? (isChatPanelFullScreen ? 200 : 300)}
+          className={INPUT_AREA_EDITOR_CLASS}
+          minHeight={INPUT_AREA_EDITOR_HEIGHT.min}
+          maxHeight={INPUT_AREA_EDITOR_HEIGHT.max}
           onKeyDownForDropdown={handleKeyDownForDropdown}
           onSlashCommand={onSlashCommand}
           onSlashCommandClose={onSlashCommandClose}
@@ -614,6 +610,7 @@ const EditorArea: React.FC<EditorAreaProps> = ({
             items={filteredSlashItems}
             loading={slashLoading}
             currentMode={currentMode}
+            includeProjectMode={includeProjectMode}
             searchQuery={slashQuery}
             onClose={onSlashCommandClose ?? handlePlusSlashClose}
             onSelect={(item) => onSlashSelect?.(item)}
@@ -634,6 +631,7 @@ const EditorArea: React.FC<EditorAreaProps> = ({
             items={filteredSlashItems}
             loading={slashLoading}
             currentMode={currentMode}
+            includeProjectMode={includeProjectMode}
             searchQuery={plusSlashQuery}
             onClose={handlePlusSlashClose}
             onSelect={(item) => {
@@ -672,7 +670,6 @@ const EditorArea: React.FC<EditorAreaProps> = ({
             }
             dropdownDirection={resolvedDropdownDirection}
             repoPath={repoPath}
-            toolbarItemGap={false}
             showContextInfo={false}
             pills={
               <ControlButtons
@@ -695,10 +692,10 @@ const EditorArea: React.FC<EditorAreaProps> = ({
                     />
                   )}
                   <LaunchButton
+                    ariaLabel={launchAriaLabel}
                     disabled={launchDisabled ?? false}
                     loading={isLoading}
                     onClick={onLaunch}
-                    label={launchLabel}
                   />
                 </>
               ) : undefined

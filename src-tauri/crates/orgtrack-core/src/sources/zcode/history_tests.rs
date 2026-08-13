@@ -137,6 +137,8 @@ fn to_row(input: &ImportedHistoryCacheInput) -> ImportedHistorySessionRow {
         input_tokens: input.input_tokens,
         output_tokens: input.output_tokens,
         repo_path: input.repo_path.clone(),
+        repo_root_path: None,
+        repo_remote_urls: Vec::new(),
         branch: input.branch.clone(),
         impact: input.impact.clone(),
         listable: input.listable,
@@ -151,7 +153,7 @@ fn includes_zcode_cli_db_path() {
     let home = std::path::Path::new("/Users/example");
     let rendered = zcode_history_candidate_paths_for_home(home)
         .iter()
-        .map(|p| p.to_string_lossy().to_string())
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
         .collect::<Vec<_>>();
     assert!(rendered
         .iter()
@@ -162,15 +164,13 @@ fn includes_zcode_cli_db_path() {
 #[test]
 fn maps_zcode_session_metadata_to_cache_input() {
     let conn = fixture_conn();
-    let metas = list_all_zcode_session_meta_from_conn(
-        &conn,
-        std::path::Path::new("/tmp/db.sqlite"),
-        1770000006000,
-        4096,
-    )
-    .expect("list session metadata");
+    let metas =
+        list_all_zcode_session_meta_from_conn(&conn, std::path::Path::new("/tmp/db.sqlite"))
+            .expect("list session metadata");
     assert_eq!(metas.len(), 1);
-    let row = to_row(&session_meta_to_cache_input(metas.into_iter().next().unwrap()));
+    let row = to_row(&session_meta_to_cache_input(
+        metas.into_iter().next().unwrap(),
+    ));
 
     assert_eq!(row.session_id, "zcodeapp-sess_1");
     assert_eq!(row.name, "Check npm status");
@@ -180,6 +180,74 @@ fn maps_zcode_session_metadata_to_cache_input() {
     assert_eq!(row.total_tokens, 235);
     assert_eq!(row.repo_path.as_deref(), Some("/tmp/zcode-repo"));
     assert_eq!(row.repo_name.as_deref(), Some("zcode-repo"));
+}
+
+#[test]
+fn zcode_metadata_signature_ignores_unrelated_session_writes() {
+    let conn = fixture_conn();
+    let before =
+        list_all_zcode_session_meta_from_conn(&conn, std::path::Path::new("/tmp/db.sqlite"))
+            .expect("initial metadata")
+            .into_iter()
+            .find(|meta| meta.source_session_id == "sess_1")
+            .map(|meta| zcode_meta_signature(&meta))
+            .expect("target signature");
+
+    conn.execute(
+        "INSERT INTO session (
+            id, title, directory, parent_id, task_type,
+            time_created, time_updated, time_archived
+         ) VALUES ('sess_other', 'Other', '/tmp/other', NULL, 'interactive', 1, 2, NULL)",
+        [],
+    )
+    .expect("insert unrelated session");
+    conn.execute(
+        "INSERT INTO message (id, session_id, data)
+         VALUES ('msg_other', 'sess_other', '{\"role\":\"assistant\"}')",
+        [],
+    )
+    .expect("insert unrelated message");
+    conn.execute(
+        "INSERT INTO part (id, message_id, session_id, data, time_created)
+         VALUES ('prt_other', 'msg_other', 'sess_other', '{\"type\":\"text\",\"text\":\"tail\"}', 3)",
+        [],
+    )
+    .expect("insert unrelated part");
+    conn.execute(
+        "UPDATE part SET data = '{\"type\":\"text\",\"text\":\"longer unrelated tail\"}'
+         WHERE id = 'prt_other'",
+        [],
+    )
+    .expect("grow unrelated part");
+
+    let after_unrelated =
+        list_all_zcode_session_meta_from_conn(&conn, std::path::Path::new("/tmp/db.sqlite"))
+            .expect("metadata after unrelated write")
+            .into_iter()
+            .find(|meta| meta.source_session_id == "sess_1")
+            .map(|meta| zcode_meta_signature(&meta))
+            .expect("target signature after unrelated write");
+    assert!(imported_cache::record_matches_cached_signature(
+        &before,
+        &after_unrelated
+    ));
+
+    conn.execute(
+        "UPDATE part SET data = data || ' target growth' WHERE id = 'prt_text'",
+        [],
+    )
+    .expect("grow target part");
+    let after_target =
+        list_all_zcode_session_meta_from_conn(&conn, std::path::Path::new("/tmp/db.sqlite"))
+            .expect("metadata after target write")
+            .into_iter()
+            .find(|meta| meta.source_session_id == "sess_1")
+            .map(|meta| zcode_meta_signature(&meta))
+            .expect("target signature after target write");
+    assert!(!imported_cache::record_matches_cached_signature(
+        &before,
+        &after_target
+    ));
 }
 
 #[test]
@@ -202,7 +270,10 @@ fn parses_zcode_parts_into_replay_chunks() {
         chunks[1].result.get("output").and_then(Value::as_str),
         Some("11.15.0\n")
     );
-    assert_eq!(chunks[2].action_type, imported_history::ACTION_TYPE_THINKING);
+    assert_eq!(
+        chunks[2].action_type,
+        imported_history::ACTION_TYPE_THINKING
+    );
     assert_eq!(chunks[3].function, imported_history::FUNCTION_ASSISTANT);
 }
 
@@ -216,16 +287,12 @@ fn subagent_child_is_hidden_and_linked_to_parent() {
     )
     .expect("insert subagent session");
 
-    let inputs: Vec<ImportedHistoryCacheInput> = list_all_zcode_session_meta_from_conn(
-        &conn,
-        std::path::Path::new("/tmp/db.sqlite"),
-        0,
-        0,
-    )
-    .expect("list sessions")
-    .into_iter()
-    .map(session_meta_to_cache_input)
-    .collect();
+    let inputs: Vec<ImportedHistoryCacheInput> =
+        list_all_zcode_session_meta_from_conn(&conn, std::path::Path::new("/tmp/db.sqlite"))
+            .expect("list sessions")
+            .into_iter()
+            .map(session_meta_to_cache_input)
+            .collect();
 
     let parent = inputs
         .iter()

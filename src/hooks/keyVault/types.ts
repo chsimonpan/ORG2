@@ -45,6 +45,7 @@ export interface KeyVaultAccount {
   hasApiKey: boolean;
   hasSessionToken: boolean;
   authMethod?: "api_key" | "oauth";
+  canRefreshQuota?: boolean;
   supportsRustAgents?: boolean;
   canLaunchCli?: boolean;
   canUseNativeHarness?: boolean;
@@ -115,6 +116,8 @@ export interface UseKeyVaultReturn {
   accounts: KeyVaultAccount[];
   localAccounts: KeyVaultAccount[];
   loading: boolean;
+  /** Whether the initial key-store load has settled at least once. */
+  hasLoaded: boolean;
   error: string | null;
   /** Refresh everything: accounts list + quotas + validation (all in parallel) */
   refresh: (force?: boolean) => Promise<void>;

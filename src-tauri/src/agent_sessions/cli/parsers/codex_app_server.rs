@@ -63,6 +63,7 @@ use tokio::sync::mpsc;
 
 use core_types::activity::ActivityChunk;
 
+use super::canonicalize_cli_error_message;
 use super::normalizer::{normalize_tool_name, unwrap_codex_command};
 use super::types::{CliAgentType, TokenUsage};
 use crate::agent_sessions::cli::session_runner::launch_profiles::CliPermissionMode;
@@ -215,6 +216,14 @@ pub(crate) struct CodexAppServerEventParser {
     turn_status: Option<String>,
     turn_error: Option<String>,
     session_start_emitted: bool,
+    error_deduper: super::BoundedCliErrorDeduper,
+    /// Held until `turn/completed`, whose error body is authoritative.
+    pending_error_message: Option<String>,
+    /// Last `willRetry` error, kept only as a body of last resort. Codex
+    /// retries past these, so it must never be rendered on its own — but a
+    /// `turn/completed` that reports failure without an error body leaves the
+    /// turn with no message at all, and this is the only thing left to say.
+    last_retry_notice: Option<String>,
 }
 
 impl CodexAppServerEventParser {
@@ -227,6 +236,9 @@ impl CodexAppServerEventParser {
             turn_status: None,
             turn_error: None,
             session_start_emitted: false,
+            error_deduper: super::BoundedCliErrorDeduper::default(),
+            pending_error_message: None,
+            last_retry_notice: None,
         }
     }
 
@@ -364,12 +376,19 @@ impl CodexAppServerEventParser {
             "thread/tokenUsage/updated" => {
                 if let Some(last) = params.get("tokenUsage").and_then(|u| u.get("last")) {
                     let read = |key: &str| last.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
+                    let input_tokens = read("inputTokens");
+                    let output_tokens = read("outputTokens");
+                    let reported_total = read("totalTokens");
                     self.usage = Some(TokenUsage {
-                        input_tokens: read("inputTokens"),
-                        output_tokens: read("outputTokens"),
+                        input_tokens,
+                        output_tokens,
                         cache_read_tokens: read("cachedInputTokens"),
                         cache_write_tokens: 0,
-                        total_tokens: read("totalTokens"),
+                        total_tokens: if reported_total > 0 {
+                            reported_total
+                        } else {
+                            input_tokens.saturating_add(output_tokens)
+                        },
                         model: None,
                     });
                 }
@@ -382,13 +401,26 @@ impl CodexAppServerEventParser {
                     .and_then(|v| v.as_str())
                     .unwrap_or("completed")
                     .to_string();
-                let error_message = params
+                let terminal_error_message = params
                     .get("turn")
                     .and_then(|t| t.get("error"))
                     .and_then(|e| e.get("message"))
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
+                    .map(canonicalize_cli_error_message)
+                    .filter(|message| !message.is_empty());
                 let success = status == "completed";
+                // The retry notice is the weakest signal there is: only a turn
+                // that actually failed may borrow it, an interrupted one has a
+                // better reason of its own — and it never outlives the turn.
+                let retry_fallback = self.last_retry_notice.take().filter(|_| status == "failed");
+                let error_message = if success {
+                    self.pending_error_message = None;
+                    None
+                } else {
+                    terminal_error_message
+                        .or_else(|| self.pending_error_message.take())
+                        .or(retry_fallback)
+                };
                 let mut chunk = ActivityChunk::new(&self.session_id, "session_end", "session_end");
                 let mut result = serde_json::json!({
                     "success": success,
@@ -414,13 +446,15 @@ impl CodexAppServerEventParser {
                     .unwrap_or(false);
                 if will_retry {
                     tracing::warn!("[CodexAppServer] Retryable error: {}", message);
+                    self.last_retry_notice = Some(canonicalize_cli_error_message(message));
                     return vec![];
                 }
-                let mut chunk = ActivityChunk::new(&self.session_id, "error", "error");
-                chunk.result = serde_json::json!({
-                    "observation": message, "error": message, "success": false,
-                });
-                vec![chunk]
+                let message = canonicalize_cli_error_message(message);
+                let Some(message) = self.error_deduper.admit(message) else {
+                    return vec![];
+                };
+                self.pending_error_message = Some(message);
+                vec![]
             }
             other => {
                 tracing::debug!("[CodexAppServer] Ignoring notification: {}", other);

@@ -670,13 +670,8 @@ fn all_scenarios() -> Vec<ScenarioDef> {
         ),
         scenario!(
             "agent-org",
-            "agent-org-launch-materializes-cli-member-sessions",
-            agent_org::launch_materializes_cli_member_sessions_in_run_view
-        ),
-        scenario!(
-            "agent-org",
-            "agent-org-cli-member-idle-does-not-prematurely-end-run",
-            agent_org::cli_member_idle_does_not_prematurely_end_run
+            "agent-org-production-return-to-work-drains-visible-input",
+            agent_org::production_return_to_work_drains_inbox_into_member_transcript
         ),
         scenario!(
             "agent-org",
@@ -700,8 +695,8 @@ fn all_scenarios() -> Vec<ScenarioDef> {
         ),
         scenario!(
             "agent-org",
-            "agent-org-control-after-state-reconciles-on-run-view",
-            agent_org::control_after_state_reconciles_when_run_view_opens
+            "agent-org-control-after-state-run-view-pure-read",
+            agent_org::control_after_state_run_view_is_pure_read
         ),
         scenario!(
             "agent-org",
@@ -837,35 +832,35 @@ fn all_scenarios() -> Vec<ScenarioDef> {
             "agent-org-coordinator-cannot-spawn-materialized-member",
             agent_org::coordinator_cannot_spawn_materialized_member
         ),
-        // Agent-team task system (autonomous claim, unassign-on-
+        // Agent-team task system (explicit assignment, unassign-on-
         // shutdown, ExecModeSetRequest). Each scenario is
         // deterministic — seeds task rows / inbox rows via debug
         // endpoints, drives the production drain helper, and asserts
         // the observable post-state.
         scenario!(
             "agent-org",
-            "agent-org-tasks-idle-member-autonomous-claim",
-            agent_org_tasks_and_exec_mode::idle_member_autonomous_claim_assigns_oldest_pending
+            "agent-org-tasks-worker-drain-keeps-ownerless",
+            agent_org_tasks_and_exec_mode::worker_drain_does_not_assign_ownerless_tasks
         ),
         scenario!(
             "agent-org",
-            "agent-org-tasks-coordinator-no-autonomous-claim",
-            agent_org_tasks_and_exec_mode::coordinator_drain_does_not_autonomously_claim
+            "agent-org-tasks-coordinator-drain-keeps-ownerless",
+            agent_org_tasks_and_exec_mode::coordinator_drain_does_not_assign_ownerless_task
         ),
         scenario!(
             "agent-org",
-            "agent-org-tasks-busy-member-skips-claim",
-            agent_org_tasks_and_exec_mode::busy_member_skips_autonomous_claim
+            "agent-org-tasks-owned-work-does-not-claim-ownerless",
+            agent_org_tasks_and_exec_mode::owned_work_does_not_make_ownerless_task_assignable
         ),
         scenario!(
             "agent-org",
-            "agent-org-tasks-concurrent-claim-single-winner",
-            agent_org_tasks_and_exec_mode::concurrent_autonomous_claim_has_single_winner
+            "agent-org-tasks-concurrent-drains-keep-ownerless",
+            agent_org_tasks_and_exec_mode::concurrent_worker_drains_leave_ownerless_task_unassigned
         ),
         scenario!(
             "agent-org",
-            "agent-org-tasks-blocked-dependency-gate",
-            agent_org_tasks_and_exec_mode::blocked_dependency_prevents_claim_until_completed
+            "agent-org-tasks-dependency-readiness-never-auto-assigns",
+            agent_org_tasks_and_exec_mode::dependency_state_never_auto_assigns_ownerless_task
         ),
         scenario!(
             "agent-org",
@@ -879,18 +874,18 @@ fn all_scenarios() -> Vec<ScenarioDef> {
         ),
         scenario!(
             "agent-org",
-            "agent-org-tasks-shutdown-releases-tasks",
+            "agent-org-tasks-shutdown-escalates-without-peer",
             agent_org_tasks_and_exec_mode::accepted_shutdown_releases_owned_open_tasks
         ),
         scenario!(
             "agent-org",
-            "agent-org-tasks-released-task-peer-reclaims",
-            agent_org_tasks_and_exec_mode::released_task_can_be_claimed_by_idle_peer
+            "agent-org-tasks-released-task-needs-explicit-assignment",
+            agent_org_tasks_and_exec_mode::released_task_requires_explicit_peer_assignment
         ),
         scenario!(
             "agent-org",
-            "agent-org-tasks-stale-worker-timeout-releases-tasks",
-            agent_org_tasks_and_exec_mode::stale_worker_timeout_releases_open_tasks
+            "agent-org-tasks-stale-running-worker-keeps-tasks",
+            agent_org_tasks_and_exec_mode::stale_running_worker_keeps_open_tasks_assigned
         ),
         scenario!(
             "agent-org",
@@ -899,8 +894,8 @@ fn all_scenarios() -> Vec<ScenarioDef> {
         ),
         scenario!(
             "agent-org",
-            "agent-org-tasks-exec-mode-set-request-lands",
-            agent_org_tasks_and_exec_mode::coordinator_exec_mode_set_request_lands_in_member_inbox
+            "agent-org-tasks-legacy-exec-mode-request-rejected",
+            agent_org_tasks_and_exec_mode::coordinator_cannot_send_legacy_exec_mode_set_request
         ),
         scenario!(
             "agent-org",
@@ -909,13 +904,13 @@ fn all_scenarios() -> Vec<ScenarioDef> {
         ),
         scenario!(
             "agent-org",
-            "agent-org-tasks-exec-mode-rejects-unknown",
-            agent_org_tasks_and_exec_mode::coordinator_exec_mode_set_request_rejects_unknown_mode
+            "agent-org-tasks-legacy-exec-mode-variants-rejected",
+            agent_org_tasks_and_exec_mode::legacy_exec_mode_set_request_variants_are_rejected
         ),
         scenario!(
             "agent-org",
-            "agent-org-tasks-plan-approval-next-mode-contract",
-            agent_org_tasks_and_exec_mode::coordinator_plan_approval_response_defaults_and_rejects_unsupported_next_mode
+            "agent-org-tasks-plan-approval-requires-pending-record",
+            agent_org_tasks_and_exec_mode::plan_approval_response_requires_pending_record
         ),
         scenario!(
             "agent-org",
@@ -1133,6 +1128,15 @@ async fn main() {
     println!("  Connected to {}", cfg.base_url);
     println!();
 
+    // A previous interrupted E2E process may have exited before its normal
+    // teardown. Remove only reserved Agent Org fixture runs before any real
+    // watchdog tick can mistake that residue for product work.
+    match agent_org_tasks_and_exec_mode::cleanup_agent_org_fixture_runs(&cfg).await {
+        Ok(0) => {}
+        Ok(count) => println!("[e2e-cleanup] Scrubbed {count} residual Agent Org run(s)"),
+        Err(err) => eprintln!("[e2e-cleanup] Agent Org startup sweep failed: {err}"),
+    }
+
     let selected: Vec<&ScenarioDef> = if let Some(pos) = args.iter().position(|a| a == "--scenario")
     {
         let name = args.get(pos + 1).expect("--scenario requires a name");
@@ -1168,6 +1172,13 @@ async fn main() {
     for sc in &selected {
         let start = std::time::Instant::now();
         let ok = (sc.run)(&cfg).await;
+        // This is the async equivalent of a `finally`: scenarios return a
+        // bool on both success and early-error paths, and cleanup always runs
+        // before the harness advances to the next scenario.
+        if let Err(err) = agent_org_tasks_and_exec_mode::cleanup_agent_org_fixture_runs(&cfg).await
+        {
+            eprintln!("[e2e-cleanup] Agent Org scenario sweep failed: {err}");
+        }
         let elapsed = start.elapsed();
         println!("  Time: {:.1}s", elapsed.as_secs_f64());
 
@@ -1214,16 +1225,18 @@ async fn main() {
 /// cleanup only needs to remove rows minted by the harness and must never turn
 /// stale local schema into a suite warning.
 fn scrub_e2e_project_residue() {
-    let home = std::env::var("ORGII_HOME")
-        .or_else(|_| std::env::var("HOME"))
+    let orgii_root = std::env::var("ORGII_HOME")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
-    scrub_e2e_projects_db(&home);
-    scrub_e2e_sessions_db(&home);
+        .or_else(|_| {
+            std::env::var("HOME").map(|home| std::path::PathBuf::from(home).join(".orgii"))
+        })
+        .unwrap_or_else(|_| std::path::PathBuf::from(".orgii"));
+    scrub_e2e_projects_db(&orgii_root);
+    scrub_e2e_sessions_db(&orgii_root);
 }
 
-fn scrub_e2e_projects_db(home: &std::path::Path) {
-    let db_path = home.join(".orgii/projects/projects.db");
+fn scrub_e2e_projects_db(orgii_root: &std::path::Path) {
+    let db_path = orgii_root.join("projects/projects.db");
     if !db_path.exists() {
         println!(
             "[e2e-cleanup] No projects.db at {} — skipping project sweep",
@@ -1350,8 +1363,8 @@ fn sqlite_table_exists(conn: &rusqlite::Connection, table_name: &str) -> rusqlit
 /// — never fails the test run. We intentionally use `sqlite3` via a shell
 /// call instead of pulling in a runtime dependency on `rusqlite` just for
 /// the e2e binary.
-fn scrub_e2e_sessions_db(home: &std::path::Path) {
-    let db_path = home.join(".orgii/sessions.db");
+fn scrub_e2e_sessions_db(orgii_root: &std::path::Path) {
+    let db_path = orgii_root.join("sessions.db");
     if !db_path.exists() {
         println!(
             "[e2e-cleanup] No sessions.db at {} — skipping db sweep",

@@ -169,14 +169,14 @@ const BottomPanelHeader: React.FC<BottomPanelHeaderProps> = memo(
                 options={outputChannelOptions}
                 onChange={handleOutputChannelChange}
                 size="small"
-                variant="ghost"
+                appearance="ghost"
                 radius="lg"
                 dropdownMinWidth={140}
                 dropdownWidthMode="auto"
                 dropdownAlign="right"
                 placement="bottom"
                 className="w-auto"
-                selectorClassName="!h-7 max-w-[140px] !gap-1.5 !border-0 !bg-transparent !px-1.5 !text-[12px] font-medium !text-text-2 hover:!bg-surface-hover hover:!text-text-1 [&_.select-suffix]:!ml-0"
+                selectorClassName="!h-7 max-w-[140px] !gap-1.5 !px-1.5 !text-[12px] [&_.select-suffix]:!ml-0"
               />
             )}
 

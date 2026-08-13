@@ -79,7 +79,7 @@
     "heading": "从 GitHub Issues 创建 Project",
     "description": "选择一个 GitHub 仓库，创建 ORGII Project，并将其中的 GitHub Issues 同步为 work items。",
     "importButton": "导入 GitHub Issues",
-    "projectDescription": "从 {{owner}}/{{repo}} 的 GitHub Issues 同步。",
+    "projectDescription": "GitHub Issues · {{owner}}/{{repo}}",
     "fields": {
       "projectName": "Project 名称",
       "repo": "GitHub 仓库",
@@ -149,18 +149,25 @@
       "overview": "概览",
       "profile": "概览",
       "syncMethods": "同步方式",
-      "orgNameDescription": "此项目组织的显示名称。",
+      "orgNameDescription": "此项目组织的显示名称",
       "orgKey": "组织标识",
-      "orgKeyDescription": "用于组织范围项目 ID 的稳定短标识。",
-      "projectCountDescription": "当前归属此组织的原生项目数。",
+      "orgKeyDescription": "用于组织范围项目 ID 的稳定短标识",
+      "projectCountDescription": "当前归属此组织的原生项目数",
       "gitFolderSync": "Git 文件夹同步",
-      "gitFolderSyncDescription": "通过 Git 工作区镜像此组织的项目和工作项。",
+      "gitFolderSyncDescription": "通过 Git 工作区镜像此组织的项目和工作项",
       "notConfigured": "未配置",
-      "syncNowDescription": "导入远端文件变更并导出本地数据库变更。",
+      "syncNowDescription": "导入远端文件变更并导出本地数据库变更",
       "syncSummary": "{{projects}} 个项目，{{workItems}} 个工作项，{{conflicts}} 个冲突",
-      "syncHowItWorks": "Git 文件夹同步会将此组织连接到现有 Git 仓库。ORGII 会把该组织导出的项目和工作项存放在仓库内的 `.orgii/projects/...` 下，从那里导入文件变更，将本地数据库变更导出回文件，并在遇到冲突时暂停，等待你检查后再覆盖任何内容。",
+      "syncHowItWorks": "Git 文件夹同步会将此组织连接到现有 Git 仓库。ORGII 会把该组织导出的项目和工作项存放在仓库内的 `.orgii/projects/...` 下，从那里导入文件变更，将本地数据库变更导出回文件，并在遇到冲突时暂停，等待你检查后再覆盖任何内容",
       "noProjectsForCatalog": "此组织还没有项目。",
-      "noProjectsForCatalogHint": "先在此组织中创建项目，然后再管理共享成员或标签。"
+      "noProjectsForCatalogHint": "先在此组织中创建项目，然后再管理共享标签",
+      "dangerZone": "危险区域",
+      "deleteOrg": "删除此组织",
+      "deleteOrgDescription": "永久删除 {{org}} 及其所有本地项目和工作项。此操作无法撤销",
+      "personalOrgDeleteDisabled": "默认个人组织是永久的，无法删除",
+      "deleteTypeToConfirm": "输入 {{org}} 以确认",
+      "deleteOrgAction": "删除组织",
+      "deletedToast": "已删除 {{org}}"
     }
   },
   "properties": {
@@ -361,9 +368,14 @@
     },
     "activity": {
       "title": "动态",
+      "discussionTitle": "讨论",
+      "activityHistory": "活动记录",
+      "activityHistoryCount": "{{count}} 条事件",
+      "noComments": "暂无评论",
       "subscribe": "订阅",
       "unsubscribe": "取消订阅",
       "commentPlaceholder": "留下评论...",
+      "mentionPeople": "提及成员",
       "you": "你",
       "createdWorkItem": "创建了工作项",
       "deletedWorkItem": "删除了工作项",
@@ -382,6 +394,16 @@
       "clearedField": "清除了{{field}}",
       "changedDescription": "更新了描述",
       "editedFields": "编辑了 {{count}} 个字段:",
+      "groupedChanges": "进行了 {{count}} 项更改",
+      "groupedTodoChanges": "更新了待办 · {{count}} 项操作",
+      "todoAdded": "新增了「{{todo}}」",
+      "todoRemoved": "删除了「{{todo}}」",
+      "todoCompleted": "完成了「{{todo}}」",
+      "todoReopened": "重新打开了「{{todo}}」",
+      "todoStarted": "开始了「{{todo}}」",
+      "todoMarkedPending": "将「{{todo}}」标记为待处理",
+      "todoRenamed": "将「{{from}}」重命名为「{{to}}」",
+      "todoUpdated": "更新了「{{todo}}」",
       "justNow": "刚刚",
       "daysAgo": "{{count}}天前",
       "hoursAgo": "{{count}}小时前",
@@ -404,7 +426,8 @@
         "todos": "待办事项",
         "comments": "评论",
         "schedule": "计划",
-        "orchestratorConfig": "Orchestrator 配置"
+        "orchestratorConfig": "Orchestrator 配置",
+        "handoff": "工作交接"
       }
     },
     "todos": {
@@ -480,6 +503,7 @@
       "title": "Agent 工作流",
       "startAgent": "启动 Agent",
       "startAgentAndChat": "启动 Agent 并打开 Chat",
+      "noWorkspaceForAgent": "请先打开一个仓库工作区，再对该事项启动 agent。",
       "running": "运行中...",
       "pendingLaunch": "等待启动...",
       "completed": "已完成",
@@ -491,7 +515,6 @@
       "openSession": "打开会话",
       "viewLiveChat": "查看实时 Chat",
       "viewConversation": "查看对话记录",
-      "viewSessionJourney": "会话旅程",
       "noWorkflowRun": "尚未运行 Agent 工作流",
       "confirmStart": "在此工作项上启动 SDE Agent？",
       "sdePhase": "SDE 开发",
@@ -589,7 +612,9 @@
       "newSession": "新建会话",
       "starting": "正在启动...",
       "emptyOverview": "暂无 Sessions",
-      "emptyOverviewHint": "启动 Agent Session 后，可在此跟踪执行。"
+      "emptyOverviewHint": "启动 Agent Session 后，可在此跟踪执行。",
+      "originTitle": "创建来源 Session",
+      "originStatus": "由此 Session 创建"
     },
     "outputTab": {
       "prSection": "Pull Request",
@@ -613,7 +638,27 @@
       "cycles": "轮次"
     },
     "viewWorkItems": "查看 Work Items",
-    "fromRoutine": "来自 Routine：{{name}}"
+    "fromRoutine": "来自 Routine：{{name}}",
+    "subItems": {
+      "title": "子任务",
+      "parent": "父任务",
+      "progress": "已完成 {{completed}} / {{total}}",
+      "add": "添加子任务",
+      "addFirst": "添加第一个子任务",
+      "titlePlaceholder": "输入子任务标题",
+      "stagePicker": "子任务阶段",
+      "noStage": "无阶段",
+      "stage": "阶段 {{stage}}",
+      "openStatus": "未完成",
+      "completedStatus": "已完成",
+      "cancelledStatus": "已取消",
+      "createError": "无法创建子任务，请重试。"
+    },
+    "sessionRail": {
+      "notOnDeviceTitle": "会话不在此设备",
+      "notOnDeviceHint": "该会话在其他设备上运行，转录未同步到本机。",
+      "finalOutput": "最终输出"
+    }
   },
   "settings": {
     "sidebarGeneral": "常规",
@@ -696,6 +741,11 @@
         "notAttached": "未绑定",
         "attach": "绑定",
         "detach": "解绑",
+        "detachProjectMenuLabel": "解除 GitHub 关联",
+        "detachProjectTitle": "解除 {{project}} 与 GitHub 的关联？",
+        "detachProjectDescription": "GitHub Issues 同步将停止。本地项目和已导入的工作项会保留在 ORGII 中。",
+        "detachProjectAction": "解除 {{project}} 与 GitHub 的关联",
+        "detachProjectSuccess": "已解除 {{project}} 与 GitHub 的关联",
         "changeWarning": "在绑定新适配器前，请先解绑当前适配器。"
       },
       "accountPicker": {
@@ -926,9 +976,7 @@
     "empty": "未找到 Workspace 项目",
     "issues": "Issues",
     "views": "Views",
-    "more": "More",
-    "projectTree": "项目树",
-    "projectJourney": "项目旅程"
+    "more": "More"
   },
   "teams": {
     "title": "你的团队",

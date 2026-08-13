@@ -1,7 +1,12 @@
 import { CANCEL_REASON } from "@src/api/tauri/agent";
 import {
+  type TimelineBoundaryReason,
+  shouldInterruptTimelineBoundary,
+} from "@src/engines/SessionCore/control/sessionTimelineBoundaryHelpers";
+import {
   beginTurnStopping,
   forceTurnIdle,
+  isTurnActive,
 } from "@src/engines/SessionCore/control/turnLifecycle";
 import { isTimelineBoundaryClosableRuntimeEvent } from "@src/engines/SessionCore/core/runningEventGate";
 import { eventStoreProxy } from "@src/engines/SessionCore/core/store/EventStoreProxy";
@@ -10,21 +15,24 @@ import { markSessionStreamingStopped } from "@src/engines/SessionCore/sync/adapt
 import { createLogger } from "@src/hooks/logger";
 import { killAgentShellProcess } from "@src/services/terminal";
 import {
+  closePostStopDispatchEpisodeAtom,
   isPendingCancelAtom,
-  isSessionActiveAtom,
-  sessionRuntimeStatusAtom,
+  openPostStopDispatchEpisodeAtom,
   setSessionRuntimeStatusAtom,
   streamRetryStatusAtom,
-  userInitiatedCancelAtom,
 } from "@src/store/session/cliSessionStatusAtom";
 import { shellProcessMapAtom } from "@src/store/session/shellProcessAtom";
+import {
+  hasLiveSubagentJobs,
+  subagentJobMapAtom,
+} from "@src/store/session/subagentJobAtom";
 import { holdSessionQueueForStopAtom } from "@src/store/ui/messageQueueAtom";
 import { getInstrumentedStore } from "@src/util/core/state/instrumentedStore";
 
 import { streamingDeltaContentAtom } from "../core/atoms";
 import { discardStreamingDeltaBuffer } from "../core/atoms/streamingDeltaBuffer";
 
-export type TimelineBoundaryReason = "stop" | "force-send" | "rewind";
+export type { TimelineBoundaryReason } from "./sessionTimelineBoundaryHelpers";
 
 /**
  * Which OS shell processes a boundary terminates.
@@ -118,7 +126,13 @@ async function killShellProcessesForBoundary(
           ? process.status === "running" || process.status === "background"
           : process.status === "running"
       )
-      .map((process) => killAgentShellProcess({ pid: process.pid, sessionId }))
+      .map((process) =>
+        killAgentShellProcess({
+          pid: process.pid,
+          sessionId,
+          callId: process.callId,
+        })
+      )
   );
 }
 
@@ -143,18 +157,17 @@ async function closeRunningEventsForTimelineBoundary(
 }
 
 function shouldInterruptForTimelineBoundary(
-  _sessionId: string,
+  sessionId: string,
   reason: TimelineBoundaryReason
 ): boolean {
-  if (reason !== "rewind") return true;
-
   const store = getInstrumentedStore();
-  const runtimeStatus = store.get(sessionRuntimeStatusAtom);
-  return (
-    store.get(isSessionActiveAtom) ||
-    runtimeStatus === "running" ||
-    runtimeStatus === "installing"
-  );
+  return shouldInterruptTimelineBoundary(reason, {
+    turnActive: isTurnActive(sessionId),
+    hasLiveSubagents: hasLiveSubagentJobs(
+      store.get(subagentJobMapAtom),
+      sessionId
+    ),
+  });
 }
 
 export function beginTimelineBoundary(
@@ -178,13 +191,13 @@ export function beginTimelineBoundary(
   }
 
   if (effect.isUserStop) {
-    store.set(userInitiatedCancelAtom, true);
+    store.set(openPostStopDispatchEpisodeAtom, sessionId);
     store.set(isPendingCancelAtom, true);
     // Stop parks every queued follow-up of this session: the natural drain
     // skips them permanently; only an explicit Send Now dispatches them.
     store.set(holdSessionQueueForStopAtom, sessionId);
   } else {
-    store.set(userInitiatedCancelAtom, false);
+    store.set(closePostStopDispatchEpisodeAtom, sessionId);
     store.set(isPendingCancelAtom, false);
   }
 

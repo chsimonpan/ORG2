@@ -45,23 +45,8 @@ import { SESSION_TARGET_KIND } from "@src/store/session/creatorStateAtom";
 import { invokeTauri } from "@src/util/platform/tauri/init";
 
 import type { SpotlightItem } from "../../types";
-import type { AgentSelection } from "./types";
-
-export interface AgentOption {
-  id: string;
-  name: string;
-  desc: string;
-  iconId?: string;
-  category: DispatchCategory;
-  targetKind: AgentSelection["targetKind"];
-  agentDefinitionId?: string;
-  agentOrgId?: string;
-  cliAgentType?: CliAgentType;
-  isBuiltIn: boolean;
-  isCli: boolean;
-  isOrg: boolean;
-  rightContent?: React.ReactNode;
-}
+import { createHumanSessionOption } from "./humanSessionOption";
+import type { AgentOption, AgentSelection } from "./types";
 
 export interface DispatchCategoryOptionGroup {
   headerId: string;
@@ -72,8 +57,10 @@ export interface DispatchCategoryOptionGroup {
 export interface UseDispatchCategoryOptionsArgs {
   isOpen: boolean;
   hideOrgs: boolean;
+  hideCliAgents?: boolean;
   /** When true, only CLI agent entries are included (Rust-native agents and orgs are hidden). */
   cliOnly?: boolean;
+  includeHumanSession?: boolean;
   currentCategory: DispatchCategory;
   currentAgentDefinitionId?: string;
   currentAgentOrgId?: string;
@@ -143,7 +130,9 @@ export function useDispatchCategoryOptions(
   const {
     isOpen,
     hideOrgs,
+    hideCliAgents = false,
     cliOnly = false,
+    includeHumanSession = false,
     currentCategory,
     currentAgentDefinitionId,
     currentAgentOrgId,
@@ -252,6 +241,14 @@ export function useDispatchCategoryOptions(
       }));
   }, [allAgents, rustCompatibleAccounts]);
 
+  const humanOptions = useMemo(
+    (): AgentOption[] =>
+      includeHumanSession
+        ? [createHumanSessionOption(t("creator.humanSession.name"))]
+        : [],
+    [includeHumanSession, t]
+  );
+
   const cliOptions = useMemo((): AgentOption[] => {
     return installedCliAgents.flatMap((agent) => {
       const parsed = CliAgentTypeSchema.safeParse(agent.name);
@@ -338,20 +335,23 @@ export function useDispatchCategoryOptions(
       cliOnly
         ? [...cliOptions]
         : [
+            ...humanOptions,
             ...builtInRustOptions,
-            ...cliOptions,
+            ...(hideCliAgents ? [] : cliOptions),
             ...externalIdeOptions,
             ...customAgentOptions,
             ...(hideOrgs ? [] : orgOptions),
           ],
     [
       cliOnly,
+      humanOptions,
       builtInRustOptions,
       cliOptions,
       externalIdeOptions,
       customAgentOptions,
       orgOptions,
       hideOrgs,
+      hideCliAgents,
     ]
   );
 
@@ -366,6 +366,9 @@ export function useDispatchCategoryOptions(
         }
         if (selection.category === "cursor_ide") {
           return candidate.category === "cursor_ide";
+        }
+        if (selection.category === "human_session") {
+          return candidate.category === "human_session";
         }
         return candidate.agentDefinitionId === selection.agentDefinitionId;
       });
@@ -389,13 +392,14 @@ export function useDispatchCategoryOptions(
       recentOptions
     );
     if (!cliOnly) {
-      push(
-        "__header_builtin__",
-        t("creator.builtInAgents"),
-        builtInRustOptions
-      );
+      push("__header_builtin__", t("creator.builtIns"), [
+        ...humanOptions,
+        ...builtInRustOptions,
+      ]);
     }
-    push("__header_cli__", t("creator.cliAgents"), cliOptions);
+    if (!hideCliAgents) {
+      push("__header_cli__", t("creator.cliAgents"), cliOptions);
+    }
     if (!cliOnly) {
       push(
         "__header_external_ide__",
@@ -411,8 +415,10 @@ export function useDispatchCategoryOptions(
   }, [
     cliOnly,
     recentOptions,
+    humanOptions,
     builtInRustOptions,
     cliOptions,
+    hideCliAgents,
     externalIdeOptions,
     customAgentOptions,
     orgOptions,
@@ -429,8 +435,9 @@ export function useDispatchCategoryOptions(
         : option.isCli
           ? currentCategory === "cli_agent" &&
             option.cliAgentType === currentCliAgentType
-          : option.category === "cursor_ide"
-            ? currentCategory === "cursor_ide"
+          : option.category === "cursor_ide" ||
+              option.category === "human_session"
+            ? currentCategory === option.category
             : currentCategory === "rust_agent" &&
               option.agentDefinitionId === currentAgentDefinitionId;
 
@@ -463,11 +470,13 @@ export function useDispatchCategoryOptions(
           rightContent: option.rightContent,
           testId: option.isOrg
             ? `session-creator-agent-option-org-${option.agentOrgId}`
-            : option.agentDefinitionId
-              ? `session-creator-agent-option-def-${option.agentDefinitionId}`
-              : option.cliAgentType
-                ? `session-creator-agent-option-cli-${option.cliAgentType}`
-                : undefined,
+            : option.category === "human_session"
+              ? "session-creator-option-human-session"
+              : option.agentDefinitionId
+                ? `session-creator-agent-option-def-${option.agentDefinitionId}`
+                : option.cliAgentType
+                  ? `session-creator-agent-option-cli-${option.cliAgentType}`
+                  : undefined,
         },
         action: () => {
           recordRecentAgentSelection({

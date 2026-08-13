@@ -14,11 +14,6 @@
  * </SidebarBase>
  * ```
  */
-import {
-  MenuItem,
-  PredefinedMenuItem,
-  Menu as TauriMenu,
-} from "@tauri-apps/api/menu";
 import i18next from "i18next";
 import { useAtomValue, useSetAtom } from "jotai";
 import { PanelLeft, Plus, X } from "lucide-react";
@@ -47,6 +42,7 @@ import {
 } from "@src/store/ui/sidebarAtom";
 import { windowFullscreenAtom } from "@src/store/ui/uiAtom";
 import { isTauriDesktop } from "@src/util/platform/tauri";
+import { popupNativeMenu } from "@src/util/platform/tauri/nativeMenuPopup";
 
 import { SIDEBAR_STYLE } from "./config";
 import { useForceVisibleSidebar } from "./contexts/ForceVisibleContext";
@@ -57,7 +53,7 @@ const log = createLogger("SidebarBase");
 const HOST_DESKTOP_KIND = resolveHostDesktop();
 const IS_MACOS_HOST = HOST_DESKTOP_KIND === HOST_DESKTOP.MACOS;
 const IS_WINDOWS_HOST = HOST_DESKTOP_KIND === HOST_DESKTOP.WINDOWS;
-const SHOW_HOST_TITLE =
+const IS_WINDOWS_OR_LINUX_HOST =
   HOST_DESKTOP_KIND === HOST_DESKTOP.WINDOWS ||
   HOST_DESKTOP_KIND === HOST_DESKTOP.LINUX;
 
@@ -89,6 +85,8 @@ const SidebarBase: React.FC<SidebarBaseProps> = React.memo(
     addTooltipContent,
     beforeAddNewActions,
     headerActions,
+    hostTopBarLeadingContent,
+    macTopBarFollowingContent,
   }) => {
     const sidebarContainerRef = useRef<HTMLDivElement>(null);
     const {
@@ -166,45 +164,41 @@ const SidebarBase: React.FC<SidebarBaseProps> = React.memo(
         const isAlreadyDefault = sidebarWidth === DEFAULT_SIDEBAR_WIDTH;
         const isAlreadyMin = sidebarWidth <= MIN_SIDEBAR_WIDTH;
 
-        (async () => {
-          try {
+        void popupNativeMenu({
+          source: "navigation-sidebar",
+          buildItems: () => {
             const t = i18next.t.bind(i18next);
-
-            const resizeDefaultItem = await MenuItem.new({
-              text: t("tooltips.resizeToDefault", {
-                width: DEFAULT_SIDEBAR_WIDTH,
-              }),
-              enabled: !isAlreadyDefault,
-              action: () => {
-                setWidth(DEFAULT_SIDEBAR_WIDTH);
+            return [
+              {
+                text: t("tooltips.resizeToDefault", {
+                  width: DEFAULT_SIDEBAR_WIDTH,
+                }),
+                enabled: !isAlreadyDefault,
+                action: () => {
+                  setWidth(DEFAULT_SIDEBAR_WIDTH);
+                },
               },
-            });
-            const minimizeItem = await MenuItem.new({
-              text: t("tooltips.minimizeWidth", {
-                width: MIN_SIDEBAR_WIDTH,
-              }),
-              enabled: !isAlreadyMin,
-              action: () => {
-                setWidth(MIN_SIDEBAR_WIDTH);
+              {
+                text: t("tooltips.minimizeWidth", {
+                  width: MIN_SIDEBAR_WIDTH,
+                }),
+                enabled: !isAlreadyMin,
+                action: () => {
+                  setWidth(MIN_SIDEBAR_WIDTH);
+                },
               },
-            });
-            const separator = await PredefinedMenuItem.new({
-              item: "Separator",
-            });
-            const hideItem = await MenuItem.new({
-              text: t("tooltips.hideSidebar"),
-              action: () => {
-                collapse();
+              { item: "Separator" as const },
+              {
+                text: t("tooltips.hideSidebar"),
+                action: () => {
+                  collapse();
+                },
               },
-            });
-            const menu = await TauriMenu.new({
-              items: [resizeDefaultItem, minimizeItem, separator, hideItem],
-            });
-            await menu.popup();
-          } catch (error) {
-            log.error("Failed to show sidebar context menu:", error);
-          }
-        })();
+            ];
+          },
+        }).catch((error) => {
+          log.error("Failed to show sidebar context menu:", error);
+        });
       },
       [sidebarWidth, setWidth, collapse]
     );
@@ -269,11 +263,13 @@ const SidebarBase: React.FC<SidebarBaseProps> = React.memo(
 
       // In fullscreen mode, traffic lights are hidden, so no padding needed
       const trafficLightPadding =
-        IS_WINDOWS_HOST || isFullscreen
+        IS_WINDOWS_OR_LINUX_HOST || isFullscreen
           ? 0
           : SIDEBAR_STYLE.trafficLightsPadding;
-      const alignmentClassName = IS_WINDOWS_HOST
-        ? "justify-between pl-5 pr-2"
+      const alignmentClassName = IS_WINDOWS_OR_LINUX_HOST
+        ? hostTopBarLeadingContent
+          ? "justify-between pl-3 pr-2"
+          : "justify-between pl-5 pr-2"
         : "justify-end pr-2";
 
       return (
@@ -290,13 +286,22 @@ const SidebarBase: React.FC<SidebarBaseProps> = React.memo(
             } as React.CSSProperties
           }
         >
-          {SHOW_HOST_TITLE ? (
-            <span className="select-none text-[13px] font-semibold tracking-wide text-text-2">
-              ORG2
-            </span>
+          {IS_WINDOWS_OR_LINUX_HOST ? (
+            hostTopBarLeadingContent ? (
+              <div
+                className="min-w-0 flex-1"
+                style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+              >
+                {hostTopBarLeadingContent}
+              </div>
+            ) : (
+              <span className="select-none text-[13px] font-semibold tracking-wide text-text-2">
+                ORG2
+              </span>
+            )
           ) : null}
           <div
-            className={`flex items-center gap-1 ${sidebarTopChromeClassName}`}
+            className={`flex shrink-0 items-center gap-1 ${sidebarTopChromeClassName}`}
           >
             {beforeAddNewActions ? (
               <div
@@ -435,9 +440,10 @@ const SidebarBase: React.FC<SidebarBaseProps> = React.memo(
         <VerticalResizeHandle
           className={IDLE_SIDEBAR_RESIZE_HANDLE_CLASS_NAME}
           isResizing={isDragging}
+          noAccent={IS_WINDOWS_HOST}
           onMouseDown={handleMouseDown}
           onContextMenu={handleResizeContextMenu}
-          variant="border"
+          variant={IS_WINDOWS_HOST ? "transparent" : "border"}
         />
       </div>
     );
@@ -458,6 +464,7 @@ const SidebarBase: React.FC<SidebarBaseProps> = React.memo(
           />
         )}
         {renderTrafficLightsSpace()}
+        {IS_MACOS_HOST ? macTopBarFollowingContent : null}
         {header}
         <div className="flex flex-1 flex-col overflow-hidden">
           {resolvedChildren}
@@ -496,7 +503,9 @@ const SidebarBase: React.FC<SidebarBaseProps> = React.memo(
           ...floatingSurfaceOverride,
         }
       : {
-          backgroundColor: "var(--sidebar-bg)",
+          backgroundColor: IS_WINDOWS_HOST
+            ? "color-mix(in srgb, var(--color-bg-2) var(--windows-native-chrome-opacity, 30%), transparent)"
+            : "var(--sidebar-bg)",
           borderColor: "var(--sidebar-border)",
           boxShadow: sidebarBoxShadow,
           backdropFilter: sidebarBackdropFilter,
@@ -513,17 +522,21 @@ const SidebarBase: React.FC<SidebarBaseProps> = React.memo(
     // content panel). The top-left and bottom-left corners follow the window
     // radius (`--border-radius-window`) so the sidebar surface aligns with
     // the rounded window/body clip instead of leaving a sliver of the body
-    // Modern chrome keeps the sidebar flush against the rounded window edge,
-    // with only a separator where it meets the content panel.
+    // Modern chrome keeps the sidebar flush against the rounded window edge.
+    // On Windows, the rounded content surface owns the shared edge; a straight
+    // sidebar separator would remain visible behind its curved top-left corner.
     const modernSurfaceStyle = {
-      borderTopLeftRadius: "var(--border-radius-window)",
+      // The Windows header spans the full native top edge and owns both top
+      // radii. Rounding the sidebar again below it creates a detached inner
+      // curve; macOS has no HTML topbar, so its sidebar still owns this corner.
+      borderTopLeftRadius: IS_WINDOWS_HOST ? 0 : "var(--border-radius-window)",
       borderBottomLeftRadius: "var(--border-radius-window)",
       borderTopRightRadius: 0,
       borderBottomRightRadius: 0,
       borderTopWidth: 0,
       borderLeftWidth: 0,
       borderBottomWidth: 0,
-      borderRightWidth: 1,
+      borderRightWidth: IS_WINDOWS_HOST ? 0 : 1,
     } as const;
     const wrappedContent = wrapInSurface ? (
       <div

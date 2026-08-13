@@ -61,10 +61,7 @@ static RATE_LIMIT_COOLDOWNS: LazyLock<Mutex<HashMap<String, Instant>>> =
 /// Providers are tried in order. For each provider, up to
 /// `max_retries + 1` attempts are made before moving to the next.
 pub struct ReliableProvider {
-    /// Ordered list of (name, provider). First is primary. Runtime ORG2
-    /// sessions intentionally reject cross-model fallbacks at construction
-    /// time, so this list is normally length 1; the vector shape remains for
-    /// tests and explicit low-level callers.
+    /// Ordered list of (name, provider). First is primary, rest are fallbacks.
     providers: Vec<(String, Box<dyn LLMProvider>)>,
     /// Maximum retry attempts per provider (0 = no retries, just one attempt).
     max_retries: u32,
@@ -75,24 +72,7 @@ pub struct ReliableProvider {
     session_id: Mutex<Option<String>>,
 }
 
-fn extract_http_status(message: &str) -> Option<u16> {
-    ["http status ", "http ", "status="]
-        .iter()
-        .find_map(|marker| {
-            let tail = message.split(marker).nth(1)?;
-            tail.get(..3)?.parse::<u16>().ok()
-        })
-}
-
 impl ReliableProvider {
-    /// Return provider labels in the order this wrapper would try them.
-    pub fn provider_chain_names(&self) -> Vec<String> {
-        self.providers
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect()
-    }
-
     /// Create a new reliable provider wrapping a single provider.
     pub fn single(
         name: String,
@@ -235,11 +215,6 @@ impl ReliableProvider {
                     || lower.contains("connection refused")
                     || lower.contains("dns error")
                     || lower.contains("no such host")
-                    // Deterministic client errors must fail fast. 408, 409,
-                    // and 429 are explicitly transient/retryable.
-                    || extract_http_status(&lower).is_some_and(|status| {
-                        (400..500).contains(&status) && !matches!(status, 408 | 409 | 429)
-                    })
                     || (lower.contains("http 400")
                         && (lower.contains("model is not supported")
                             || lower.contains("model_not_found")
@@ -376,7 +351,7 @@ impl LLMProvider for ReliableProvider {
         messages: &[Value],
         tools: Option<&[Value]>,
         model: &str,
-        max_tokens: Option<u32>,
+        max_tokens: u32,
         temperature: f32,
     ) -> Result<LLMResponse, ProviderError> {
         self.chat_with_options(
@@ -399,7 +374,7 @@ impl LLMProvider for ReliableProvider {
         messages: &[Value],
         tools: Option<&[Value]>,
         model: &str,
-        max_tokens: Option<u32>,
+        max_tokens: u32,
         temperature: f32,
         options: ChatOptions,
     ) -> Result<LLMResponse, ProviderError> {
@@ -496,7 +471,7 @@ impl LLMProvider for ReliableProvider {
         messages: &[Value],
         tools: Option<&[Value]>,
         model: &str,
-        max_tokens: Option<u32>,
+        max_tokens: u32,
         temperature: f32,
         on_delta: &(dyn Fn(StreamDelta) + Send + Sync),
         cancel_flag: Option<&AtomicBool>,

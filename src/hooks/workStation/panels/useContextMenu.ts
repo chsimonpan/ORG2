@@ -30,6 +30,10 @@ import {
   useState,
 } from "react";
 
+import { org2CloudAuthAtom } from "@src/features/Org2Cloud/org2CloudAuthAtom";
+import { sidebarActiveCloudOrgIdAtom } from "@src/features/Org2Cloud/org2CloudOrgsAtom";
+import { org2CloudRemoteSessionsAtom } from "@src/features/Org2Cloud/org2CloudRemoteSessionsAtom";
+import { teamSessionMentionResults } from "@src/features/Org2Cloud/teamSessionMentionResults";
 import { createLogger } from "@src/hooks/logger";
 import {
   DEBOUNCE_DELAYS,
@@ -39,6 +43,7 @@ import { sessionsAtom } from "@src/store/session/sessionAtom";
 import { workspaceFoldersAtom } from "@src/store/ui/workspaceFoldersAtom";
 import { activeWorkspaceRootAtom } from "@src/store/workspace";
 
+import { LatestRequestGuard } from "../latestRequestGuard";
 import {
   type DrilledProject,
   searchFiles,
@@ -99,6 +104,16 @@ export function useContextMenu(
 
   // Get all sessions for @sessions search
   const allSessions = useAtomValue(sessionsAtom);
+  // Team sessions ride the ALREADY-CACHED listing: opening a menu must not
+  // put an RPC on the wire, so `useCloudOrgRemoteSessions` (which fetches)
+  // is deliberately not used here.
+  const cloudRemoteSessions = useAtomValue(org2CloudRemoteSessionsAtom);
+  const activeCloudOrgId = useAtomValue(sidebarActiveCloudOrgIdAtom);
+  const cloudAuth = useAtomValue(org2CloudAuthAtom);
+  const localSessionIdSet = useMemo(
+    () => new Set(allSessions.map((session) => session.session_id)),
+    [allSessions]
+  );
 
   const drilledProjectRef = useRef<DrilledProject | null>(null);
   const [drilledProjectName, setDrilledProjectName] = useState<string | null>(
@@ -116,6 +131,16 @@ export function useContextMenu(
   const [secondLayerActiveIndex, setSecondLayerActiveIndex] = useState(0);
   const hasMovedMainHighlightRef = useRef(false);
   const hasMovedSecondLayerHighlightRef = useRef(false);
+  const searchRequestGuardRef = useRef<LatestRequestGuard | null>(null);
+  if (searchRequestGuardRef.current === null) {
+    searchRequestGuardRef.current = new LatestRequestGuard();
+  }
+
+  useEffect(() => {
+    return () => {
+      searchRequestGuardRef.current!.invalidate();
+    };
+  }, []);
 
   // Derive effective values — when externalSearchQuery is provided, override
   // without any setState.  This eliminates the 2-setState cascade that was
@@ -166,8 +191,10 @@ export function useContextMenu(
 
   const performSearch = useCallback(
     async (query: string, type: SecondLayerId, allowEmpty: boolean = false) => {
+      const request = searchRequestGuardRef.current!.issue();
       if (!query.trim() && !allowEmpty) {
         updateSearchResults([]);
+        setSearchLoading(false);
         return;
       }
       setSearchLoading(true);
@@ -186,7 +213,19 @@ export function useContextMenu(
           const fileResults = mergeSearchResultsByRoot(perRootResults, 20);
           results = [...rootResults, ...fileResults].slice(0, 20);
         } else if (type === "sessions") {
-          results = searchSessions(query, allSessions);
+          // Teammates' sessions sit after the viewer's own: the local list
+          // is what @ has always meant, and team rows extend it.
+          results = [
+            ...searchSessions(query, allSessions),
+            ...teamSessionMentionResults({
+              query,
+              rows: activeCloudOrgId
+                ? cloudRemoteSessions[activeCloudOrgId]?.rows
+                : undefined,
+              selfUserId: cloudAuth?.userId ?? null,
+              localSessionIds: localSessionIdSet,
+            }),
+          ];
         } else if (type === "projects") {
           results = await searchProjects(
             query,
@@ -196,15 +235,30 @@ export function useContextMenu(
         } else {
           results = [];
         }
-        updateSearchResults(results);
+        if (request.isCurrent()) {
+          updateSearchResults(results);
+        }
       } catch (error) {
-        log.error("[ContextMenu] Search failed:", error);
-        updateSearchResults([]);
+        if (request.isCurrent()) {
+          log.error("[ContextMenu] Search failed:", error);
+          updateSearchResults([]);
+        }
       } finally {
-        setSearchLoading(false);
+        if (request.isCurrent()) {
+          setSearchLoading(false);
+        }
       }
     },
-    [effectiveRepoPath, searchRoots, allSessions, updateSearchResults]
+    [
+      effectiveRepoPath,
+      searchRoots,
+      allSessions,
+      updateSearchResults,
+      activeCloudOrgId,
+      cloudAuth?.userId,
+      cloudRemoteSessions,
+      localSessionIdSet,
+    ]
   );
 
   // Debounced context menu search — leading: true fires first call immediately
@@ -224,11 +278,17 @@ export function useContextMenu(
   // useDebouncedCallback keeps the function fresh.
   useEffect(() => {
     if (secondLayer) {
+      // Invalidate immediately when the user's search intent changes. The next
+      // debounced search issues its own ticket; until then, an older request
+      // must not commit results for the previous query or menu invocation.
+      searchRequestGuardRef.current!.invalidate();
       // When entering files layer without query, still search to show all files
       debouncedContextSearch(searchQuery, secondLayer, !searchQuery);
     } else if (!searchQuery) {
       debouncedContextSearch.cancel();
+      searchRequestGuardRef.current!.invalidate();
       updateSearchResults([]);
+      setSearchLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery, secondLayer, debouncedContextSearch]);
@@ -276,6 +336,7 @@ export function useContextMenu(
 
   // Reset state
   const reset = useCallback(() => {
+    searchRequestGuardRef.current!.invalidate();
     setActiveIndex(0);
     setKeyboardNavigated(false);
     setSecondLayer(null);
@@ -359,6 +420,10 @@ export function useContextMenu(
                 selectType = "workitem";
               } else if (selected.iconType === "browser") {
                 selectType = "browser";
+              } else if (selected.iconType === "cloudSession") {
+                // Without this the Enter path falls through to "sessions"
+                // and a cloud reference gets inserted as a local pill.
+                selectType = "cloudSession";
               } else if (
                 secondLayer === "files" &&
                 selected.type === "folder"

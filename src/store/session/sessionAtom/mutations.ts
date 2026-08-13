@@ -18,6 +18,10 @@
  *      reconcile-driven write; it represents activity the user just
  *      performed, so it's the correct signal for sidebar / Kanban
  *      "recent activity" ordering.
+ *   4. `applyImportedSessionTimestamps()` — an imported collaboration
+ *      replay mirrors a TEAMMATE's session, so its timestamps are the
+ *      owner's and arrive on the cloud listing row. No local read or
+ *      list refresh can supply them.
  *
  * On the *update* path of `upsertSession()` we deliberately preserve
  * the prior record's timestamps and ignore whatever the caller spread
@@ -28,6 +32,10 @@
  * intentional escape hatch for "the user just did something, bump
  * the row".
  */
+import { disposeSessionStreamingState } from "@src/engines/SessionCore/sync/adapters/rustAgent/eventHandlers/streamHelpers";
+import { cursorIdeTurnSummariesAtomFamily } from "@src/store/session/cursorIdeTurnSummariesAtom";
+import { tuiModeAtom } from "@src/store/session/tuiModeAtom";
+import { clearTodosForSessionAtom } from "@src/store/ui/todoAtom";
 import { getInstrumentedStore } from "@src/util/core/state/instrumentedStore";
 
 import {
@@ -35,6 +43,7 @@ import {
   sessionLastLoadedAtom,
   sessionsAtom,
 } from "./atoms";
+import { removeGuestImportedSession } from "./guestImportRegistry";
 import type { Session, SessionStatus } from "./types";
 
 const getStore = () => getInstrumentedStore();
@@ -117,6 +126,51 @@ export const markSessionActive = (sessionId: string) => {
 };
 
 /**
+ * Adopt the SOURCE's activity timestamps on an imported replay copy.
+ *
+ * The only mutation that writes someone else's clock, and the reason it
+ * has to exist: an imported collaboration copy is a read-only mirror of a
+ * teammate's session, so its `created_at` / `updated_at` describe the
+ * OWNER's work and reach this device on the cloud listing row
+ * (`lastActivityAt`) — no `loadSessions()` refresh can correct them.
+ * `upsertSession()`'s pinning is precisely what this bypasses; without it
+ * the copy keeps the moment the viewer first clicked the card, which made
+ * every opened cloud card read "Now" in Kanban and jump to the top of
+ * List/Diary.
+ *
+ * No-op unless the row is in the store AND carries `importedFrom`: the
+ * pinning stays absolute for locally-owned sessions.
+ */
+export const applyImportedSessionTimestamps = (
+  sessionId: string,
+  timestamps: {
+    created_at: string;
+    updated_at: string;
+    completed_at: string;
+  }
+) => {
+  const store = getStore();
+  store.set(sessionsAtom, (prev) => {
+    let changed = false;
+    const next = prev.map((session) => {
+      if (session.session_id !== sessionId || !session.importedFrom) {
+        return session;
+      }
+      if (
+        session.created_at === timestamps.created_at &&
+        session.updated_at === timestamps.updated_at &&
+        session.completed_at === timestamps.completed_at
+      ) {
+        return session;
+      }
+      changed = true;
+      return { ...session, ...timestamps };
+    });
+    return changed ? next : prev;
+  });
+};
+
+/**
  * Remove a session from the store.
  */
 export const removeSession = (sessionId: string) => {
@@ -124,6 +178,20 @@ export const removeSession = (sessionId: string) => {
   store.set(sessionsAtom, (prev) =>
     prev.filter((session) => session.session_id !== sessionId)
   );
+  // A removed session has no live viewers, so free its per-session caches.
+  // Without this they accumulate one entry per session for the app lifetime —
+  // and tuiMode additionally leaves a `orgii:tuiMode:<id>` localStorage key.
+  cursorIdeTurnSummariesAtomFamily.remove(sessionId);
+  tuiModeAtom.remove(sessionId);
+  if (typeof localStorage !== "undefined") {
+    localStorage.removeItem(`orgii:tuiMode:${sessionId}`);
+  }
+  store.set(clearTodosForSessionAtom, sessionId);
+  removeGuestImportedSession(sessionId);
+  // Rust-agent streaming-stop state (per-turn stop markers etc.). This single
+  // chokepoint covers every removal path — sidebar delete, cloud remove, fork
+  // rollback, guest-share remove — so callers need not dispose it themselves.
+  disposeSessionStreamingState(sessionId);
 };
 
 /**
@@ -146,11 +214,21 @@ export const updateSessionStatus = (
   status: SessionStatus
 ) => {
   const store = getStore();
-  store.set(sessionsAtom, (prev) =>
-    prev.map((session) =>
-      session.session_id === sessionId ? { ...session, status } : session
-    )
-  );
+  store.set(sessionsAtom, (prev) => {
+    // Short-circuit when the row already carries this status. Live-status
+    // pushes fire many times per second per running agent; without this guard
+    // every heartbeat allocated a fresh length-n array and invalidated the
+    // whole sidebar derivation cascade even when nothing changed.
+    let changed = false;
+    const next = prev.map((session) => {
+      if (session.session_id === sessionId && session.status !== status) {
+        changed = true;
+        return { ...session, status };
+      }
+      return session;
+    });
+    return changed ? next : prev;
+  });
 };
 
 /**

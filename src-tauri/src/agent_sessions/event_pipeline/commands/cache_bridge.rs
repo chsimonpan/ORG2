@@ -175,6 +175,56 @@ pub async fn cache_save_session_events(
     Ok(count)
 }
 
+/// Append one bounded cloud-replay import page without rebuilding metadata,
+/// normalized sequences, or the turn index for the already persisted prefix.
+/// The import remains unpublished until `cache_finalize_session_event_import`.
+#[tauri::command]
+pub async fn cache_append_session_event_import(
+    session_id: String,
+    events: Vec<SessionEvent>,
+) -> Result<usize, String> {
+    if session_providers::skips_event_cache_save(&session_id) {
+        return Ok(0);
+    }
+
+    let cached: Vec<sqlite_cache::CachedEvent> = events
+        .iter()
+        .filter(|event| !is_synthetic_persistence_artifact(event))
+        .map(session_event_to_cached_event)
+        .collect();
+    let count = cached.len();
+    tokio::task::spawn_blocking(move || sqlite_cache::save_events_deferred(&session_id, &cached))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    Ok(count)
+}
+
+/// Publish a page-streamed replay after the final epoch/count check. Exactly
+/// one full metadata/sequence pass and one turn-index rebuild are scheduled.
+#[tauri::command]
+pub async fn cache_finalize_session_event_import(session_id: String) -> Result<usize, String> {
+    if session_providers::skips_event_cache_save(&session_id) {
+        return Ok(0);
+    }
+    tokio::task::spawn_blocking(move || sqlite_cache::finalize_deferred_event_import(&session_id))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+/// Count a session's persisted events without loading them — the cheap
+/// cache-hit probe for imported replays. Pure read: takes neither the
+/// writer serializer nor the sequence-normalization pass.
+#[tauri::command]
+pub async fn cache_count_session_events(session_id: String) -> Result<usize, String> {
+    tokio::task::spawn_blocking(move || sqlite_cache::count_events(&session_id))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+        .map(|count| count.max(0) as usize)
+}
+
 /// Load SessionEvents directly from SQLite cache (conversion happens in Rust).
 #[tauri::command]
 pub async fn cache_load_session_events(session_id: String) -> Result<Vec<SessionEvent>, String> {
@@ -623,7 +673,7 @@ mod tests {
         assistant.display_text = FINAL_ASSISTANT_ANSWER.to_string();
         assistant.is_delta = Some(false);
 
-        let cached = vec![user, subagent, assistant]
+        let cached = [user, subagent, assistant]
             .iter()
             .filter(|event| !is_synthetic_persistence_artifact(event))
             .map(session_event_to_cached_event)
@@ -801,6 +851,8 @@ mod tests {
             repo_path: None,
             extracted: None,
             payload_refs: Vec::new(),
+            shell_replay: None,
+            shell_replay_bookmarks: None,
             last_extract_at: None,
         }
     }

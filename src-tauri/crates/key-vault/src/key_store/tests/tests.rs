@@ -1,10 +1,101 @@
 use crate::key_store::{
     AuthMethod, CliOAuthTokenSync, CliOAuthTokenSyncOutcome, HealthStatus, KeyService, KeyStore,
-    ModelKey, ModelType, ModelVariant, ReasoningEffort, KEY_SERVICE,
+    ModelKey, ModelType, OAuthRefreshOutcome, KEY_SERVICE,
 };
 use chrono::{TimeZone, Utc};
 use std::collections::HashMap;
 use tempfile::tempdir;
+
+#[test]
+fn api_key_rejects_oauth_refresh_failure_bookkeeping_without_mutation() {
+    let temp_dir = tempdir().unwrap();
+    let service = KeyService::new(Some(temp_dir.path().to_path_buf()));
+
+    for model_type in [
+        ModelType::Codex,
+        ModelType::ClaudeCode,
+        ModelType::ZhipuApi,
+        ModelType::ZenmuxApi,
+    ] {
+        let mut key = ModelKey::new(model_type);
+        key.api_key = Some("provider-test-key".to_string());
+        let key_id = key.id.clone();
+        service.save_key(key).unwrap();
+
+        assert!(service
+            .record_oauth_refresh_failure(&key_id, "401 Unauthorized: invalid API key")
+            .is_err());
+
+        let stored = service.get_key_by_id(&key_id).unwrap();
+        assert_eq!(stored.oauth_refresh_failure_count, 0);
+        assert!(stored.last_oauth_refresh_failed_at.is_none());
+        assert!(stored.temporary_unavailable_until.is_none());
+        assert_eq!(stored.health_status, HealthStatus::Unknown);
+        assert!(stored.enabled);
+    }
+}
+
+#[tokio::test]
+async fn api_key_and_cross_provider_refreshes_are_not_applicable() {
+    let temp_dir = tempdir().unwrap();
+    let service = KeyService::new(Some(temp_dir.path().to_path_buf()));
+
+    let mut codex_api_key = ModelKey::new(ModelType::Codex);
+    codex_api_key.api_key = Some("codex-api-key".to_string());
+    let codex_api_key_id = codex_api_key.id.clone();
+    service.save_key(codex_api_key).unwrap();
+
+    let mut claude_api_key = ModelKey::new(ModelType::ClaudeCode);
+    claude_api_key.api_key = Some("claude-api-key".to_string());
+    let claude_api_key_id = claude_api_key.id.clone();
+    service.save_key(claude_api_key).unwrap();
+
+    let mut zhipu_key = ModelKey::new(ModelType::ZhipuApi);
+    zhipu_key.api_key = Some("zhipu-api-key".to_string());
+    let zhipu_key_id = zhipu_key.id.clone();
+    service.save_key(zhipu_key).unwrap();
+
+    let mut zenmux_key = ModelKey::new(ModelType::ZenmuxApi);
+    zenmux_key.api_key = Some("zenmux-api-key".to_string());
+    let zenmux_key_id = zenmux_key.id.clone();
+    service.save_key(zenmux_key).unwrap();
+
+    let mut atlas_key = ModelKey::new(ModelType::AtlascloudApi);
+    atlas_key.api_key = Some("atlas-api-key".to_string());
+    let atlas_key_id = atlas_key.id.clone();
+    service.save_key(atlas_key).unwrap();
+
+    assert!(matches!(
+        service
+            .refresh_codex_oauth_key(&codex_api_key_id, "codex-api-key")
+            .await
+            .unwrap(),
+        OAuthRefreshOutcome::NotApplicable
+    ));
+    assert!(matches!(
+        service
+            .refresh_claude_code_oauth_key(&claude_api_key_id, "claude-api-key")
+            .await
+            .unwrap(),
+        OAuthRefreshOutcome::NotApplicable
+    ));
+    for cross_provider_id in [&zhipu_key_id, &zenmux_key_id, &atlas_key_id] {
+        assert!(matches!(
+            service
+                .refresh_codex_oauth_key(cross_provider_id, "provider-api-key")
+                .await
+                .unwrap(),
+            OAuthRefreshOutcome::NotApplicable
+        ));
+        assert!(matches!(
+            service
+                .refresh_claude_code_oauth_key(cross_provider_id, "provider-api-key")
+                .await
+                .unwrap(),
+            OAuthRefreshOutcome::NotApplicable
+        ));
+    }
+}
 
 #[test]
 fn test_agent_type_conversion() {
@@ -179,22 +270,6 @@ fn test_mask_api_key() {
 
     cred.api_key = Some("short".to_string());
     assert_eq!(cred.mask_api_key(), Some("*****".to_string()));
-}
-
-#[test]
-fn legacy_model_variant_json_decodes_with_auto_runtime_settings() {
-    let legacy = r#"{
-        "model": "gpt-4o",
-        "base_model": "gpt-4o",
-        "reasoning": null,
-        "fast": false,
-        "context_window": 128000
-    }"#;
-
-    let variant: ModelVariant = serde_json::from_str(legacy).expect("legacy variant decodes");
-    assert_eq!(variant.context_window, Some(128_000));
-    assert_eq!(variant.context_window_override, None);
-    assert_eq!(variant.reasoning_effort_override, None);
 }
 
 /// E2E test using real credentials file
@@ -397,103 +472,6 @@ fn test_update_key_health_clears_stale_context_window_when_provider_omits_it() {
     assert_eq!(
         variant.context_window, None,
         "missing context_length in a fresh provider response must clear stale override"
-    );
-}
-
-#[test]
-fn test_refresh_updates_reported_context_but_preserves_runtime_overrides() {
-    let temp_dir = tempdir().unwrap();
-    let service = KeyService::new(Some(temp_dir.path().to_path_buf()));
-    let mut credential = ModelKey::new(ModelType::OpenaiApi);
-    credential.model_variants = vec![ModelVariant {
-        model: "gpt-4o".to_string(),
-        base_model: "gpt-4o".to_string(),
-        reasoning: None,
-        fast: false,
-        context_window: Some(128_000),
-        context_window_override: Some(96_000),
-        reasoning_effort_override: Some(ReasoningEffort::High),
-    }];
-    let saved = service.save_key(credential).unwrap();
-
-    let contexts = HashMap::from([("gpt-4o".to_string(), 256_000)]);
-    service
-        .update_key_health(
-            &saved.id,
-            HealthStatus::Valid,
-            None,
-            Some(vec!["gpt-4o".to_string()]),
-            None,
-            None,
-            Some(&contexts),
-        )
-        .unwrap();
-
-    let refreshed = service.get_key_by_id(&saved.id).unwrap();
-    let variant = refreshed.model_variants.first().unwrap();
-    assert_eq!(variant.context_window, Some(256_000));
-    assert_eq!(variant.context_window_override, Some(96_000));
-    assert_eq!(
-        variant.reasoning_effort_override,
-        Some(ReasoningEffort::High)
-    );
-}
-
-#[test]
-fn test_runtime_settings_patch_has_tri_state_semantics() {
-    let temp_dir = tempdir().unwrap();
-    let service = KeyService::new(Some(temp_dir.path().to_path_buf()));
-    let mut credential = ModelKey::new(ModelType::OpenaiApi);
-    credential.model_variants = vec![ModelVariant {
-        model: "gpt-4o".to_string(),
-        base_model: "gpt-4o".to_string(),
-        reasoning: None,
-        fast: false,
-        context_window: Some(128_000),
-        context_window_override: Some(64_000),
-        reasoning_effort_override: Some(ReasoningEffort::Low),
-    }];
-    let saved = service.save_key(credential).unwrap();
-
-    // Omitted fields leave both existing values unchanged.
-    service
-        .update_model_runtime_settings(&saved.id, "gpt-4o", None, None)
-        .unwrap();
-    let unchanged = service.get_key_by_id(&saved.id).unwrap();
-    let variant = unchanged.model_variants.first().unwrap();
-    assert_eq!(variant.context_window_override, Some(64_000));
-    assert_eq!(
-        variant.reasoning_effort_override,
-        Some(ReasoningEffort::Low)
-    );
-
-    // Null clears only the selected field back to Auto.
-    service
-        .update_model_runtime_settings(&saved.id, "gpt-4o", Some(None), None)
-        .unwrap();
-    let cleared = service.get_key_by_id(&saved.id).unwrap();
-    let variant = cleared.model_variants.first().unwrap();
-    assert_eq!(variant.context_window_override, None);
-    assert_eq!(
-        variant.reasoning_effort_override,
-        Some(ReasoningEffort::Low)
-    );
-
-    // A value updates only the requested setting.
-    service
-        .update_model_runtime_settings(
-            &saved.id,
-            "gpt-4o",
-            Some(Some(96_000)),
-            Some(Some(ReasoningEffort::ExtraHigh)),
-        )
-        .unwrap();
-    let updated = service.get_key_by_id(&saved.id).unwrap();
-    let variant = updated.model_variants.first().unwrap();
-    assert_eq!(variant.context_window_override, Some(96_000));
-    assert_eq!(
-        variant.reasoning_effort_override,
-        Some(ReasoningEffort::ExtraHigh)
     );
 }
 
@@ -997,6 +975,18 @@ async fn test_claude_concurrent_refreshes_once_without_consuming_rotating_token_
 
     let first = first.unwrap();
     let second = second.unwrap();
+    assert!(matches!(
+        (&first, &second),
+        (
+            OAuthRefreshOutcome::Refreshed(_),
+            OAuthRefreshOutcome::AlreadyRotated(_)
+        ) | (
+            OAuthRefreshOutcome::AlreadyRotated(_),
+            OAuthRefreshOutcome::Refreshed(_)
+        )
+    ));
+    let first = first.into_key().unwrap();
+    let second = second.into_key().unwrap();
     assert_eq!(request_count.load(Ordering::SeqCst), 1);
     assert_eq!(first.session_token.as_deref(), Some("fresh-claude-access"));
     assert_eq!(second.session_token.as_deref(), Some("fresh-claude-access"));
@@ -1079,6 +1069,18 @@ async fn test_codex_refresh_uses_form_body_and_concurrent_refreshes_once() {
 
     let first = first.unwrap();
     let second = second.unwrap();
+    assert!(matches!(
+        (&first, &second),
+        (
+            OAuthRefreshOutcome::Refreshed(_),
+            OAuthRefreshOutcome::AlreadyRotated(_)
+        ) | (
+            OAuthRefreshOutcome::AlreadyRotated(_),
+            OAuthRefreshOutcome::Refreshed(_)
+        )
+    ));
+    let first = first.into_key().unwrap();
+    let second = second.into_key().unwrap();
     assert_eq!(request_count.load(Ordering::SeqCst), 1);
     assert_eq!(first.session_token.as_deref(), Some("fresh-codex-access"));
     assert_eq!(second.session_token.as_deref(), Some("fresh-codex-access"));
@@ -1342,6 +1344,64 @@ fn test_cross_type_env_zenmux_as_codex_uses_openai_endpoint() {
 }
 
 #[test]
+fn test_cross_type_env_atlascloud_as_claude_code_uses_anthropic_endpoint() {
+    let temp_dir = tempdir().unwrap();
+    let service = KeyService::new(Some(temp_dir.path().to_path_buf()));
+
+    let mut atlas_key = ModelKey::new(ModelType::AtlascloudApi);
+    atlas_key.api_key = Some("atlas-test-key".to_string());
+    atlas_key.enabled_models = vec!["zai-org/glm-5.1".to_string()];
+    // The stored /v1 URL is OpenAI-protocol; the Anthropic export must
+    // ignore it and use the bare host instead.
+    atlas_key.base_url = Some("https://api.atlascloud.ai/v1".to_string());
+    let key_id = atlas_key.id.clone();
+    service.save_key(atlas_key).unwrap();
+
+    let env = service.get_env_for_agent(&ModelType::ClaudeCode, Some(&key_id));
+    assert_eq!(
+        env.get("ANTHROPIC_API_KEY").map(String::as_str),
+        Some("atlas-test-key"),
+    );
+    assert_eq!(
+        env.get("ANTHROPIC_BASE_URL").map(String::as_str),
+        Some("https://api.atlascloud.ai"),
+    );
+    assert_eq!(
+        env.get("ANTHROPIC_MODEL").map(String::as_str),
+        Some("zai-org/glm-5.1"),
+    );
+    assert_eq!(
+        env.get("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS")
+            .map(String::as_str),
+        Some("1"),
+    );
+    assert!(!env.contains_key("ATLASCLOUD_API_KEY"));
+}
+
+#[test]
+fn test_atlascloud_provider_exports_canonical_environment() {
+    let temp_dir = tempdir().unwrap();
+    let service = KeyService::new(Some(temp_dir.path().to_path_buf()));
+
+    let mut atlas_key = ModelKey::new(ModelType::AtlascloudApi);
+    atlas_key.api_key = Some("atlas-test-key".to_string());
+    atlas_key.base_url = Some("https://api.atlascloud.ai/v1".to_string());
+    let key_id = atlas_key.id.clone();
+    service.save_key(atlas_key).unwrap();
+
+    let env = service.get_env_for_agent(&ModelType::AtlascloudApi, Some(&key_id));
+    assert_eq!(
+        env.get("ATLASCLOUD_API_KEY").map(String::as_str),
+        Some("atlas-test-key")
+    );
+    assert_eq!(
+        env.get("ATLASCLOUD_BASE_URL").map(String::as_str),
+        Some("https://api.atlascloud.ai/v1")
+    );
+    assert!(!env.contains_key("ATLASCLOUD_API_BASE"));
+}
+
+#[test]
 fn test_cross_type_enabled_models_first_wins() {
     // Regression guard: when a key has both `available_models` (raw probe
     // result, possibly containing legacy names the proxy rejects) and
@@ -1457,23 +1517,6 @@ fn test_disabled_key_returns_empty_env() {
         env.get("ANTHROPIC_API_KEY").map(|v| v.as_str()),
         Some("sk-ant-test"),
     );
-}
-
-#[test]
-fn embedding_api_key_uses_its_dedicated_environment_variable() {
-    let temp_dir = tempdir().unwrap();
-    let service = KeyService::new(Some(temp_dir.path().to_path_buf()));
-    let mut key = ModelKey::new(ModelType::EmbeddingApi);
-    key.api_key = Some("embedding-secret".to_string());
-    let key_id = key.id.clone();
-    service.save_key(key).unwrap();
-
-    let env = service.get_env_for_agent(&ModelType::EmbeddingApi, Some(&key_id));
-    assert_eq!(
-        env.get("EMBEDDING_API_KEY").map(String::as_str),
-        Some("embedding-secret")
-    );
-    assert!(!env.contains_key("API_KEY"));
 }
 
 #[test]

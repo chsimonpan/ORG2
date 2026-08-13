@@ -157,8 +157,6 @@ fn test_model_variant_info_to_variant_preserves_context_window() {
         reasoning: None,
         fast: false,
         context_window: Some(128_000),
-        context_window_override: None,
-        reasoning_effort_override: None,
     };
     assert_eq!(ModelVariant::from(with_ctx).context_window, Some(128_000));
 
@@ -168,8 +166,6 @@ fn test_model_variant_info_to_variant_preserves_context_window() {
         reasoning: None,
         fast: false,
         context_window: None,
-        context_window_override: None,
-        reasoning_effort_override: None,
     };
     assert_eq!(ModelVariant::from(without_ctx).context_window, None);
 
@@ -179,58 +175,8 @@ fn test_model_variant_info_to_variant_preserves_context_window() {
         reasoning: None,
         fast: false,
         context_window: Some(0),
-        context_window_override: None,
-        reasoning_effort_override: None,
     };
     assert_eq!(ModelVariant::from(zero_ctx).context_window, None);
-}
-
-#[test]
-fn runtime_settings_request_distinguishes_omitted_null_and_value() {
-    use crate::commands::crud::{RuntimeSettingPatch, UpdateModelRuntimeSettingsRequest};
-
-    let omitted: UpdateModelRuntimeSettingsRequest = serde_json::from_value(serde_json::json!({
-        "key_id": "key-1",
-        "model": "gpt-4o"
-    }))
-    .unwrap();
-    assert_eq!(
-        omitted.context_window_override,
-        RuntimeSettingPatch::Unchanged
-    );
-    assert_eq!(
-        omitted.reasoning_effort_override,
-        RuntimeSettingPatch::Unchanged
-    );
-
-    let cleared: UpdateModelRuntimeSettingsRequest = serde_json::from_value(serde_json::json!({
-        "key_id": "key-1",
-        "model": "gpt-4o",
-        "context_window_override": null,
-        "reasoning_effort_override": null
-    }))
-    .unwrap();
-    assert_eq!(cleared.context_window_override, RuntimeSettingPatch::Clear);
-    assert_eq!(
-        cleared.reasoning_effort_override,
-        RuntimeSettingPatch::Clear
-    );
-
-    let set: UpdateModelRuntimeSettingsRequest = serde_json::from_value(serde_json::json!({
-        "key_id": "key-1",
-        "model": "gpt-4o",
-        "context_window_override": 96000,
-        "reasoning_effort_override": "high"
-    }))
-    .unwrap();
-    assert_eq!(
-        set.context_window_override,
-        RuntimeSettingPatch::Set(96_000)
-    );
-    assert_eq!(
-        set.reasoning_effort_override,
-        RuntimeSettingPatch::Set(crate::key_store::ReasoningEffort::High)
-    );
 }
 
 #[test]
@@ -252,8 +198,6 @@ fn claude_native_key_info_exposes_output_config_effort_variants() {
         reasoning: Some("always_on".to_string()),
         fast: false,
         context_window: Some(200_000),
-        context_window_override: None,
-        reasoning_effort_override: None,
     }];
 
     let info = KeyInfo::from(key);
@@ -412,6 +356,139 @@ fn codex_gpt_5_6_ultra_tier_limited_to_sol_and_terra() {
 }
 
 #[test]
+fn live_codex_catalog_preserves_capabilities_and_completes_builtin_models() {
+    use crate::commands::crud::CODEX_OAUTH_MODELS;
+    use crate::commands::validate::{resolved_oauth_catalog, OAuthModelCatalogSource};
+    use crate::types::DiscoveredModel;
+
+    let catalog = resolved_oauth_catalog(
+        "codex",
+        vec![
+            DiscoveredModel {
+                id: "account-visible-model".to_string(),
+                context_window: Some(777_000),
+                supported_efforts: vec!["low".to_string(), "high".to_string()],
+                default_effort: Some("high".to_string()),
+                is_default: true,
+                ..DiscoveredModel::default()
+            },
+            DiscoveredModel {
+                id: "gpt-5.6-sol".to_string(),
+                context_window: Some(1_050_000),
+                supported_efforts: vec!["ultra".to_string()],
+                default_effort: Some("ultra".to_string()),
+                ..DiscoveredModel::default()
+            },
+        ],
+        OAuthModelCatalogSource::Live,
+    )
+    .expect("resolved live catalog");
+
+    let expected_models: Vec<_> = ["account-visible-model", "gpt-5.6-sol"]
+        .into_iter()
+        .map(str::to_string)
+        .chain(
+            CODEX_OAUTH_MODELS
+                .iter()
+                .filter(|model| **model != "gpt-5.6-sol")
+                .map(|model| (*model).to_string()),
+        )
+        .collect();
+    assert_eq!(catalog.models, expected_models);
+    for model in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+        assert!(catalog.models.iter().any(|available| available == model));
+    }
+    assert_eq!(
+        catalog.default_enabled_models,
+        vec![
+            "account-visible-model",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+        ]
+    );
+    assert_eq!(
+        catalog.model_context_lengths.get("account-visible-model"),
+        Some(&777_000)
+    );
+    assert_eq!(
+        catalog.model_context_lengths.get("gpt-5.6-sol"),
+        Some(&1_050_000)
+    );
+    assert_eq!(
+        catalog
+            .models
+            .iter()
+            .filter(|model| model.as_str() == "gpt-5.6-sol")
+            .count(),
+        1
+    );
+    assert_eq!(catalog.source, OAuthModelCatalogSource::Live);
+    let account_variants: Vec<_> = catalog
+        .model_variants
+        .iter()
+        .filter(|variant| variant.base_model == "account-visible-model")
+        .collect();
+    assert_eq!(account_variants.len(), 2);
+    assert!(catalog
+        .model_variants
+        .iter()
+        .any(|variant| variant.model == "account-visible-model-high"));
+    assert!(catalog.default_variants.iter().any(|variant| {
+        variant.base_model == "account-visible-model"
+            && variant.model == "account-visible-model-high"
+    }));
+}
+
+#[test]
+fn live_claude_catalog_remains_account_visible_only() {
+    use crate::commands::validate::{resolved_oauth_catalog, OAuthModelCatalogSource};
+    use crate::types::DiscoveredModel;
+
+    let catalog = resolved_oauth_catalog(
+        "claude_code",
+        vec![DiscoveredModel {
+            id: "account-visible-claude".to_string(),
+            is_default: true,
+            ..DiscoveredModel::default()
+        }],
+        OAuthModelCatalogSource::Live,
+    )
+    .expect("resolved Claude live catalog");
+
+    assert_eq!(catalog.models, vec!["account-visible-claude"]);
+    assert_eq!(
+        catalog.default_enabled_models,
+        vec!["account-visible-claude"]
+    );
+}
+
+#[test]
+fn claude_opus_5_fallback_exposes_effort_variants() {
+    use crate::commands::crud::KeyInfo;
+    use crate::key_store::{AuthMethod, ModelKey, ModelType};
+
+    let mut key = ModelKey::new(ModelType::ClaudeCode);
+    key.auth_method = AuthMethod::Oauth;
+    key.session_token = Some("access-token".to_string());
+    key.available_models = vec!["claude-opus-5".to_string()];
+
+    let info = KeyInfo::from(key);
+    let variants: Vec<_> = info
+        .model_variants
+        .iter()
+        .filter(|variant| variant.base_model == "claude-opus-5")
+        .collect();
+    assert_eq!(variants.len(), 5);
+    assert!(variants
+        .iter()
+        .any(|variant| variant.model == "claude-opus-5-max"));
+    assert!(info.default_variants.iter().any(|variant| {
+        variant.base_model == "claude-opus-5" && variant.model == "claude-opus-5-high"
+    }));
+}
+
+#[test]
 fn glm_5_2_plus_gets_high_max_ladder_and_max_default() {
     use crate::commands::crud::KeyInfo;
     use crate::key_store::{AuthMethod, ModelKey, ModelType};
@@ -479,8 +556,6 @@ fn relay_claude_code_key_gets_no_synthesized_effort_variants() {
         reasoning: None,
         fast: false,
         context_window: Some(128_000),
-        context_window_override: None,
-        reasoning_effort_override: None,
     }];
 
     let info = KeyInfo::from(key);
@@ -504,8 +579,6 @@ fn third_party_anthropic_protocol_key_keeps_record_rows_untouched() {
         reasoning: None,
         fast: false,
         context_window: Some(131_072),
-        context_window_override: None,
-        reasoning_effort_override: None,
     }];
 
     let info = KeyInfo::from(key);

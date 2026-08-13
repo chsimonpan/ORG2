@@ -96,6 +96,23 @@ fn map_bridge_status(status: session_bridge::TurnIntentBridgeStatus) -> PsStatus
         B::Failed => PsStatus::Failed,
         B::Cancelled => PsStatus::Cancelled,
         B::Stale => PsStatus::Stale,
+        B::Coalesced => PsStatus::Coalesced,
+        B::Rejected => PsStatus::Rejected,
+    }
+}
+
+fn map_persisted_status(status: PsStatus) -> session_bridge::TurnIntentBridgeStatus {
+    use session_bridge::TurnIntentBridgeStatus as B;
+    match status {
+        PsStatus::Optimistic => B::Optimistic,
+        PsStatus::Queued => B::Queued,
+        PsStatus::Running => B::Running,
+        PsStatus::Completed => B::Completed,
+        PsStatus::Failed => B::Failed,
+        PsStatus::Cancelled => B::Cancelled,
+        PsStatus::Stale => B::Stale,
+        PsStatus::Coalesced => B::Coalesced,
+        PsStatus::Rejected => B::Rejected,
     }
 }
 
@@ -116,6 +133,7 @@ fn upsert_turn_intent_adapter(
     session_id: &str,
     turn_intent_id: &str,
     client_message_id: Option<&str>,
+    org_run_id: Option<&str>,
     source: session_bridge::TurnIntentBridgeSource,
     status: session_bridge::TurnIntentBridgeStatus,
 ) {
@@ -123,6 +141,7 @@ fn upsert_turn_intent_adapter(
         session_id,
         turn_intent_id,
         client_message_id,
+        org_run_id,
         map_bridge_source(source),
         map_bridge_status(status),
     ) {
@@ -156,6 +175,24 @@ fn update_turn_intent_status_adapter(
     }
 }
 
+fn get_turn_intent_status_adapter(
+    session_id: &str,
+    turn_intent_id: &str,
+) -> Option<session_bridge::TurnIntentBridgeStatus> {
+    match turn_intents::read_intent(session_id, turn_intent_id) {
+        Ok(row) => row.map(|row| map_persisted_status(row.status)),
+        Err(err) => {
+            tracing::warn!(
+                session_id = %session_id,
+                turn_intent_id = %turn_intent_id,
+                error = ?err,
+                "turn_intents.read_intent failed"
+            );
+            None
+        }
+    }
+}
+
 fn mark_pending_turn_intents_stale_adapter(session_id: &str) {
     if let Err(err) = turn_intents::mark_pending_stale(session_id) {
         tracing::warn!(
@@ -173,6 +210,7 @@ pub fn register() {
     session_bridge::register_record_usage_telemetry_batch(record_usage_telemetry_batch_adapter);
     session_bridge::register_upsert_turn_intent(upsert_turn_intent_adapter);
     session_bridge::register_update_turn_intent_status(update_turn_intent_status_adapter);
+    session_bridge::register_get_turn_intent_status(get_turn_intent_status_adapter);
     session_bridge::register_mark_pending_turn_intents_stale(
         mark_pending_turn_intents_stale_adapter,
     );

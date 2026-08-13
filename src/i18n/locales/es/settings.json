@@ -142,7 +142,7 @@
     "timezoneAuto": "Auto (navegador)",
     "timezoneSearchPlaceholder": "Buscar ciudades cercanas",
     "sendOnEnter": "Enviar mensajes con Enter",
-    "sendOnEnterDesc": "Si está activado, Enter envía y Shift+Enter inserta una nueva línea. Si está desactivado, Ctrl/Cmd+Enter envía",
+    "sendOnEnterDesc": "Si está activado, Enter envía; Shift+Enter y Ctrl/Cmd+Enter insertan una nueva línea. Si está desactivado, Ctrl/Cmd+Enter envía",
     "language": "Idioma",
     "languageSearchPlaceholder": "Buscar idiomas...",
     "languageNames": {
@@ -227,7 +227,10 @@
     "presenceGuidanceOnlineDefault": "Estoy frente al teclado. Puedes hacerme preguntas aclaratorias en cualquier momento y confirmar conmigo cualquier acción destructiva antes de ejecutarla",
     "presenceGuidanceInvisibleDefault": "Estoy disponible, pero aparezco sin conexión. Por defecto trabaja de forma autónoma y avísame solo ante acciones de alto riesgo o refactorizaciones importantes; agrupa las demás preguntas en un único resumen en vez de hacerlas una por una",
     "presenceGuidanceAwayDefault": "Estoy lejos del teclado. No te bloquees esperando mi respuesta; toma la mejor decisión con la información disponible, termina lo que puedas y deja un resumen breve con lo ocurrido y las preguntas abiertas para cuando vuelva",
-    "followSystem": "Seguir el sistema"
+    "followSystem": "Seguir el sistema",
+    "preferences": "Preferencias",
+    "usePointerCursors": "Usar cursores de puntero",
+    "usePointerCursorsDesc": "Cambia el cursor a un puntero al pasar sobre elementos interactivos"
   },
   "background": {
     "title": "Fondo",
@@ -703,8 +706,34 @@
     "test": {
       "sent": "Notificación de prueba enviada",
       "permissionWarning": "No se pudo enviar la notificación de prueba. Comprueba los permisos.",
-      "sendFailed": "No se puede enviar la notificación de prueba. Comprueba los permisos de notificación e inténtalo de nuevo."
-    }
+      "sendFailed": "No se puede enviar la notificación de prueba. Comprueba los permisos de notificación e inténtalo de nuevo.",
+      "soundFailed": "No se puede reproducir el sonido de notificación. Comprueba el volumen del sistema."
+    },
+    "teamInbox": "Bandeja de entrada del equipo",
+    "soundPreset": "Sonido de notificación",
+    "soundPresetDesc": "Elige el sonido de las notificaciones audibles",
+    "previewSound": "Escuchar",
+    "soundPresets": {
+      "classic": "Clásico",
+      "gentle": "Suave",
+      "ascending": "Ascendente",
+      "bell": "Campana"
+    },
+    "criticalOnly": "Solo alertas críticas",
+    "criticalOnlyDesc": "Notificar solo cuando una acción necesite aprobación o una tarea falle",
+    "quietHours": "Programación de no molestar",
+    "quietHoursDesc": "Silenciar las notificaciones rutinarias durante un intervalo diario",
+    "quietHoursSchedule": "Horas de silencio",
+    "quietHoursScheduleDesc": "Usa la hora local de tu dispositivo. Si la hora de inicio y de fin coinciden, el intervalo se desactiva.",
+    "quietHoursStart": "Desde",
+    "quietHoursEnd": "Hasta",
+    "allowCriticalDuringQuietHours": "Permitir alertas críticas",
+    "allowCriticalDuringQuietHoursDesc": "Las solicitudes de aprobación y los fallos pueden mostrar una notificación del sistema, pero nunca suenan",
+    "backgroundCompletionSummary": "Resumir las tareas completadas en segundo plano",
+    "backgroundCompletionSummaryDesc": "Enviar un único aviso combinado al terminar las horas de silencio",
+    "mutedSessions": "Sessions silenciadas",
+    "mutedSessionsDesc": "{{count}} Sessions están silenciadas en este dispositivo",
+    "clearMutedSessions": "Borrar todo"
   },
   "editor": {
     "tabEditor": "Editor",
@@ -923,7 +952,24 @@
     "diskCategory_screenshots": "Capturas del navegador",
     "diskCategory_agentWorktrees": "Worktrees de Session Agent",
     "diskCategory_lspBin": "Binarios de LSP Server",
-    "loadZeroRows": "Haz clic para cargar {{count}} más"
+    "loadZeroRows": "Haz clic para cargar {{count}} más",
+    "appMemory": "App memory",
+    "appBackend": "ORG2 backend",
+    "appWebviewHelpers": "Owned WebView helpers",
+    "rssMappedDiagnostic": "RSS / mapped memory (diagnostic)",
+    "measurement": "Measurement",
+    "measurementKinds": {
+      "native": "Native effective memory",
+      "compatibility": "Compatibility metric",
+      "mixed": "Mixed native / fallback metrics",
+      "rss_fallback": "RSS fallback",
+      "unavailable": "Unavailable"
+    },
+    "toolProcessDiagnostics": "Terminal, CLI & tool processes (RSS diagnostic)",
+    "excludedFromAppMemory": "excluded from App memory",
+    "noToolProcesses": "No terminal, CLI, MCP, or tool processes detected",
+    "categoryAgentCli": "CLI agent",
+    "categoryMcpOrTool": "MCP / tool process"
   },
   "storage": {
     "dataDirectory": "Directorio de datos",
@@ -942,7 +988,13 @@
     "tableSize": "Tamaño",
     "tablePercentage": "Porc.",
     "scanFailed": "Error al analizar el almacenamiento",
-    "openFolderFailed": "No se pudo abrir la carpeta"
+    "openFolderFailed": "No se pudo abrir la carpeta",
+    "browserCache": "Caché del navegador",
+    "browserCacheDesc": "{{used}} usados · {{cleanable}} se pueden limpiar de forma segura",
+    "cleanBrowserCache": "Limpiar",
+    "browserCacheCleaned": "Se liberaron {{size}} de almacenamiento del navegador",
+    "browserCacheAlreadyClean": "La caché del navegador ya está limpia",
+    "browserCacheCleanFailed": "No se pudo limpiar la caché del navegador"
   },
   "dependencies": {
     "systemDependencies": "Dependencies del sistema",
@@ -991,7 +1043,7 @@
     "decryptEffect": "Efecto Decrypt",
     "decryptEffectDesc": "Activar animación Decrypt para mensajes del Agent",
     "sendOnEnter": "Enviar mensajes con Enter",
-    "sendOnEnterDesc": "Si está activado, Enter envía y Shift+Enter inserta una nueva línea. Si está desactivado, Ctrl/Cmd+Enter envía"
+    "sendOnEnterDesc": "Si está activado, Enter envía; Shift+Enter y Ctrl/Cmd+Enter insertan una nueva línea. Si está desactivado, Ctrl/Cmd+Enter envía"
   },
   "languageServers": {
     "languageServersDesc": "Gestionar servidores LSP para autocompletado, diagnósticos e inteligencia de código",

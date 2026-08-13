@@ -18,8 +18,10 @@ mod status_post;
 
 pub(crate) use collaboration_replay::{delete_collaboration_replay, index_collaboration_replay};
 pub(super) use historical_backfill::request_historical_backfill;
+pub(crate) use historical_backfill::spawn_codex_write_reconciliation_loop;
 pub use hook_capture::capture_hook_stdin;
 pub(super) use hook_capture::drain_hook_inbox;
+pub(crate) use hook_capture::notify_hook_inbox_ready;
 #[cfg(test)]
 use hook_capture::quarantine_invalid_envelope;
 pub(crate) use hook_capture::spawn_hook_inbox_drain_loop;
@@ -114,7 +116,6 @@ fn persist_actor_lifecycle(
                 origin: Some(SESSION_PROVENANCE_HOOK_ORIGIN.to_string()),
                 ..AgentMetadata::default()
             },
-            journey: Default::default(),
         },
     };
     if root_transcript.is_some() {
@@ -167,7 +168,6 @@ fn persist_actor_lifecycle(
                     display_name: envelope.actor_type.clone(),
                     ..AgentMetadata::default()
                 },
-                journey: Default::default(),
             },
         };
         store.upsert_session(&child)?;
@@ -390,7 +390,6 @@ fn persist_envelope(
                 origin: Some(SESSION_PROVENANCE_HOOK_ORIGIN.to_string()),
                 ..AgentMetadata::default()
             },
-            journey: Default::default(),
         })?;
     }
 
@@ -494,6 +493,8 @@ mod tests {
     fn codex_lifecycle_maps_actor_to_independently_loadable_transcript() {
         let conn = Connection::open_in_memory().expect("in-memory SQLite");
         SqliteRecordStore::init_tables(&conn).expect("initialize orgtrack schema");
+        SqliteRecordStore::init_source_cache_tables(&conn)
+            .expect("initialize imported-history schema");
         let store = SqliteRecordStore::new(&conn);
         let temp = tempfile::tempdir().expect("Codex session root");
         let sessions_dir = temp

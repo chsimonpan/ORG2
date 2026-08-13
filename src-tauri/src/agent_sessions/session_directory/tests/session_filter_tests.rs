@@ -42,6 +42,8 @@ fn make_session(
         external_history_source: None,
         user_input: None,
         repo_path: None,
+        repo_root_path: None,
+        repo_remote_urls: None,
         storage_path: None,
         repo_name: None,
         branch: None,
@@ -66,7 +68,6 @@ fn make_session(
         is_active: is_active_status(status),
         display_label: generate_display_label(name, None),
         parent_session_id: None,
-        parent_session_relation: None,
         org_member_id: None,
         agent_org_id: None,
         agent_org_name: None,
@@ -74,6 +75,7 @@ fn make_session(
         agent_icon_id: None,
         agent_display_name: None,
         agent_exec_mode: None,
+        product_mode: None,
         draft_text: None,
         reply_target_event_id: None,
         pinned: false,
@@ -81,7 +83,6 @@ fn make_session(
         lines_added: None,
         lines_removed: None,
         touched_files: None,
-        channel: None,
     }
 }
 
@@ -209,10 +210,12 @@ fn session_category_variants_are_distinct() {
     let cli = make_session("c1", "running", SessionCategory::Cli, "CLI S");
     let agent = make_session("a1", "running", SessionCategory::Agent, "Agent S");
     let os = make_session("o1", "running", SessionCategory::Os, "OS S");
+    let human = make_session("h1", "completed", SessionCategory::Human, "Human S");
 
     assert!(matches!(cli.category, SessionCategory::Cli));
     assert!(matches!(agent.category, SessionCategory::Agent));
     assert!(matches!(os.category, SessionCategory::Os));
+    assert!(matches!(human.category, SessionCategory::Human));
 }
 
 // ============================================================================

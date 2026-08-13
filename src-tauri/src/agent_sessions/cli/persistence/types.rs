@@ -3,6 +3,13 @@ use serde::{Deserialize, Serialize};
 use super::super::types::KeySource;
 use super::super::types::SessionStatus;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliSessionStatusSnapshot {
+    pub session_id: String,
+    pub status: SessionStatus,
+    pub updated_at: String,
+}
+
 /// A code generation session record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,6 +80,9 @@ pub struct CodeSession {
     /// `code_session_chunks`) or `native` (the CLI's own store via the
     /// imported-history loaders). Frozen at creation time.
     pub transcript_source: String,
+    /// Product-mode axis (orgtrack/v1 §5.2); `Some("project")` gates the
+    /// WorkItem/Routine mutation surface, mirroring `agent_sessions`.
+    pub product_mode: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -101,6 +111,10 @@ pub struct CreateCodeSessionParams {
     pub account_id: Option<String>,
     pub repo_path: Option<String>,
     pub branch: Option<String>,
+    /// Existing registered linked worktree to reuse for execution.
+    pub worktree_path: Option<String>,
+    /// Git base ref used only when `isolate` creates a fresh worktree.
+    pub worktree_base_ref: Option<String>,
     pub proxy_token: Option<String>,
     pub proxy_url: Option<String>,
     pub hosted_token: Option<String>,
@@ -109,11 +123,6 @@ pub struct CreateCodeSessionParams {
     /// Request worktree isolation for parallel execution.
     #[serde(default)]
     pub isolate: Option<bool>,
-    /// Reuse an existing worktree checkout instead of creating one.
-    /// Ignored when `isolate` is set. The path must be an existing
-    /// directory; the session's cwd and merge flow are pinned to it.
-    #[serde(default)]
-    pub worktree_path: Option<String>,
     /// Launch in background mode ("fire and forget" with completion notification).
     #[serde(default)]
     pub background: Option<bool>,
@@ -133,4 +142,7 @@ pub struct CreateCodeSessionParams {
     pub project_slug: Option<String>,
     pub work_item_id: Option<String>,
     pub agent_role: Option<String>,
+    /// Product-mode axis (orgtrack/v1 §5.2); `Some("project")` gates the
+    /// WorkItem/Routine mutation surface, mirroring `agent_sessions`.
+    pub product_mode: Option<String>,
 }

@@ -1,6 +1,7 @@
 import type { SetStateAction } from "react";
 
 import { wasRecentlyOptimisticallyStarted } from "@src/engines/SessionCore/control/optimisticTurnStatus";
+import { getTurnIntentDispatch } from "@src/engines/SessionCore/control/turnIntentDispatchLifecycle";
 import {
   markTurnRunning,
   markTurnTerminal,
@@ -23,6 +24,7 @@ import type {
   StreamRetryStatus,
 } from "@src/store/session/cliSessionStatusAtom";
 import type { CliSessionStatus } from "@src/types/session/session";
+import { isSessionRuntimeExecuting } from "@src/util/session/sessionRuntimeExecuting";
 
 import { toCliSessionStatus } from "./sessionSyncUtils";
 import type {
@@ -54,6 +56,10 @@ export interface SessionSwitchStateActions {
   setSessionRuntimeError: (value: string | null) => void;
   setPendingCancel: (value: boolean) => void;
   setStreamRetryStatus: (value: StreamRetryStatus | null) => void;
+  clearCanvasPreviewOnSessionSwitch: (
+    leavingSessionId: string | null,
+    enteringSessionId: string
+  ) => void;
 }
 
 export interface SessionLoadStateActions {
@@ -103,7 +109,8 @@ const RUNNING_HANDLER_STATUSES = new Set<string>([
 ]);
 export function resetSessionSwitchState(
   actions: SessionSwitchStateActions,
-  sessionId?: string
+  sessionId?: string,
+  leavingSessionId?: string | null
 ): void {
   actions.setWpReadOnly(false);
   actions.clearSessionLoadError();
@@ -124,6 +131,12 @@ export function resetSessionSwitchState(
   actions.setSessionContextTokens(0);
   actions.setSessionContextUsage(null);
   actions.setSessionContextBreakdown(null);
+  if (sessionId) {
+    actions.clearCanvasPreviewOnSessionSwitch(
+      leavingSessionId ?? null,
+      sessionId
+    );
+  }
 }
 
 export function applyPostLoadResult(
@@ -219,6 +232,14 @@ export function createSessionEventHandlerCallbacks(
       // the UI mirror, pendingCancel, pin state, and the session row all
       // leaked the phantom terminal.
       if (meta?.intermediate) return;
+      const terminalDispatch =
+        TERMINAL_HANDLER_STATUSES.has(status) && meta?.turnIntentId
+          ? getTurnIntentDispatch(meta.turnIntentId)
+          : undefined;
+      // Reject a misrouted terminal before it mutates any UI mirror or durable
+      // session status. Finality attribution and presentation state must move
+      // together or not at all.
+      if (terminalDispatch && terminalDispatch.sessionId !== sessionId) return;
       actions.setSessionRuntimeStatus(toCliSessionStatus(status));
       if (status === "failed" && errorMessage) {
         actions.setSessionRuntimeError(errorMessage);
@@ -228,14 +249,15 @@ export function createSessionEventHandlerCallbacks(
         // here. Intermediate signals already returned above.
         markTurnTerminal(
           sessionId,
-          toTurnTerminalStatus(meta?.turnStatus ?? status)
+          toTurnTerminalStatus(meta?.turnStatus ?? status),
+          { generation: terminalDispatch?.generation }
         );
         actions.setPendingCancel(false);
         eventStoreProxy.unpinSession(sessionId);
         updateSessionStatus(sessionId, status as SessionStatus);
         actions.scheduleNativeTranscriptReconcile?.(sessionId);
       }
-      if (status === "running") {
+      if (isSessionRuntimeExecuting(status)) {
         markTurnRunning(sessionId);
         actions.setSessionRuntimeError(null);
         eventStoreProxy.pinSession(sessionId);

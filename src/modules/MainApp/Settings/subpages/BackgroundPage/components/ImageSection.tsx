@@ -88,11 +88,13 @@ export const ImageSection: React.FC<ImageSectionProps> = ({
                 className={`${IMAGE_TILE_BASE} block cursor-pointer p-0 text-left ${isPresetSelected ? IMAGE_TILE_SELECTED : IMAGE_TILE_IDLE}`}
                 onClick={() => onImageSelect(img.value)}
               >
-                <div className="relative aspect-video w-full overflow-hidden bg-surface-container">
+                <div className="relative aspect-video w-full overflow-hidden bg-primary-container">
                   <img
                     src={img.thumbnail}
                     alt=""
                     className="h-full w-full object-cover"
+                    loading="lazy"
+                    decoding="async"
                   />
                 </div>
               </button>
@@ -110,11 +112,13 @@ export const ImageSection: React.FC<ImageSectionProps> = ({
                   className={`${IMAGE_TILE_BASE} block w-[88px] cursor-pointer p-0 text-left ${isSelected ? IMAGE_TILE_SELECTED : IMAGE_TILE_IDLE}`}
                   onClick={() => onImageSelect(imageDataUrl, imageId)}
                 >
-                  <div className="relative aspect-video w-full bg-surface-container">
+                  <div className="relative aspect-video w-full bg-primary-container">
                     <img
                       src={imageDataUrl}
                       alt={`Custom ${index + 1}`}
                       className="h-full w-full object-cover"
+                      loading="lazy"
+                      decoding="async"
                     />
                   </div>
                 </button>
@@ -135,7 +139,7 @@ export const ImageSection: React.FC<ImageSectionProps> = ({
           })}
 
           <label
-            className={`${IMAGE_TILE_BASE} flex aspect-video w-[88px] cursor-pointer items-center justify-center bg-surface-container text-text-3 ${
+            className={`${IMAGE_TILE_BASE} flex aspect-video w-[88px] cursor-pointer items-center justify-center bg-primary-container text-text-3 ${
               isOptimizing
                 ? "pointer-events-none cursor-not-allowed border-border-2 opacity-40"
                 : IMAGE_TILE_IDLE

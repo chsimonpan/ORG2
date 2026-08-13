@@ -71,7 +71,11 @@ enum LogEvent {
         prompt: String,
     },
     /// A tool invocation with name + args — carries NO session id.
-    ToolInvoke { ts_ms: i64, name: String, args: Value },
+    ToolInvoke {
+        ts_ms: i64,
+        name: String,
+        args: Value,
+    },
     /// `[FileChangeTracking] <path> | source=agent | session=<taskDir>, … | Agent <op>` —
     /// an agent file edit, carrying the session as the truncated dir name.
     FileEdit {
@@ -89,6 +93,8 @@ enum ContentSignal {
     Theirs,
     Silent,
 }
+
+type EditSnapshotMap = HashMap<String, (String, String)>;
 
 /// Enrich a session's text-only chunks with the tool trajectory recovered
 /// from Qoder's launch logs. `task_dir_name`/`project_dir_name` are the
@@ -125,7 +131,7 @@ fn enrich_chunks_with_events(
     workspace_path: Option<&str>,
     chunks: Vec<ActivityChunk>,
     events: &[LogEvent],
-    edit_snapshots: &dyn Fn(&str) -> HashMap<String, (String, String)>,
+    edit_snapshots: &dyn Fn(&str) -> EditSnapshotMap,
 ) -> Vec<ActivityChunk> {
     // Resolve the truncated dir name to the full task id seen in the logs.
     // Two distinct matches would mean we cannot tell the sessions apart —
@@ -326,13 +332,8 @@ fn enrich_chunks_with_events(
             args: normalized_args(&tool.name, &tool.args),
             created_at: imported_history::epoch_ms_to_iso(tool.ts_ms),
         };
-        let mut chunk = imported_history::tool_call_chunk(
-            session_id,
-            "qoder-log",
-            index,
-            &call,
-            &tool.output,
-        );
+        let mut chunk =
+            imported_history::tool_call_chunk(session_id, "qoder-log", index, &call, &tool.output);
         if let Some(result) = chunk.result.as_object_mut() {
             // Flag the provenance so consumers can tell recovered trajectory
             // from the durable transcript.
@@ -366,25 +367,38 @@ fn invoke_content_signal(
     let candidates = ["file_path", "cwd", "path"]
         .iter()
         .filter_map(|key| args.get(*key).and_then(Value::as_str));
-    let our_cache_dir = format!("/cache/projects/{project_dir_name}/");
+    let our_cache_dir =
+        normalize_path_for_matching(&format!("/cache/projects/{project_dir_name}/"));
     let mut signal = ContentSignal::Silent;
     for path in candidates {
-        if path.contains(&our_cache_dir) {
+        let normalized_path = normalize_path_for_matching(path);
+        if normalized_path.contains(&our_cache_dir) {
             return ContentSignal::Ours;
         }
         if let Some(workspace) = workspace_path {
+            let workspace = normalize_path_for_matching(workspace);
             let workspace = workspace.trim_end_matches('/');
             if !workspace.is_empty()
-                && (path == workspace || path.starts_with(&format!("{workspace}/")))
+                && (normalized_path == workspace
+                    || normalized_path.starts_with(&format!("{workspace}/")))
             {
                 return ContentSignal::Ours;
             }
         }
-        if path.contains("/cache/projects/") {
+        if normalized_path.contains("/cache/projects/") {
             signal = ContentSignal::Theirs;
         }
     }
     signal
+}
+
+fn normalize_path_for_matching(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    if cfg!(windows) {
+        normalized.to_ascii_lowercase()
+    } else {
+        normalized
+    }
 }
 
 /// Most recent ACP `tool_call` id preceding `ts_ms` within the pairing window.
@@ -447,7 +461,7 @@ fn spill_file_output(args: &Value) -> String {
     let Some(path) = args.get("file_path").and_then(Value::as_str) else {
         return String::new();
     };
-    if !path.contains("/agent-tools/") {
+    if !normalize_path_for_matching(path).contains("/agent-tools/") {
         return String::new();
     }
     let Ok(content) = fs::read_to_string(Path::new(path)) else {
@@ -476,10 +490,7 @@ fn parse_launch_log(content: &str, events: &mut Vec<LogEvent>) {
             let mut tool_call_id = "";
             for (index, part) in rest.split(", ").enumerate() {
                 if index == 0 {
-                    session_task_id = part
-                        .trim()
-                        .trim_end_matches(SESSION_ID_SUFFIX)
-                        .to_string();
+                    session_task_id = part.trim().trim_end_matches(SESSION_ID_SUFFIX).to_string();
                 } else if let Some(value) = part.trim().strip_prefix("type=") {
                     event_type = value;
                 } else if let Some(value) = part.trim().strip_prefix("toolCallId=") {
@@ -604,11 +615,7 @@ fn edit_snapshots(
     full_task_id: Option<&str>,
 ) -> HashMap<String, (String, String)> {
     let mut snapshots = HashMap::new();
-    for dir in edit_store_paths(
-        &qoder_workspace_storage_dirs(),
-        task_dir_name,
-        full_task_id,
-    ) {
+    for dir in edit_store_paths(&qoder_workspace_storage_dirs(), task_dir_name, full_task_id) {
         for (path, contents) in edit_snapshots_from_session_dir(&dir) {
             snapshots.entry(path).or_insert(contents);
         }
@@ -661,24 +668,20 @@ fn numstat_between(old_content: &str, new_content: &str) -> (i64, i64) {
 /// workspace). Folded into the discovery fingerprint so edits that land after
 /// a sync re-parse the session even when the transcript itself is unchanged.
 pub(super) fn edit_store_signature(task_dir_name: &str, full_task_id: Option<&str>) -> String {
-    edit_store_paths(
-        &qoder_workspace_storage_dirs(),
-        task_dir_name,
-        full_task_id,
-    )
-    .iter()
-    .filter_map(|dir| {
-        let metadata = fs::metadata(dir.join("state.json")).ok()?;
-        let mtime_ns = metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|since| since.as_nanos() as i64)
-            .unwrap_or_default();
-        Some(format!("{mtime_ns}:{}", metadata.len()))
-    })
-    .collect::<Vec<_>>()
-    .join("|")
+    edit_store_paths(&qoder_workspace_storage_dirs(), task_dir_name, full_task_id)
+        .iter()
+        .filter_map(|dir| {
+            let metadata = fs::metadata(dir.join("state.json")).ok()?;
+            let mtime_ns = metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|since| since.as_nanos() as i64)
+                .unwrap_or_default();
+            Some(format!("{mtime_ns}:{}", metadata.len()))
+        })
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 /// The session's chat-editing store dirs across every workspace. With only a
@@ -727,13 +730,10 @@ fn edit_store_paths(
 
 /// `<data root>/Qoder/User/workspaceStorage` candidates.
 fn qoder_workspace_storage_dirs() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Some(data) = dirs::data_dir() {
-        roots.push(data);
-    }
-    if let Some(config) = dirs::config_dir() {
-        roots.push(config);
-    }
+    let mut roots = vec![
+        app_paths::external_history_data_dir(),
+        app_paths::external_history_config_dir(),
+    ];
     roots.sort();
     roots.dedup();
     roots
@@ -842,13 +842,10 @@ fn substring_after<'a>(line: &'a str, marker: &str) -> Option<&'a str> {
 /// `<data>/Qoder/logs/<ts>/questWindow/agent.log` and
 /// `<data>/Qoder/logs/<ts>/questWindow/exthost/output_logging_*/1-Qoder.log`.
 fn qoder_launch_log_paths() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Some(data) = dirs::data_dir() {
-        roots.push(data);
-    }
-    if let Some(config) = dirs::config_dir() {
-        roots.push(config);
-    }
+    let mut roots = vec![
+        app_paths::external_history_data_dir(),
+        app_paths::external_history_config_dir(),
+    ];
     roots.sort();
     roots.dedup();
 

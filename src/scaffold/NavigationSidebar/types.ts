@@ -166,6 +166,10 @@ export interface SidebarBaseProps {
   beforeAddNewActions?: ReactNode;
   /** Extra controls to the right of the add button (e.g. session group-by filter) */
   headerActions?: ReactNode;
+  /** Leading content in the Windows/Linux sidebar chrome row. */
+  hostTopBarLeadingContent?: ReactNode;
+  /** Equivalent content rendered below the traffic-light row on macOS. */
+  macTopBarFollowingContent?: ReactNode;
 }
 
 /** SidebarHeader props */
@@ -272,6 +276,8 @@ export interface SidebarListProps {
   scrollContainerRef?: Ref<HTMLDivElement>;
   /** Loading state */
   isLoading?: boolean;
+  /** Optional loading UI for surfaces that can mirror their eventual rows. */
+  loadingContent?: ReactNode;
   /** Custom theme */
   theme?: SidebarTheme;
   /** Additional class names */

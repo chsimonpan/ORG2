@@ -1,16 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import {
   type AgentOrgMemberIntervention,
-  getAgentOrgSessionInterventionState,
+  type AgentOrgRunView,
   returnAgentOrgSessionToWork,
 } from "@src/api/tauri/agent";
 import {
   isCliSession,
   isImportedHistorySession,
 } from "@src/util/session/sessionDispatch";
-
-const AGENT_ORG_INTERVENTION_REFRESH_MS = 2500;
 
 const EMPTY_RESULT = {
   intervention: null as AgentOrgMemberIntervention | null,
@@ -20,114 +18,92 @@ const EMPTY_RESULT = {
   returnToWork: async () => false,
 } as const;
 
-interface AgentOrgInterventionState {
+interface AgentOrgInterventionActionState {
   sessionId: string | null;
-  intervention: AgentOrgMemberIntervention | null;
   error: string | null;
   returning: boolean;
 }
 
-export function useAgentOrgIntervention(sessionId: string | null) {
-  const [state, setState] = useState<AgentOrgInterventionState>({
-    sessionId: null,
-    intervention: null,
-    error: null,
-    returning: false,
-  });
+export function interventionForSession(
+  view: AgentOrgRunView | null,
+  sessionId: string | null
+): AgentOrgMemberIntervention | null {
+  if (!view || !sessionId) return null;
+  const member = view.members.find(
+    (candidate) =>
+      candidate.sessionRuntime?.sessionId === sessionId ||
+      (view.context.rootSessionId === sessionId && candidate.isCoordinator)
+  );
+  return member?.intervention ?? member?.sessionRuntime?.intervention ?? null;
+}
 
-  const isPollingEnabled =
+/**
+ * Derives intervention state from the canonical run view. The old hook polled
+ * a second endpoint every 2.5 seconds even though this data is already part of
+ * each run-view member projection.
+ */
+export function useAgentOrgIntervention(
+  sessionId: string | null,
+  runView: AgentOrgRunView | null,
+  refreshRunView: () => Promise<void>
+) {
+  const [actionState, setActionState] =
+    useState<AgentOrgInterventionActionState>({
+      sessionId: null,
+      error: null,
+      returning: false,
+    });
+  const eligible =
     !!sessionId &&
     !isCliSession(sessionId) &&
     !isImportedHistorySession(sessionId);
-
-  const refresh = useCallback(async () => {
-    if (!isPollingEnabled || !sessionId) return;
-    const currentSessionId = sessionId;
-    try {
-      const result =
-        await getAgentOrgSessionInterventionState(currentSessionId);
-      setState((previous) => ({
-        sessionId: currentSessionId,
-        intervention: result.intervention ?? null,
-        error: null,
-        returning:
-          previous.sessionId === currentSessionId ? previous.returning : false,
-      }));
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      setState((previous) => ({
-        sessionId: currentSessionId,
-        intervention:
-          previous.sessionId === currentSessionId
-            ? previous.intervention
-            : null,
-        error: message,
-        returning:
-          previous.sessionId === currentSessionId ? previous.returning : false,
-      }));
-    }
-  }, [isPollingEnabled, sessionId]);
-
-  useEffect(() => {
-    if (!isPollingEnabled || !sessionId) return;
-
-    let cancelled = false;
-    const refreshIfActive = async () => {
-      if (!cancelled) {
-        await refresh();
-      }
-    };
-
-    void refreshIfActive();
-    const intervalId = window.setInterval(
-      () => void refreshIfActive(),
-      AGENT_ORG_INTERVENTION_REFRESH_MS
-    );
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [sessionId, isPollingEnabled, refresh]);
+  const intervention = interventionForSession(runView, sessionId);
 
   const returnToWork = useCallback(async () => {
-    if (!isPollingEnabled || !sessionId) return false;
+    if (!eligible || !sessionId) return false;
     const currentSessionId = sessionId;
-    setState((previous) => ({
-      ...previous,
+    setActionState({
       sessionId: currentSessionId,
+      error: null,
       returning: true,
-    }));
+    });
     try {
       const changed = await returnAgentOrgSessionToWork(currentSessionId);
-      await refresh();
       return changed;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      setState((previous) => ({
-        ...previous,
-        sessionId: currentSessionId,
-        error: message,
-      }));
+      setActionState((previous) =>
+        previous.sessionId === currentSessionId
+          ? { ...previous, error: message }
+          : previous
+      );
       return false;
     } finally {
-      setState((previous) => ({
-        ...previous,
-        returning: false,
-      }));
+      setActionState((previous) =>
+        previous.sessionId === currentSessionId
+          ? { ...previous, returning: false }
+          : previous
+      );
     }
-  }, [isPollingEnabled, refresh, sessionId]);
+  }, [eligible, sessionId]);
 
   return useMemo(() => {
-    if (!isPollingEnabled || !sessionId || state.sessionId !== sessionId) {
-      return EMPTY_RESULT;
-    }
+    if (!eligible || !sessionId || !runView) return EMPTY_RESULT;
+    const stateMatches = actionState.sessionId === sessionId;
     return {
-      intervention: state.intervention,
-      error: state.error,
-      returning: state.returning,
-      refresh,
+      intervention,
+      error: stateMatches ? actionState.error : null,
+      returning: stateMatches ? actionState.returning : false,
+      refresh: refreshRunView,
       returnToWork,
     };
-  }, [isPollingEnabled, refresh, returnToWork, sessionId, state]);
+  }, [
+    actionState,
+    eligible,
+    intervention,
+    refreshRunView,
+    returnToWork,
+    runView,
+    sessionId,
+  ]);
 }

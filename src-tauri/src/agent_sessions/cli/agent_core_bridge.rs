@@ -12,12 +12,16 @@ use std::pin::Pin;
 
 use agent_core::foundation::session_bridge::{
     self, CliLaunchOutcome, CliLaunchParams, CliPlanApprovalResponseParams, CliToolsSnapshot,
+    CliTurnDispatchParams,
 };
 use agent_core::interaction::plan_approval::{self, PlanResolution};
 use agent_core::session::AgentExecMode;
 use agent_core::tools::names as tool_names;
 
-use super::commands::{cli_agent_create, cli_agent_message, cli_agent_run};
+use super::commands::{
+    cli_agent_create, cli_agent_delete, cli_agent_message, cli_agent_run, CliMessageRequest,
+    CliRunRequest,
+};
 use super::persistence::{self, CreateCodeSessionParams};
 
 fn run(
@@ -34,6 +38,8 @@ fn run(
             account_id: params.account_id,
             repo_path: params.repo_path,
             branch: params.branch,
+            worktree_path: params.worktree_path,
+            worktree_base_ref: params.worktree_base_ref,
             proxy_token: None,
             proxy_url: None,
             hosted_token: params.hosted_token,
@@ -51,6 +57,7 @@ fn run(
             project_slug: params.project_slug,
             work_item_id: params.work_item_id,
             agent_role: params.agent_role,
+            product_mode: params.product_mode,
         };
 
         let session = cli_agent_create(create_params).await?;
@@ -58,29 +65,58 @@ fn run(
         let created_at = session.created_at.clone();
 
         if !params.user_input.trim().is_empty() {
-            cli_agent_run(
-                session_id.clone(),
-                params.user_input,
-                None,
-                params.ide_context,
-                params.mode,
-                params.images,
-            )
+            let durable_run_id = params.durable_run_id.clone();
+            if let Err(err) = cli_agent_run(CliRunRequest {
+                session_id: session_id.clone(),
+                user_input: params.user_input,
+                ide_context: params.ide_context,
+                mode: params.mode,
+                images: params.images,
+                turn_intent_id: durable_run_id.clone(),
+                client_message_id: durable_run_id,
+                ..Default::default()
+            })
             .await
-            .map_err(|err| {
+            {
                 tracing::warn!(
                     "[cli::agent_core_bridge] cli_agent_run failed for {}: {}",
                     session_id,
                     err
                 );
-                err
-            })?;
+                let cleanup_error = cli_agent_delete(session_id.clone()).await.err();
+                return Err(match cleanup_error {
+                    Some(cleanup_error) => {
+                        format!("{err}; failed to roll back CLI session: {cleanup_error}")
+                    }
+                    None => err,
+                });
+            }
         }
 
         Ok(CliLaunchOutcome {
             session_id,
             created_at,
+            workspace_path: session.repo_path,
+            worktree_path: session.worktree_path,
+            worktree_branch: session.worktree_branch,
+            base_ref: session.base_branch,
         })
+    })
+}
+
+fn dispatch_turn(
+    params: CliTurnDispatchParams,
+) -> Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send>> {
+    Box::pin(async move {
+        cli_agent_message(CliMessageRequest {
+            session_id: params.session_id,
+            content: params.content,
+            turn_intent_id: Some(params.turn_intent_id),
+            client_message_id: Some(params.client_message_id),
+            ..Default::default()
+        })
+        .await
+        .map(|_| ())
     })
 }
 
@@ -182,16 +218,16 @@ fn respond_plan_approval(
             edited_marker = if edited { " (edited)" } else { "" },
         );
 
-        cli_agent_message(
-            params.session_id,
-            synthetic_content,
-            params.model,
-            params.account_id,
-            None,
-            Some(AgentExecMode::Build.as_str().to_string()),
-            None,
-        )
+        cli_agent_message(CliMessageRequest {
+            session_id: params.session_id,
+            content: synthetic_content,
+            model: params.model,
+            account_id: params.account_id,
+            mode: Some(AgentExecMode::Build.as_str().to_string()),
+            ..Default::default()
+        })
         .await
+        .map(|_| ())
     })
 }
 
@@ -217,6 +253,7 @@ fn cli_registered_tool_names() -> Vec<String> {
 /// Register CLI adapters into agent_core's session bridge slots.
 pub fn register() {
     session_bridge::register_launch_cli_agent(run);
+    session_bridge::register_dispatch_cli_turn(dispatch_turn);
     session_bridge::register_delete_cli_session(|session_id| {
         persistence::delete_session(session_id).map_err(|err| format!("DB error: {err}"))
     });

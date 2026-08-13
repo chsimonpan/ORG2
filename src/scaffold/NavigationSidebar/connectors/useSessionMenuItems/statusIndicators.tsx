@@ -1,23 +1,28 @@
 import type { ReactNode } from "react";
 
-import { CODEMIRROR_STYLE_NONCE } from "@src/features/CodeMirror/config/nonce";
+import {
+  type SessionStatusDotTone,
+  resolveSessionStatusDotColor,
+} from "@src/util/session/sessionStatusDot";
 
-export type StatusDotTone = "default" | "unread" | "asking";
-export type SessionStatusDotTone = "active" | "completed" | "error";
+export type StatusDotTone = Extract<
+  SessionStatusDotTone,
+  "default" | "unread" | "asking"
+>;
 
+/**
+ * Keep the historical helper name for call-site compatibility. A working
+ * session may stay in the sidebar for hours, so its marker must not own a
+ * permanent compositor animation. The accessible label still distinguishes
+ * working state from the static unread and pending-question markers.
+ */
 export function renderBreathingStatusDot(): ReactNode {
   return (
     <span
       aria-label="Working"
-      className="h-1.5 w-1.5 rounded-full bg-primary-6 motion-safe:animate-[sidebar-working-dot-breathe_1.6s_ease-in-out_infinite] motion-reduce:opacity-80"
-    >
-      <style nonce={CODEMIRROR_STYLE_NONCE}>{`
-        @keyframes sidebar-working-dot-breathe {
-          0%, 100% { opacity: 0.6; transform: scale(0.9); }
-          50% { opacity: 1; transform: scale(1); }
-        }
-      `}</style>
-    </span>
+      className="h-1.5 w-1.5 rounded-full opacity-90"
+      style={{ backgroundColor: resolveSessionStatusDotColor("working") }}
+    />
   );
 }
 
@@ -28,36 +33,13 @@ export function renderStatusDot(tone: StatusDotTone = "default"): ReactNode {
       : tone === "asking"
         ? "Pending question"
         : undefined;
-  const colorClass =
-    tone === "unread"
-      ? "bg-success-6"
-      : tone === "asking"
-        ? "bg-warning-6"
-        : "bg-fill-4";
 
   return (
     <span
       aria-label={ariaLabel}
       aria-hidden={ariaLabel ? undefined : true}
-      className={`h-1.5 w-1.5 rounded-full ${colorClass}`}
-    />
-  );
-}
-
-/** Persistent session-state marker used at the end of every session row. */
-export function renderSessionStatusDot(tone: SessionStatusDotTone): ReactNode {
-  const ariaLabel =
-    tone === "active" ? "Active" : tone === "completed" ? "Completed" : "Error";
-  const colorClass =
-    tone === "active"
-      ? "bg-primary-6"
-      : tone === "completed"
-        ? "bg-success-6"
-        : "bg-danger-6";
-  return (
-    <span
-      aria-label={ariaLabel}
-      className={`h-1.5 w-1.5 rounded-full ${colorClass}`}
+      className="h-1.5 w-1.5 rounded-full"
+      style={{ backgroundColor: resolveSessionStatusDotColor(tone) }}
     />
   );
 }

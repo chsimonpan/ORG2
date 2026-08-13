@@ -1,171 +1,345 @@
 import {
   ArrowDown,
   ArrowUp,
-  ArrowUpRight,
-  ChevronRight,
+  Box,
   Info,
+  ListChecks,
   Trash2,
 } from "lucide-react";
+import { type ReactNode, useRef, useState } from "react";
 
+import { STORY_SYNC_ADAPTER } from "@src/api/http/integrations/syncConnections";
 import Button from "@src/components/Button";
+import Input from "@src/components/Input";
+import IntegrationIcon from "@src/components/IntegrationIcon";
 import { HEADER_ICON_SIZE } from "@src/config/workstation/tokens";
+import {
+  formatWorkItemShortId,
+  isGitHubIssueStatus,
+} from "@src/modules/ProjectManager/WorkItems/workItemIdentity";
+import ProjectManagerBreadcrumb from "@src/modules/ProjectManager/shared/components/ProjectManagerBreadcrumb";
+import type { ProjectManagerBreadcrumbSegment } from "@src/modules/ProjectManager/shared/components/ProjectManagerBreadcrumb";
 import { WorkstationToolbarTooltip } from "@src/modules/WorkStation/shared";
 import type { WorkItem as WorkItemExtended } from "@src/types/core/workItem";
 
-interface WorkItemDetailHeaderProps {
+export interface WorkItemDetailHeaderProps {
   workItem: WorkItemExtended;
-  pendingUpdates: Partial<WorkItemExtended>;
+  breadcrumbSegments?: readonly ProjectManagerBreadcrumbSegment[];
   breadcrumbProjectName?: string;
+  breadcrumbIcon?: ReactNode;
   shortId?: string | null;
   propertiesOpen: boolean;
   hasPrev: boolean;
   hasNext: boolean;
   onClose: () => void;
+  onTitleChange?: (title: string) => void;
   onNavigate: (direction: "prev" | "next") => void;
   onDeleteWorkItem?: (id: string) => void;
-  onExpandToTab?: (pendingUpdates: Partial<WorkItemExtended>) => void;
   onToggleProperties?: () => void;
   t: (key: string) => string;
 }
 
-export function WorkItemDetailHeader({
-  workItem,
-  pendingUpdates,
-  breadcrumbProjectName,
+type WorkItemDetailHeaderBreadcrumbProps = Pick<
+  WorkItemDetailHeaderProps,
+  | "workItem"
+  | "breadcrumbSegments"
+  | "breadcrumbProjectName"
+  | "breadcrumbIcon"
+  | "shortId"
+  | "onTitleChange"
+  | "t"
+> & {
+  onClose?: WorkItemDetailHeaderProps["onClose"];
+};
+
+interface WorkItemBreadcrumbTitleProps {
+  title: string;
+  fallbackTitle: string;
+  shortId?: string | null;
+  onTitleChange?: (title: string) => void;
+  renameLabel: string;
+  fillAvailableWidth?: boolean;
+}
+
+function WorkItemBreadcrumbTitle({
+  title,
+  fallbackTitle,
   shortId,
+  onTitleChange,
+  renameLabel,
+  fillAvailableWidth = false,
+}: WorkItemBreadcrumbTitleProps) {
+  const [draftState, setDraftState] = useState({
+    sourceTitle: title,
+    value: title,
+  });
+  const [isEditing, setIsEditing] = useState(false);
+  const cancelBlurRef = useRef(false);
+  const draftTitle =
+    isEditing || draftState.sourceTitle === title ? draftState.value : title;
+
+  const commitTitle = () => {
+    setIsEditing(false);
+    if (draftTitle !== title) onTitleChange?.(draftTitle);
+  };
+
+  const displayLength = Array.from(draftTitle || fallbackTitle).length;
+  const shortIdLength = shortId ? Array.from(shortId).length + 3 : 0;
+  const maxTitleLength = Math.max(12, 36 - shortIdLength);
+  const inputWidth = Math.min(Math.max(displayLength + 1, 4), maxTitleLength);
+
+  return (
+    <span
+      className={`inline-flex min-w-0 items-center gap-1 ${
+        fillAvailableWidth ? "flex-1" : "max-w-[36ch]"
+      }`}
+    >
+      {shortId ? <span className="shrink-0">{shortId} ·</span> : null}
+      {onTitleChange ? (
+        <Input
+          type="text"
+          value={draftTitle}
+          onChange={(value) => setDraftState({ sourceTitle: title, value })}
+          onFocus={() => {
+            setIsEditing(true);
+            setDraftState({ sourceTitle: title, value: draftTitle });
+          }}
+          onBlur={() => {
+            if (cancelBlurRef.current) {
+              cancelBlurRef.current = false;
+              return;
+            }
+            commitTitle();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.blur();
+              return;
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              cancelBlurRef.current = true;
+              setDraftState({ sourceTitle: title, value: title });
+              setIsEditing(false);
+              event.currentTarget.blur();
+            }
+          }}
+          placeholder={fallbackTitle}
+          aria-label={renameLabel}
+          data-testid="work-item-header-title-input"
+          appearance="ghost"
+          className="min-w-[4ch]"
+          style={{ width: `${inputWidth}ch` }}
+        />
+      ) : (
+        <span
+          className={
+            fillAvailableWidth
+              ? "min-w-0 flex-1 whitespace-nowrap"
+              : "min-w-0 truncate"
+          }
+        >
+          {title || fallbackTitle}
+        </span>
+      )}
+    </span>
+  );
+}
+
+export function WorkItemDetailHeaderBreadcrumb({
+  workItem,
+  breadcrumbSegments,
+  breadcrumbProjectName,
+  breadcrumbIcon,
+  shortId,
+  onClose,
+  onTitleChange,
+  t,
+}: WorkItemDetailHeaderBreadcrumbProps) {
+  const workItemName = workItem.name || t("workItems.untitled");
+  const workItemStatus = workItem.workItemStatus ?? workItem.status;
+  const isGitHubIssue = isGitHubIssueStatus(workItemStatus);
+  const displayShortId = formatWorkItemShortId(
+    shortId,
+    workItemStatus,
+    breadcrumbProjectName
+  );
+  const title = displayShortId
+    ? `${displayShortId} · ${workItemName}`
+    : workItemName;
+  const identityIcon = isGitHubIssue ? (
+    <IntegrationIcon
+      type={STORY_SYNC_ADAPTER.GITHUB}
+      size={HEADER_ICON_SIZE.sm}
+    />
+  ) : (
+    breadcrumbIcon
+  );
+  const titleContent = (
+    <WorkItemBreadcrumbTitle
+      title={workItem.name || ""}
+      fallbackTitle={t("workItems.untitled")}
+      shortId={displayShortId}
+      onTitleChange={onTitleChange}
+      renameLabel={t("workItems.contextMenu.rename")}
+      fillAvailableWidth={isGitHubIssue}
+    />
+  );
+  const fallbackParentSegments: readonly ProjectManagerBreadcrumbSegment[] =
+    breadcrumbProjectName ? [{ label: breadcrumbProjectName }] : [];
+  const parentSegments = (breadcrumbSegments ?? fallbackParentSegments).map(
+    (segment, index, segments) =>
+      index === segments.length - 1 && onClose
+        ? {
+            ...segment,
+            onClick: onClose,
+            title: `${t("common:actions.back")}: ${segment.label}`,
+          }
+        : segment
+  );
+  const segments: readonly ProjectManagerBreadcrumbSegment[] = [
+    ...parentSegments,
+    {
+      label: title,
+      content: titleContent,
+      fillAvailableWidth: isGitHubIssue,
+      icon:
+        identityIcon ??
+        (parentSegments.length > 0 ? (
+          <Box size={HEADER_ICON_SIZE.sm} strokeWidth={1.75} />
+        ) : (
+          <ListChecks size={HEADER_ICON_SIZE.sm} strokeWidth={1.75} />
+        )),
+    },
+  ];
+
+  return <ProjectManagerBreadcrumb segments={segments} />;
+}
+
+type WorkItemDetailHeaderActionsProps = Omit<
+  WorkItemDetailHeaderProps,
+  | "breadcrumbSegments"
+  | "breadcrumbProjectName"
+  | "breadcrumbIcon"
+  | "shortId"
+  | "onClose"
+  | "onTitleChange"
+>;
+
+export function WorkItemDetailHeaderActions({
+  workItem,
   propertiesOpen,
   hasPrev,
   hasNext,
-  onClose,
   onNavigate,
   onDeleteWorkItem,
-  onExpandToTab,
   onToggleProperties,
   t,
-}: WorkItemDetailHeaderProps) {
-  const title = shortId ? `${shortId} · ${workItem.name}` : workItem.name;
-
+}: WorkItemDetailHeaderActionsProps) {
   return (
-    <>
-      <div className="flex min-w-0 flex-shrink items-center gap-1.5">
-        {breadcrumbProjectName ? (
-          <div className="flex min-w-0 items-center gap-0.5">
-            <button
-              type="button"
-              onClick={onClose}
-              className="whitespace-nowrap text-[12px] text-text-2 hover:text-text-1 hover:underline"
-              title={t("common:actions.back")}
-            >
-              {breadcrumbProjectName}
-            </button>
-            <ChevronRight
-              size={14}
-              strokeWidth={1.75}
-              className="mx-1 flex-shrink-0 text-fill-4"
-              aria-hidden
-            />
-            <span
-              className="min-w-0 truncate text-[12px] font-medium text-text-1"
-              title={title}
-            >
-              {workItem.name || t("workItems.untitled")}
-            </span>
-          </div>
-        ) : (
-          <span
-            className="min-w-0 truncate text-[12px] font-medium text-text-1"
-            title={title}
-          >
-            {workItem.name || t("workItems.untitled")}
-          </span>
-        )}
-      </div>
-      <div className="ml-auto flex flex-shrink-0 items-center gap-px">
-        <WorkstationToolbarTooltip label={t("common:actions.previous")}>
+    <div className="flex flex-shrink-0 items-center gap-px">
+      <WorkstationToolbarTooltip label={t("common:actions.previous")}>
+        <Button
+          htmlType="button"
+          variant="tertiary"
+          size="small"
+          iconOnly
+          onClick={() => onNavigate("prev")}
+          disabled={!hasPrev}
+          aria-label={t("common:actions.previous")}
+          icon={<ArrowUp size={HEADER_ICON_SIZE.sm} />}
+        />
+      </WorkstationToolbarTooltip>
+      <WorkstationToolbarTooltip label={t("common:actions.next")}>
+        <Button
+          htmlType="button"
+          variant="tertiary"
+          size="small"
+          iconOnly
+          onClick={() => onNavigate("next")}
+          disabled={!hasNext}
+          aria-label={t("common:actions.next")}
+          icon={<ArrowDown size={HEADER_ICON_SIZE.sm} />}
+        />
+      </WorkstationToolbarTooltip>
+      {(onDeleteWorkItem || onToggleProperties) && (
+        <div
+          className="pointer-events-none mx-1.5 h-4 w-px shrink-0 bg-border-2"
+          role="separator"
+          aria-hidden
+        />
+      )}
+      {onDeleteWorkItem && (
+        <WorkstationToolbarTooltip label={t("workItems.deleteWorkItem")}>
           <Button
             htmlType="button"
             variant="tertiary"
             size="small"
             iconOnly
-            onClick={() => onNavigate("prev")}
-            disabled={!hasPrev}
-            aria-label={t("common:actions.previous")}
-            icon={<ArrowUp size={HEADER_ICON_SIZE.sm} />}
+            onClick={() => onDeleteWorkItem(workItem.session_id)}
+            aria-label={t("workItems.deleteWorkItem")}
+            data-testid="work-item-delete"
+            icon={<Trash2 size={HEADER_ICON_SIZE.sm} />}
           />
         </WorkstationToolbarTooltip>
-        <WorkstationToolbarTooltip label={t("common:actions.next")}>
+      )}
+      {onToggleProperties && (
+        <WorkstationToolbarTooltip
+          label={
+            propertiesOpen
+              ? t("workItems.hideProperties")
+              : t("workItems.showProperties")
+          }
+        >
           <Button
             htmlType="button"
             variant="tertiary"
             size="small"
             iconOnly
-            onClick={() => onNavigate("next")}
-            disabled={!hasNext}
-            aria-label={t("common:actions.next")}
-            icon={<ArrowDown size={HEADER_ICON_SIZE.sm} />}
-          />
-        </WorkstationToolbarTooltip>
-        {(onExpandToTab || onDeleteWorkItem || onToggleProperties) && (
-          <div
-            className="pointer-events-none mx-1.5 h-4 w-px shrink-0 bg-border-2"
-            role="separator"
-            aria-hidden
-          />
-        )}
-        {onExpandToTab && (
-          <WorkstationToolbarTooltip label={t("common:actions.openInNewTab")}>
-            <Button
-              htmlType="button"
-              variant="tertiary"
-              size="small"
-              iconOnly
-              onClick={() => onExpandToTab(pendingUpdates)}
-              aria-label={t("common:actions.openInNewTab")}
-              icon={<ArrowUpRight size={HEADER_ICON_SIZE.md} />}
-            />
-          </WorkstationToolbarTooltip>
-        )}
-        {onDeleteWorkItem && (
-          <WorkstationToolbarTooltip label={t("workItems.deleteWorkItem")}>
-            <Button
-              htmlType="button"
-              variant="tertiary"
-              size="small"
-              iconOnly
-              onClick={() => onDeleteWorkItem(workItem.session_id)}
-              aria-label={t("workItems.deleteWorkItem")}
-              data-testid="work-item-delete"
-              icon={<Trash2 size={HEADER_ICON_SIZE.sm} />}
-            />
-          </WorkstationToolbarTooltip>
-        )}
-        {onToggleProperties && (
-          <WorkstationToolbarTooltip
-            label={
+            className={
+              propertiesOpen ? "!bg-surface-selected !text-primary-6" : ""
+            }
+            onClick={onToggleProperties}
+            aria-label={
               propertiesOpen
                 ? t("workItems.hideProperties")
                 : t("workItems.showProperties")
             }
-          >
-            <Button
-              htmlType="button"
-              variant="tertiary"
-              size="small"
-              iconOnly
-              className={
-                propertiesOpen ? "!bg-surface-selected !text-primary-6" : ""
-              }
-              onClick={onToggleProperties}
-              aria-label={
-                propertiesOpen
-                  ? t("workItems.hideProperties")
-                  : t("workItems.showProperties")
-              }
-              icon={<Info size={HEADER_ICON_SIZE.sm} />}
-            />
-          </WorkstationToolbarTooltip>
-        )}
-      </div>
+            icon={<Info size={HEADER_ICON_SIZE.sm} />}
+          />
+        </WorkstationToolbarTooltip>
+      )}
+    </div>
+  );
+}
+
+export function WorkItemDetailHeader(props: WorkItemDetailHeaderProps) {
+  const {
+    breadcrumbSegments,
+    breadcrumbProjectName,
+    breadcrumbIcon,
+    shortId,
+    onClose,
+    onTitleChange,
+    workItem,
+    t,
+    ...actionProps
+  } = props;
+
+  return (
+    <>
+      <WorkItemDetailHeaderBreadcrumb
+        workItem={workItem}
+        breadcrumbSegments={breadcrumbSegments}
+        breadcrumbProjectName={breadcrumbProjectName}
+        breadcrumbIcon={breadcrumbIcon}
+        shortId={shortId}
+        onClose={onClose}
+        onTitleChange={onTitleChange}
+        t={t}
+      />
+      <WorkItemDetailHeaderActions {...actionProps} workItem={workItem} t={t} />
     </>
   );
 }

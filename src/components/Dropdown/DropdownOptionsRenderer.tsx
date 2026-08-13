@@ -64,9 +64,7 @@ const DropdownOptionsRenderer: React.FC<DropdownOptionsRendererProps> = ({
     );
   } else {
     content = (
-      <div
-        className={`select-options-overlay ${DROPDOWN_CLASSES.optionsContainerScrollbar}`}
-      >
+      <div className={DROPDOWN_CLASSES.optionsContainerScrollbar}>
         <div className={DROPDOWN_CLASSES.itemsColumn}>
           {options.map((option, index) => {
             const isSelected = isMultiple

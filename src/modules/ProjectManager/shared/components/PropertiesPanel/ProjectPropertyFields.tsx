@@ -6,22 +6,17 @@
  *
  * Meant to be rendered inside a <PropertiesPanel> shell.
  */
-import {
-  BriefcaseBusiness,
-  Calendar,
-  Circle,
-  MoreHorizontal,
-} from "lucide-react";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Calendar, Circle, ListChevronsUpDown } from "lucide-react";
+import React, { useCallback, useMemo, useState } from "react";
 
-import { type WorkspaceRecord, workspaceApi } from "@src/api/tauri/workspace";
 import Button from "@src/components/Button";
+import { pillControlStateClass } from "@src/components/CompoundPill/config";
 import { DROPDOWN_ITEM } from "@src/components/Dropdown/tokens";
+import { usePropertyDropdownDirection } from "@src/components/PropertyField/PropertyDropdownDirection";
 import {
   FieldRow,
   type FieldRowVariant,
 } from "@src/components/PropertyField/PropertyFieldEditable";
-import Select, { type SelectOption } from "@src/components/Select";
 import { getProjectPropertyContextMenuItems } from "@src/modules/ProjectManager/Projects/projectContextMenu";
 import WorkItemContextMenu from "@src/modules/ProjectManager/WorkItems/components/WorkItemContextMenu";
 import { DateQuickAssignDropdown } from "@src/modules/ProjectManager/WorkItems/components/WorkItemProperties/DateQuickAssignDropdown";
@@ -60,8 +55,12 @@ export interface ProjectPropertyFieldsProps {
   fieldVariant?: FieldRowVariant;
   /** Optional subset of fields rendered directly in the row/panel. */
   visibleFields?: ProjectPropertyFieldKey[];
-  /** Render hidden fields behind an ellipsis menu. */
+  /** Render hidden fields behind a more-properties menu. */
   showMoreMenu?: boolean;
+  /** Keep the legacy group inset around row-style fields. */
+  withGroupInset?: boolean;
+  /** Reserve the legacy label column beside each row value. */
+  showLabels?: boolean;
 }
 
 export const PROJECT_PROPERTY_CONCISE_FIELDS: ProjectPropertyFieldKey[] = [
@@ -70,7 +69,6 @@ export const PROJECT_PROPERTY_CONCISE_FIELDS: ProjectPropertyFieldKey[] = [
   "lead",
   "targetDate",
   "linkedRepos",
-  "workspace",
 ];
 
 const DEFAULT_VISIBLE_FIELDS: ProjectPropertyFieldKey[] = [
@@ -82,7 +80,6 @@ const DEFAULT_VISIBLE_FIELDS: ProjectPropertyFieldKey[] = [
   "teams",
   "labels",
   "linkedRepos",
-  "workspace",
   "startDate",
   "targetDate",
   "completion",
@@ -105,7 +102,10 @@ const ProjectPropertyFields: React.FC<ProjectPropertyFieldsProps> = ({
   fieldVariant = "row",
   visibleFields = DEFAULT_VISIBLE_FIELDS,
   showMoreMenu = false,
+  withGroupInset = true,
+  showLabels = true,
 }) => {
+  const dropdownDirection = usePropertyDropdownDirection();
   const {
     t,
     openPicker,
@@ -121,26 +121,9 @@ const ProjectPropertyFields: React.FC<ProjectPropertyFieldsProps> = ({
     handleTeamToggle,
     handleLabelToggle,
     handleLinkedRepoToggle,
-    handleWorkspaceChange,
     handleDateChange,
     formatDate,
   } = usePropertiesPanel({ project, onUpdate, containerRef });
-  const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void workspaceApi
-      .listWorkspaces()
-      .then((items) => {
-        if (!cancelled) setWorkspaces(items);
-      })
-      .catch(() => {
-        if (!cancelled) setWorkspaces([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const linkedRepoCount = project.linkedRepos?.length ?? 0;
   const linkedRepoLabel =
@@ -154,21 +137,6 @@ const ProjectPropertyFields: React.FC<ProjectPropertyFieldsProps> = ({
         name: getRepoDisplayName(repo),
       })),
     [availableRepos]
-  );
-  const workspaceOptions = useMemo<SelectOption[]>(
-    () => [
-      {
-        value: "",
-        label: "Unlinked Workspace",
-        triggerLabel: "Unlinked Workspace",
-      },
-      ...workspaces.map((workspace) => ({
-        value: workspace.workspaceId,
-        label: workspace.name,
-        triggerLabel: workspace.name,
-      })),
-    ],
-    [workspaces]
   );
 
   const visibleFieldSet = useMemo(
@@ -187,12 +155,18 @@ const ProjectPropertyFields: React.FC<ProjectPropertyFieldsProps> = ({
     y: number;
   } | null>(null);
 
-  const handleMoreClick = useCallback((event: React.MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const rect = event.currentTarget.getBoundingClientRect();
-    setMoreMenuPosition({ x: rect.left, y: rect.bottom + 6 });
-  }, []);
+  const handleMoreClick = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = event.currentTarget.getBoundingClientRect();
+      setMoreMenuPosition({
+        x: rect.left,
+        y: dropdownDirection === "up" ? rect.top - 6 : rect.bottom + 6,
+      });
+    },
+    [dropdownDirection]
+  );
 
   const handleMorePropertyAction = useCallback(
     (field: Exclude<ProjectPropertyFieldKey, "completion">, value?: string) => {
@@ -234,10 +208,6 @@ const ProjectPropertyFields: React.FC<ProjectPropertyFieldsProps> = ({
         if (repo) handleLinkedRepoToggle(repo);
         return;
       }
-      if (field === "workspace") {
-        handleWorkspaceChange(value || undefined);
-        return;
-      }
       togglePicker(field);
     },
     [
@@ -253,7 +223,6 @@ const ProjectPropertyFields: React.FC<ProjectPropertyFieldsProps> = ({
       handlePriorityChange,
       handleStatusChange,
       handleTeamToggle,
-      handleWorkspaceChange,
       togglePicker,
     ]
   );
@@ -291,7 +260,7 @@ const ProjectPropertyFields: React.FC<ProjectPropertyFieldsProps> = ({
         className={
           fieldVariant === "pill"
             ? "flex flex-nowrap items-center gap-2"
-            : "flex flex-col px-2"
+            : `flex flex-col ${withGroupInset ? "px-2" : ""}`
         }
       >
         <StatusHealthPriorityFields
@@ -307,6 +276,7 @@ const ProjectPropertyFields: React.FC<ProjectPropertyFieldsProps> = ({
           t={t}
           fieldVariant={fieldVariant}
           visibleFields={visibleFieldSet}
+          showLabels={showLabels}
         />
 
         <PeopleTeamsLabelsFields
@@ -327,50 +297,8 @@ const ProjectPropertyFields: React.FC<ProjectPropertyFieldsProps> = ({
           t={t}
           fieldVariant={fieldVariant}
           visibleFields={visibleFieldSet}
+          showLabels={showLabels}
         />
-
-        {(visibleFieldSet.has("workspace") || openPicker === "workspace") && (
-          <div
-            className={
-              fieldVariant === "pill"
-                ? "relative flex min-h-7 min-w-0 max-w-[240px] items-center"
-                : "relative flex min-h-[36px] w-full items-center"
-            }
-          >
-            <FieldRow
-              icon={<BriefcaseBusiness size={DROPDOWN_ITEM.iconSize} />}
-              label="Workspace"
-              value={String(
-                workspaceOptions.find(
-                  (option) => option.value === (project.workspaceId ?? "")
-                )?.triggerLabel ?? "Unlinked Workspace"
-              )}
-              isSelected={!!project.workspaceId}
-              isActive={openPicker === "workspace"}
-              variant={fieldVariant}
-              onClick={() => togglePicker("workspace")}
-            />
-            {openPicker === "workspace" && (
-              <div
-                className="absolute left-0 right-0 top-full z-20 mt-1 min-w-[220px]"
-                data-property-dropdown
-              >
-                <Select
-                  value={project.workspaceId ?? ""}
-                  options={workspaceOptions}
-                  onChange={(value) => {
-                    if (!Array.isArray(value)) {
-                      handleWorkspaceChange(String(value) || undefined);
-                    }
-                  }}
-                  showSearch
-                  dropdownWidthMode="min-match"
-                  panelZIndex={10000}
-                />
-              </div>
-            )}
-          </div>
-        )}
 
         {/* Start Date */}
         {(visibleFieldSet.has("startDate") || openPicker === "startDate") && (
@@ -383,7 +311,7 @@ const ProjectPropertyFields: React.FC<ProjectPropertyFieldsProps> = ({
           >
             <FieldRow
               icon={<Calendar size={DROPDOWN_ITEM.iconSize} />}
-              label={t("properties.startDate")}
+              label={showLabels ? t("properties.startDate") : undefined}
               value={formatDate(project.startDate)}
               isSelected={!!project.startDate}
               isActive={openPicker === "startDate"}
@@ -412,7 +340,7 @@ const ProjectPropertyFields: React.FC<ProjectPropertyFieldsProps> = ({
           >
             <FieldRow
               icon={<Calendar size={DROPDOWN_ITEM.iconSize} />}
-              label={t("properties.targetDate")}
+              label={showLabels ? t("properties.targetDate") : undefined}
               value={formatDate(project.targetDate)}
               isSelected={!!project.targetDate}
               isActive={openPicker === "targetDate"}
@@ -441,9 +369,11 @@ const ProjectPropertyFields: React.FC<ProjectPropertyFieldsProps> = ({
               }
             >
               <div className="flex min-h-[36px] w-full items-center gap-1 px-2 py-1">
-                <span className="w-[72px] shrink-0 text-xs text-text-2">
-                  {t("properties.completion")}
-                </span>
+                {showLabels ? (
+                  <span className="w-[72px] shrink-0 text-xs text-text-2">
+                    {t("properties.completion")}
+                  </span>
+                ) : null}
                 <div className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-1.5">
                   <span
                     className={`${DROPDOWN_ITEM.iconSizeClass} shrink-0 text-primary-6`}
@@ -465,11 +395,11 @@ const ProjectPropertyFields: React.FC<ProjectPropertyFieldsProps> = ({
             size="small"
             shape="round"
             iconOnly
-            icon={<MoreHorizontal size={DROPDOWN_ITEM.iconSize} />}
+            icon={<ListChevronsUpDown size={DROPDOWN_ITEM.iconSize} />}
             onClick={handleMoreClick}
             title={t("common:actions.more")}
             htmlType="button"
-            className={`!px-3 ${moreMenuPosition ? "!border-primary-5 !bg-primary-1 !text-primary-6" : ""}`}
+            className={`!px-3 ${pillControlStateClass(Boolean(moreMenuPosition))}`}
           />
         )}
       </div>
@@ -479,6 +409,7 @@ const ProjectPropertyFields: React.FC<ProjectPropertyFieldsProps> = ({
           items={moreMenuItems}
           position={moreMenuPosition}
           onClose={() => setMoreMenuPosition(null)}
+          openDirection={dropdownDirection}
         />
       )}
     </>

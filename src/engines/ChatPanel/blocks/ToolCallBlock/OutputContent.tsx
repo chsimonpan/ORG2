@@ -28,6 +28,7 @@ import {
   CommandResultCard,
   ContextImportCard,
   FileCard,
+  OrgtrackEnvelopeCard,
   ProjectCard,
   WebsiteCard,
   WorkItemCard,
@@ -338,6 +339,9 @@ const OutputContent: React.FC<OutputContentProps> = ({
     )}
     {styledOutput?.type === "commandResult" && (
       <CommandResultCard card={styledOutput.card} />
+    )}
+    {styledOutput?.type === "orgtrackEnvelope" && (
+      <OrgtrackEnvelopeCard card={styledOutput.card} />
     )}
     {styledOutput?.type === "agentMessageCard" && (
       <AgentMessageCard card={styledOutput.card} />

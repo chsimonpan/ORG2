@@ -14,10 +14,11 @@ import { useTranslation } from "react-i18next";
 
 import type { ProjectOrg } from "@src/api/http/project";
 import type { QuickAction } from "@src/modules/WorkStation/shared";
+import { openCreateTargetInChatPanelStartPageAtom } from "@src/store/chatPanel/chatPanelTabsAtom";
+import { openOrFocusSessionInChatPanelTabAtom } from "@src/store/chatPanel/chatPanelTabsAtom";
 import {
-  CHAT_PANEL_SURFACE_KIND,
+  CHAT_PANEL_CREATE_TARGET,
   activeStationChatVisibleAtom,
-  chatPanelNavigateAtom,
 } from "@src/store/ui/chatPanelAtom";
 import { stationModeAtom } from "@src/store/ui/simulatorAtom";
 import { workStationPrimarySidebarCollapsedPersistAtom } from "@src/store/ui/workStationAtom";
@@ -34,14 +35,11 @@ import {
   STORY_ORG_SCOPE,
   STORY_PERSONAL_ORG_FILTER_ID,
   STORY_PERSONAL_ORG_NAME,
-  createChatSessionTab,
   createProjectDashboardTab,
-  createProjectJourneyTab,
   createProjectLinearProjectsTab,
   createProjectLinearWorkItemsTab,
   createProjectOrgTab,
   createProjectSettingsTab,
-  createProjectTreeTab,
   createProjectWorkItemsIndexTab,
   createProjectWorkItemsTab,
   createWorkItemDetailTab,
@@ -104,7 +102,9 @@ export function useProjectTabActions({
 
   const stationMode = useAtomValue(stationModeAtom);
   const setStationChatVisible = useSetAtom(activeStationChatVisibleAtom);
-  const navigateChatPanel = useSetAtom(chatPanelNavigateAtom);
+  const openCreateTargetInStartPage = useSetAtom(
+    openCreateTargetInChatPanelStartPageAtom
+  );
   const setLayout = useSetAtom(workstationLayoutAtom);
 
   /**
@@ -208,8 +208,8 @@ export function useProjectTabActions({
   );
 
   const handleCreateProject = useCallback(() => {
-    navigateChatPanel({
-      kind: CHAT_PANEL_SURFACE_KIND.NEW_PROJECT,
+    openCreateTargetInStartPage({
+      target: CHAT_PANEL_CREATE_TARGET.PROJECT,
       createProjectContext: {
         orgId: activeProjectOrg?.orgId ?? STORY_PERSONAL_ORG_FILTER_ID,
         scopeBreadcrumbLabel:
@@ -221,7 +221,7 @@ export function useProjectTabActions({
     }
   }, [
     activeProjectOrg,
-    navigateChatPanel,
+    openCreateTargetInStartPage,
     setStationChatVisible,
     stationMode,
     t,
@@ -229,12 +229,14 @@ export function useProjectTabActions({
 
   const handleCreateWorkItem = useCallback(
     (_projectId?: string, _projectName?: string, _projectSlug?: string) => {
-      navigateChatPanel({ kind: CHAT_PANEL_SURFACE_KIND.NEW_WORK_ITEM });
+      openCreateTargetInStartPage({
+        target: CHAT_PANEL_CREATE_TARGET.WORK_ITEM,
+      });
       if (stationMode === "my-station" || stationMode === "agent-station") {
         setStationChatVisible(stationMode, true);
       }
     },
-    [navigateChatPanel, setStationChatVisible, stationMode]
+    [openCreateTargetInStartPage, setStationChatVisible, stationMode]
   );
 
   const handleOpenProjects = useCallback(() => {
@@ -248,30 +250,6 @@ export function useProjectTabActions({
       createProjectWorkItemsIndexTab({ orgScope: STORY_ORG_SCOPE.ALL })
     );
   }, [navigateWorkspaceTab]);
-
-  const handleOpenProjectTree = useCallback(() => {
-    navigateWorkspaceTab(createProjectTreeTab());
-  }, [navigateWorkspaceTab]);
-
-  const handleOpenProjectJourney = useCallback(
-    (projectId?: string, projectSlug?: string, projectName?: string) => {
-      // The workspace/sidebar entry is not tied to one selected project. Do
-      // not mint a malformed `project/` scope: open the project tree, where a
-      // concrete canonical project id is available for the Journey action.
-      if (!projectId) {
-        navigateWorkspaceTab(createProjectTreeTab());
-        return;
-      }
-      navigateWorkspaceTab(
-        createProjectJourneyTab({
-          projectId,
-          projectSlug,
-          projectName,
-        })
-      );
-    },
-    [navigateWorkspaceTab]
-  );
 
   const handleOpenPersonalOrg = useCallback(
     (view: ProjectOrgSurfaceView = PROJECT_ORG_SURFACE_VIEW.WORK_ITEMS) => {
@@ -382,7 +360,8 @@ export function useProjectTabActions({
       projectSlug: string | undefined,
       workItemId: string,
       workItemName: string,
-      pendingUpdates?: Record<string, unknown>
+      pendingUpdates?: Record<string, unknown>,
+      workItemStatus?: string
     ) => {
       openTab(
         createWorkItemDetailTab(
@@ -392,26 +371,38 @@ export function useProjectTabActions({
           workItemName,
           projectSlug,
           pendingUpdates,
-          activeTab?.id
+          activeTab?.id,
+          workItemStatus
         )
       );
     },
     [activeTab?.id, openTab]
   );
 
+  const openSessionInChatPanel = useSetAtom(
+    openOrFocusSessionInChatPanelTabAtom
+  );
   const handleOpenChatSession = useCallback(
     (
       sessionId: string,
       title?: string,
-      workItemId?: string,
-      workItemShortId?: string
+      _workItemId?: string,
+      _workItemShortId?: string
     ) => {
-      const tabTitle = title || `Chat: ${sessionId.slice(0, 12)}`;
-      openTab(
-        createChatSessionTab(sessionId, tabTitle, workItemId, workItemShortId)
-      );
+      // Conversations live in the LEFT chat panel; the station keeps
+      // showing the item/list the session was opened from. Activating a
+      // session switches the station to that session's workspace, so the
+      // tab being read is re-opened there to keep the right pane stable.
+      // The station chat tab remains reachable only through the explicit
+      // drag placement gesture (`sessionTabPlacementAtom`).
+      const pinnedTab =
+        activeTab?.type === "workItem-detail" ? activeTab : null;
+      openSessionInChatPanel({ sessionId, sessionName: title });
+      if (pinnedTab) {
+        openTab(pinnedTab);
+      }
     },
-    [openTab]
+    [activeTab, openSessionInChatPanel, openTab]
   );
 
   // --- Sidebar toggle ---
@@ -457,8 +448,6 @@ export function useProjectTabActions({
     handleCreateWorkItem,
     handleOpenProjects,
     handleOpenWorkItems,
-    handleOpenProjectTree,
-    handleOpenProjectJourney,
     handleOpenPersonalOrg,
     handleOpenProjectOrg,
     handleOpenPersonalOrgProjects,

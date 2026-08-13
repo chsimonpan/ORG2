@@ -142,7 +142,7 @@
     "timezoneAuto": "自動（瀏覽器）",
     "timezoneSearchPlaceholder": "搜索附近城市",
     "sendOnEnter": "Enter 發送消息",
-    "sendOnEnterDesc": "啟用後 Enter 發送，Shift+Enter 換行；關閉後 Ctrl/Cmd+Enter 發送",
+    "sendOnEnterDesc": "啟用後 Enter 發送，Shift+Enter 與 Ctrl/Cmd+Enter 換行；關閉後 Ctrl/Cmd+Enter 發送",
     "language": "語言",
     "languageSearchPlaceholder": "搜索語言...",
     "languageNames": {
@@ -227,7 +227,10 @@
     "presenceGuidanceOnlineDefault": "我在電腦前。你可以隨時向我提出澄清問題，執行任何破壞性操作前請先讓我確認",
     "presenceGuidanceInvisibleDefault": "我在附近但顯示為離線。預設自主執行；只有高風險操作或重大重構才通知我，其他問題請彙總成一段摘要，不要逐個詢問",
     "presenceGuidanceAwayDefault": "我暫時不在電腦前。不要等我回覆；根據現有資訊做出最佳判斷，完成能完成的事項，並留下簡明總結和待我回來處理的問題",
-    "followSystem": "跟隨系統"
+    "followSystem": "跟隨系統",
+    "preferences": "偏好設定",
+    "usePointerCursors": "使用指標游標",
+    "usePointerCursorsDesc": "將游標移至互動元素上時變更為指標"
   },
   "background": {
     "title": "背景",
@@ -703,8 +706,34 @@
     "test": {
       "sent": "測試通知已發送",
       "permissionWarning": "測試通知發送失敗，請檢查權限。",
-      "sendFailed": "無法發送測試通知。請檢查通知權限後重試。"
-    }
+      "sendFailed": "無法發送測試通知。請檢查通知權限後重試。",
+      "soundFailed": "無法播放通知音效，請檢查系統音量。"
+    },
+    "teamInbox": "團隊收件匣",
+    "soundPreset": "通知音效",
+    "soundPresetDesc": "選擇通知提醒時播放的聲音",
+    "previewSound": "試聽",
+    "soundPresets": {
+      "classic": "經典雙音",
+      "gentle": "柔和和弦",
+      "ascending": "上揚三音",
+      "bell": "鈴音"
+    },
+    "criticalOnly": "僅關鍵提醒",
+    "criticalOnlyDesc": "僅在操作需要核准或任務失敗時提醒",
+    "quietHours": "免打擾時段",
+    "quietHoursDesc": "在每天指定的時間範圍內靜音一般通知",
+    "quietHoursSchedule": "靜音時間",
+    "quietHoursScheduleDesc": "使用裝置本地時間；開始與結束時間相同時不啟用此時段。",
+    "quietHoursStart": "開始",
+    "quietHoursEnd": "結束",
+    "allowCriticalDuringQuietHours": "允許關鍵提醒",
+    "allowCriticalDuringQuietHoursDesc": "核准與失敗可顯示系統通知，但不會播放聲音",
+    "backgroundCompletionSummary": "彙總背景任務完成提醒",
+    "backgroundCompletionSummaryDesc": "免打擾結束後只發送一則彙總提醒",
+    "mutedSessions": "已靜音的 Session",
+    "mutedSessionsDesc": "此裝置上已有 {{count}} 個 Session 靜音",
+    "clearMutedSessions": "全部清除"
   },
   "editor": {
     "tabEditor": "編輯器",
@@ -811,10 +840,14 @@
     "installConfirmDesc": "版本 {{version}} 已下載。安裝並重新啓動 ORGII 前，請儲存正在進行的工作。",
     "installAndRestart": "安裝並重新啓動",
     "autoDownloadUpdates": "以後自動下載更新",
-    "skipVersion": "跳過此版本"
+    "skipVersion": "跳過此版本",
+    "installOfficialConfirmTitle": "正式版已準備好安裝",
+    "installOfficialConfirmDesc": "將正式版 {{version}} 安裝到 /Applications/ORG2.app。目前本機構建會保持開啓且不受影響。",
+    "installOfficial": "安裝正式版 App",
+    "localBuild": "本機構建"
   },
   "monitor": {
-    "categoryTerminal": "終端機/工具程序",
+    "categoryTerminal": "終端機程序",
     "categoryWebview": "WebView 轉譯器",
     "categoryGpu": "WebKit GPU",
     "categoryNetwork": "WebKit 網路",
@@ -934,7 +967,24 @@
     "diskCategory_screenshots": "瀏覽器截圖",
     "diskCategory_agentWorktrees": "Agent Session Worktrees",
     "diskCategory_lspBin": "LSP Server 二進位",
-    "loadZeroRows": "點擊載入另外 {{count}} 項"
+    "loadZeroRows": "點擊載入另外 {{count}} 項",
+    "appMemory": "應用程式記憶體",
+    "appBackend": "ORG2 後端",
+    "appWebviewHelpers": "已確認歸屬的 WebView 輔助程序",
+    "rssMappedDiagnostic": "RSS / 映射記憶體（診斷）",
+    "measurement": "統計口徑",
+    "measurementKinds": {
+      "native": "系統原生有效記憶體",
+      "compatibility": "相容口徑",
+      "mixed": "原生與回退口徑混合",
+      "rss_fallback": "RSS 回退口徑",
+      "unavailable": "暫不可用"
+    },
+    "toolProcessDiagnostics": "終端、CLI 與工具程序（RSS 診斷）",
+    "excludedFromAppMemory": "不計入應用程式記憶體",
+    "noToolProcesses": "未偵測到終端、CLI、MCP 或工具程序",
+    "categoryAgentCli": "CLI Agent",
+    "categoryMcpOrTool": "MCP / 工具程序"
   },
   "storage": {
     "dataDirectory": "數據目錄",
@@ -953,7 +1003,13 @@
     "tableSize": "大小",
     "tablePercentage": "佔比",
     "scanFailed": "掃描磁盤佔用失敗",
-    "openFolderFailed": "打開文件夾失敗"
+    "openFolderFailed": "打開文件夾失敗",
+    "browserCache": "瀏覽器快取",
+    "browserCacheDesc": "已使用 {{used}} · 可安全清理 {{cleanable}}",
+    "cleanBrowserCache": "清理",
+    "browserCacheCleaned": "已釋放 {{size}} 瀏覽器儲存空間",
+    "browserCacheAlreadyClean": "瀏覽器快取已是乾淨狀態",
+    "browserCacheCleanFailed": "清理瀏覽器快取失敗"
   },
   "dependencies": {
     "systemDependencies": "系統 Dependencies",
@@ -1002,7 +1058,7 @@
     "decryptEffect": "解密效果",
     "decryptEffectDesc": "爲 Agent 消息啓用解密動畫效果",
     "sendOnEnter": "Enter 發送消息",
-    "sendOnEnterDesc": "啟用後 Enter 發送，Shift+Enter 換行；關閉後 Ctrl/Cmd+Enter 發送"
+    "sendOnEnterDesc": "啟用後 Enter 發送，Shift+Enter 與 Ctrl/Cmd+Enter 換行；關閉後 Ctrl/Cmd+Enter 發送"
   },
   "languageServers": {
     "languageServersDesc": "管理用於自動補全、診斷和代碼智能的 LSP 服務器",

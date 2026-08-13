@@ -195,6 +195,7 @@ pub async fn agent_session_manual_compact(
             // no-ops — compaction is not a turn and must not appear in the
             // turn indexer.
             turn_intent_id: String::new(),
+            org_run_id: None,
             content: "[manual compact]".to_string(),
             execute: Box::new(move || {
                 Box::pin(async move {
@@ -262,8 +263,8 @@ async fn run_manual_compact_exclusive(
 
     let sid_for_load = session_id.clone();
     let loaded = tokio::task::spawn_blocking(move || {
-        let history = unified_persistence::load_llm_history_for_active_journey(&sid_for_load)
-            .map_err(|err| err.to_string())?;
+        let history =
+            unified_persistence::load_llm_history(&sid_for_load).map_err(|err| err.to_string())?;
         let sm_state = unified_persistence::load_session_memory_state(&sid_for_load)
             .map_err(|err| err.to_string())?;
         Ok::<_, String>((history, sm_state))
@@ -431,7 +432,7 @@ async fn run_manual_compact_exclusive(
             // and the upfront binding guard is check-then-enqueue. Re-verify
             // that the durable transcript still matches the snapshot the
             // compaction was computed from before making the cut durable.
-            let current_len = unified_persistence::load_llm_history_for_active_journey(&sid)
+            let current_len = unified_persistence::load_llm_history(&sid)
                 .map_err(|err| err.to_string())?
                 .len();
             if current_len != messages_before {
@@ -526,9 +527,6 @@ async fn run_manual_compact_exclusive(
     };
 
     session.last_context_tokens.store(0, Ordering::SeqCst);
-    session
-        .cumulative_weighted_tokens_milli
-        .store(0, Ordering::SeqCst);
 
     // Instant ring/panel refresh, ahead of the frontend's full reload.
     crate::bus::broadcast_event(

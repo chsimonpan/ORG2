@@ -142,7 +142,7 @@
     "timezoneAuto": "Auto (przeglądarka)",
     "timezoneSearchPlaceholder": "Szukaj najbliższych miast",
     "sendOnEnter": "Wysyłaj wiadomości klawiszem Enter",
-    "sendOnEnterDesc": "Po włączeniu Enter wysyła, a Shift+Enter wstawia nową linię. Po wyłączeniu wysyła Ctrl/Cmd+Enter",
+    "sendOnEnterDesc": "Po włączeniu Enter wysyła, a Shift+Enter i Ctrl/Cmd+Enter wstawiają nową linię. Po wyłączeniu wysyła Ctrl/Cmd+Enter",
     "language": "Język",
     "languageSearchPlaceholder": "Szukaj języków...",
     "languageNames": {
@@ -227,7 +227,10 @@
     "presenceGuidanceOnlineDefault": "Jestem przy klawiaturze. Możesz w każdej chwili zadawać pytania doprecyzowujące i potwierdzać ze mną działania destrukcyjne przed ich uruchomieniem",
     "presenceGuidanceInvisibleDefault": "Jestem w pobliżu, ale widoczny jako offline. Domyślnie działaj autonomicznie i powiadamiaj mnie tylko o działaniach wysokiego ryzyka lub dużych refaktoryzacjach; pozostałe pytania zbierz w jednym podsumowaniu zamiast zadawać je pojedynczo",
     "presenceGuidanceAwayDefault": "Jestem z dala od klawiatury. Nie blokuj się, czekając na mnie; podejmij najlepszą decyzję na podstawie dostępnych informacji, dokończ co się da i zostaw krótkie podsumowanie oraz otwarte pytania na mój powrót",
-    "followSystem": "Zgodnie z systemem"
+    "followSystem": "Zgodnie z systemem",
+    "preferences": "Preferencje",
+    "usePointerCursors": "Używaj kursora wskazującego",
+    "usePointerCursorsDesc": "Zmieniaj kursor na wskazujący po najechaniu na elementy interaktywne"
   },
   "background": {
     "title": "Tło",
@@ -703,8 +706,34 @@
     "test": {
       "sent": "Wysłano testowe powiadomienie",
       "permissionWarning": "Nie udało się wysłać testowego powiadomienia. Sprawdź uprawnienia.",
-      "sendFailed": "Nie można wysłać testowego powiadomienia. Sprawdź uprawnienia do powiadomień i spróbuj ponownie."
-    }
+      "sendFailed": "Nie można wysłać testowego powiadomienia. Sprawdź uprawnienia do powiadomień i spróbuj ponownie.",
+      "soundFailed": "Nie można odtworzyć dźwięku powiadomienia. Sprawdź głośność systemu."
+    },
+    "teamInbox": "Skrzynka odbiorcza zespołu",
+    "soundPreset": "Dźwięk powiadomienia",
+    "soundPresetDesc": "Wybierz dźwięk odtwarzany dla słyszalnych powiadomień",
+    "previewSound": "Odsłuchaj",
+    "soundPresets": {
+      "classic": "Klasyczny",
+      "gentle": "Łagodny",
+      "ascending": "Rosnący",
+      "bell": "Dzwonek"
+    },
+    "criticalOnly": "Tylko alerty krytyczne",
+    "criticalOnlyDesc": "Powiadamiaj tylko, gdy działanie wymaga zatwierdzenia lub zadanie się nie powiedzie",
+    "quietHours": "Harmonogram Nie przeszkadzać",
+    "quietHoursDesc": "Wyciszaj rutynowe powiadomienia w codziennym przedziale czasu",
+    "quietHoursSchedule": "Godziny ciszy",
+    "quietHoursScheduleDesc": "Używa czasu lokalnego urządzenia. Identyczna godzina początku i końca wyłącza przedział.",
+    "quietHoursStart": "Od",
+    "quietHoursEnd": "Do",
+    "allowCriticalDuringQuietHours": "Zezwalaj na alerty krytyczne",
+    "allowCriticalDuringQuietHoursDesc": "Prośby o zatwierdzenie i błędy mogą wyświetlać powiadomienie systemowe, ale nigdy nie odtwarzają dźwięku",
+    "backgroundCompletionSummary": "Podsumowuj zakończone zadania w tle",
+    "backgroundCompletionSummaryDesc": "Wyślij jedno zbiorcze powiadomienie po zakończeniu godzin ciszy",
+    "mutedSessions": "Wyciszone sesje",
+    "mutedSessionsDesc": "Na tym urządzeniu wyciszono {{count}} sesji",
+    "clearMutedSessions": "Wyczyść wszystko"
   },
   "editor": {
     "tabEditor": "Edytor",
@@ -926,7 +955,24 @@
     "diskCategory_screenshots": "Zrzuty ekranu przeglądarki",
     "diskCategory_agentWorktrees": "Worktree sesji Agent",
     "diskCategory_lspBin": "Pliki binarne LSP Server",
-    "loadZeroRows": "Kliknij, aby wczytać jeszcze {{count}}"
+    "loadZeroRows": "Kliknij, aby wczytać jeszcze {{count}}",
+    "appMemory": "App memory",
+    "appBackend": "ORG2 backend",
+    "appWebviewHelpers": "Owned WebView helpers",
+    "rssMappedDiagnostic": "RSS / mapped memory (diagnostic)",
+    "measurement": "Measurement",
+    "measurementKinds": {
+      "native": "Native effective memory",
+      "compatibility": "Compatibility metric",
+      "mixed": "Mixed native / fallback metrics",
+      "rss_fallback": "RSS fallback",
+      "unavailable": "Unavailable"
+    },
+    "toolProcessDiagnostics": "Terminal, CLI & tool processes (RSS diagnostic)",
+    "excludedFromAppMemory": "excluded from App memory",
+    "noToolProcesses": "No terminal, CLI, MCP, or tool processes detected",
+    "categoryAgentCli": "CLI agent",
+    "categoryMcpOrTool": "MCP / tool process"
   },
   "dependencies": {
     "systemDependencies": "Zależności systemowe",
@@ -980,7 +1026,13 @@
     "tableSize": "Rozmiar",
     "tablePercentage": "Proc.",
     "scanFailed": "Nie udało się przeskanować zużycia dysku",
-    "openFolderFailed": "Nie udało się otworzyć folderu"
+    "openFolderFailed": "Nie udało się otworzyć folderu",
+    "browserCache": "Pamięć podręczna przeglądarki",
+    "browserCacheDesc": "Użyto {{used}} · {{cleanable}} można bezpiecznie wyczyścić",
+    "cleanBrowserCache": "Wyczyść",
+    "browserCacheCleaned": "Zwolniono {{size}} pamięci przeglądarki",
+    "browserCacheAlreadyClean": "Pamięć podręczna przeglądarki jest już czysta",
+    "browserCacheCleanFailed": "Nie udało się wyczyścić pamięci podręcznej przeglądarki"
   },
   "agentSessions": {
     "title": "Sesje Agent",
@@ -994,7 +1046,7 @@
     "decryptEffect": "Efekt deszyfrowania",
     "decryptEffectDesc": "Włącz animację deszyfrowania dla wiadomości Agent",
     "sendOnEnter": "Wysyłaj wiadomości klawiszem Enter",
-    "sendOnEnterDesc": "Po włączeniu Enter wysyła, a Shift+Enter wstawia nową linię. Po wyłączeniu wysyła Ctrl/Cmd+Enter"
+    "sendOnEnterDesc": "Po włączeniu Enter wysyła, a Shift+Enter i Ctrl/Cmd+Enter wstawiają nową linię. Po wyłączeniu wysyła Ctrl/Cmd+Enter"
   },
   "languageServers": {
     "languageServersDesc": "Zarządzaj serwerami LSP dla autouzupełniania, diagnostyki i inteligencji kodu",

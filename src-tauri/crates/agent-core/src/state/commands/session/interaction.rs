@@ -497,11 +497,7 @@ pub(crate) async fn plan_approval_response_impl(
              treat their next message as feedback for a new plan.</system-reminder>",
             snapshot.plan_title
         );
-        if let Err(err) = session_persistence::save_user_msg_and_assign_journey(
-            &session_id,
-            &rejection_note,
-            None,
-        ) {
+        if let Err(err) = session_persistence::save_user_msg(&session_id, &rejection_note, None) {
             tracing::warn!(
                 "[plan_approval] Failed to persist plan-rejection note for {}: {}",
                 session_id,
@@ -558,6 +554,8 @@ pub(crate) async fn plan_approval_response_impl(
         None,
         false,
         false,
+        None,
+        None,
         None,
         None,
         crate::foundation::session_bridge::TurnIntentBridgeSource::UserSubmit,

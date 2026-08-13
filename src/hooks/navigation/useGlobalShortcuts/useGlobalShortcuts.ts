@@ -10,7 +10,7 @@ import { useZoomShortcuts } from "./useZoomShortcuts";
  * Handles:
  * - Backspace: Prevented from triggering any navigation (only works in input fields)
  * - Command+Q (Meta+Q): Open quit confirmation modal
- * - Command+W (Meta+W): Close current tab with special home page logic
+ * - Command+W (Meta+W): Close the current domain-owned tab
  * - Command+M (Meta+M): Hide the window (minimize to background)
  * - Command+N (Meta+N): Create a new Agent Station session
  * - Command+T (Meta+T): Context-aware navigation
@@ -37,7 +37,8 @@ import { useZoomShortcuts } from "./useZoomShortcuts";
  * - Command+Option+U / Ctrl+Alt+U: Toggle Workstation sidebar
  * - Command+= (Meta+=): Zoom in (increase UI scale)
  * - Command+- (Meta+-): Zoom out (decrease UI scale)
- * - Command+0 (Meta+0): Reset zoom to default (100%)
+ * - Command+0 (Meta+0): Toggle global preferences
+ * - Option+Command+0 (Ctrl+Alt+0): Reset zoom to default (100%)
  * - Command+Shift+0 (Meta+Shift+0): Toggle route inspector modal
  * - Ctrl+Tab or Command+Option+→: Switch to next tab
  * - Ctrl+Shift+Tab or Command+Option+←: Switch to previous tab

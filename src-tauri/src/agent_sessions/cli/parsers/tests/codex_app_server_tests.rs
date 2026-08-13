@@ -326,6 +326,29 @@ fn token_usage_updated_captures_last_breakdown() {
 }
 
 #[test]
+fn token_usage_derives_total_when_provider_omits_it() {
+    let mut p = parser();
+    let chunks = notif(
+        &mut p,
+        "thread/tokenUsage/updated",
+        json!({
+            "threadId": "t", "turnId": "u",
+            "tokenUsage": {
+                "last": {
+                    "inputTokens": 91133,
+                    "cachedInputTokens": 76288,
+                    "outputTokens": 1876
+                }
+            }
+        }),
+    );
+    assert!(chunks.is_empty());
+    let usage = p.usage().expect("usage captured");
+    assert_eq!(usage.total_tokens, 93009);
+    assert_eq!(usage.cache_read_tokens, 76288);
+}
+
+#[test]
 fn turn_completed_emits_session_end_and_records_status() {
     let mut p = parser();
     let chunks = notif(
@@ -371,16 +394,21 @@ fn interrupted_turn_records_status() {
 }
 
 #[test]
-fn fatal_error_notification_maps_to_error_chunk_retryable_is_swallowed() {
+fn fatal_error_is_coalesced_into_authoritative_failed_turn() {
     let mut p = parser();
     let fatal = notif(
         &mut p,
         "error",
         json!({"threadId": "t", "turnId": "u", "error": {"message": "boom"}, "willRetry": false}),
     );
-    assert_eq!(fatal.len(), 1);
-    assert_eq!(fatal[0].action_type, "error");
-    assert_eq!(fatal[0].result["error"], "boom");
+    assert!(fatal.is_empty());
+
+    let duplicate_fatal = notif(
+        &mut p,
+        "error",
+        json!({"threadId": "t", "turnId": "u", "error": {"message": "boom, request-id: second"}, "willRetry": false}),
+    );
+    assert!(duplicate_fatal.is_empty());
 
     let retryable = notif(
         &mut p,
@@ -388,6 +416,92 @@ fn fatal_error_notification_maps_to_error_chunk_retryable_is_swallowed() {
         json!({"threadId": "t", "turnId": "u", "error": {"message": "transient"}, "willRetry": true}),
     );
     assert!(retryable.is_empty());
+
+    let terminal = notif(
+        &mut p,
+        "turn/completed",
+        json!({"threadId": "t", "turn": {
+            "id": "u", "items": [], "status": "failed",
+            "error": {"message": "authoritative upstream failure"},
+        }}),
+    );
+    assert_eq!(terminal.len(), 1);
+    assert_eq!(terminal[0].action_type, "session_end");
+    assert_eq!(terminal[0].result["success"], false);
+    assert_eq!(
+        terminal[0].result["error_message"],
+        "authoritative upstream failure"
+    );
+    assert_eq!(p.turn_error(), Some("authoritative upstream failure"));
+}
+
+#[test]
+fn failed_turn_without_a_body_falls_back_to_the_last_retry_notice() {
+    let mut p = parser();
+    let retryable = notif(
+        &mut p,
+        "error",
+        json!({"threadId": "t", "turnId": "u", "error": {"message": "stream disconnected"}, "willRetry": true}),
+    );
+    assert!(retryable.is_empty(), "a retry is progress, not an error");
+
+    // codex reports the failure but attaches no error object — without the
+    // fallback the turn ends with no explanation at all.
+    let terminal = notif(
+        &mut p,
+        "turn/completed",
+        json!({"threadId": "t", "turn": {"id": "u", "items": [], "status": "failed"}}),
+    );
+    assert_eq!(terminal[0].result["success"], false);
+    assert_eq!(terminal[0].result["error_message"], "stream disconnected");
+    assert_eq!(p.turn_error(), Some("stream disconnected"));
+}
+
+#[test]
+fn retry_notice_never_outlives_its_turn() {
+    let mut p = parser();
+    notif(
+        &mut p,
+        "error",
+        json!({"threadId": "t", "turnId": "u", "error": {"message": "stream disconnected"}, "willRetry": true}),
+    );
+
+    // Codex retried and got through: the notice describes nothing.
+    let ok = notif(
+        &mut p,
+        "turn/completed",
+        json!({"threadId": "t", "turn": {"id": "u", "items": [], "status": "completed"}}),
+    );
+    assert_eq!(ok[0].result["success"], true);
+    assert!(ok[0].result.get("error_message").is_none());
+
+    // And it must not be waiting to attach itself to the next turn either.
+    let next = notif(
+        &mut p,
+        "turn/completed",
+        json!({"threadId": "t", "turn": {"id": "v", "items": [], "status": "failed"}}),
+    );
+    assert!(next[0].result.get("error_message").is_none());
+    assert_eq!(p.turn_error(), None);
+}
+
+#[test]
+fn interrupted_turn_does_not_borrow_a_retry_notice() {
+    let mut p = parser();
+    notif(
+        &mut p,
+        "error",
+        json!({"threadId": "t", "turnId": "u", "error": {"message": "stream disconnected"}, "willRetry": true}),
+    );
+
+    // The user cancelled; "stream disconnected" is not why this turn ended.
+    let interrupted = notif(
+        &mut p,
+        "turn/completed",
+        json!({"threadId": "t", "turn": {"id": "u", "items": [], "status": "interrupted"}}),
+    );
+    assert_eq!(interrupted[0].result["stop_reason"], "interrupted");
+    assert!(interrupted[0].result.get("error_message").is_none());
 }
 
 #[test]

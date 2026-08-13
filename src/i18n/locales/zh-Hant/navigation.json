@@ -46,7 +46,8 @@
     "projectManager": "專案管理器",
     "diff": "Diff",
     "colleagues": "同事",
-    "terminals": "終端機"
+    "terminals": "終端機",
+    "environment": "環境"
   },
   "trajectoryPanel": {
     "title": "軌跡",
@@ -60,15 +61,9 @@
     "startSession": "開始會話",
     "sessions": "Session 列表",
     "selectProject": "選擇專案",
-    "startPage": "起始頁",
     "inbox": "收件箱",
     "login": "登錄",
     "setup": "設置嚮導",
-    "devJourney": "開發歷程",
-    "devRecord": "開發記錄",
-    "gitDashboard": "Git 儀表盤",
-    "devActivity": "Dev 活動",
-    "usageHistory": "使用歷史",
     "tokenMarket": "Token 市場",
     "taskMarket": "任務市場",
     "channels": "Channel",
@@ -85,20 +80,8 @@
     "ideaArea": "想法廣場",
     "changelog": "更新日誌"
   },
-  "appGrid": {
-    "customizeGrid": "自定義網格",
-    "horizontalGap": "水平間距",
-    "verticalGap": "垂直間距",
-    "resetToDefault": "恢復默認"
-  },
-  "greetings": {
-    "morning": "早上好",
-    "afternoon": "下午好",
-    "evening": "晚上好"
-  },
   "sidebar": {
     "tabs": {
-      "build": "起始頁",
       "workstation": "工作站",
       "manage": "管理",
       "core": "核心",
@@ -134,9 +117,7 @@
     "actions": {
       "addNew": "新建",
       "collapseAll": "全部摺疊",
-      "markAllRead": "全部標為已讀",
-      "openHome": "開啟首頁",
-      "openWorkstation": "開啟工作站"
+      "markAllRead": "全部標為已讀"
     },
     "search": {
       "folders": "搜尋工作區...",
@@ -159,7 +140,8 @@
       "workstation": "工作站",
       "viewRam": "查看 RAM",
       "tutorials": "教學",
-      "openSettings": "開啟設定"
+      "openSettings": "開啟設定",
+      "setupChecklist": "快速設定"
     },
     "empty": {
       "noItems": "暫無內容",
@@ -182,6 +164,37 @@
       "duration1h": "1 小時",
       "duration2h": "2 小時",
       "durationTomorrow": "明天"
+    },
+    "guide": {
+      "trigger": "開啟使用引導",
+      "title": "開始使用 ORGII",
+      "startSession": "建立第一個工作階段",
+      "quickSetup": "語言與外觀",
+      "close": "關閉引導",
+      "progressLabel": "已完成 {{completed}}/{{total}} 項設定",
+      "localWorkspace": "本機工作區",
+      "connectOrganization": "連接或建立組織",
+      "createOrganizationHint": "輸入組織名稱，然後點選「建立」。雲端組織建立成功後，引導會進入下一步。",
+      "inviteTeammate": "邀請一位團隊成員",
+      "inviteTeammateHint": "在這裡建立邀請連結，然後傳送給你的團隊成員。",
+      "invitePermissionHint": "你可以在這裡查看成員列表；邀請需要由組織管理員或 Owner 建立。",
+      "devPanelTitle": "Onboarding 測試狀態",
+      "devPanelHint": "僅在目前程序預覽邀請流程，不會修改後端組織資料。",
+      "devScenarioLive": "真實資料",
+      "devScenarioNoOrganization": "無組織",
+      "devScenarioMember": "一般成員 · 無邀請權限",
+      "devScenarioAdmin": "管理員 · 有邀請權限",
+      "devScenarioOwner": "Owner · 有邀請權限",
+      "devScenarioRequiresOrganization": "角色預覽至少需要一個真實雲端組織。",
+      "devSimulationActive": "開發模擬已啟用",
+      "devSimulationReadOnly": "成員頁僅供預覽，組織管理操作已停用。",
+      "viewTeamActivity": "查看團隊用量",
+      "viewTeamActivityHint": "已開啟「執行階段 > 成員」。選擇一位團隊成員即可查看 Codex、Claude 和 Cursor 用量；若無資料，請先啟用團隊執行階段同步。",
+      "exploreProduct": "瞭解主要頁面",
+      "nextStep": "下一步"
+    },
+    "developerTestPanel": {
+      "title": "開發測試面板"
     }
   },
   "appLauncher": {
@@ -449,22 +462,13 @@
       "projects": "專案"
     }
   },
-  "changelog": {
-    "title": "更新日誌",
-    "subtitle": "產品更新",
-    "commitCount": "{{count}} 次提交",
-    "commitCount_one": "{{count}} 次提交",
-    "details": "詳情",
-    "frontend": "Frontend",
-    "backend": "Backend"
-  },
   "collaboration": {
     "switchOrg": "切換 ORG",
     "addOrg": "新增 ORG",
     "createOrg": "建立",
     "joinOrg": "加入",
     "orgSource": "組織來源",
-    "localOrg": "Local",
+    "localOrg": "本地",
     "orgName": "ORG 名稱",
     "orgNamePlaceholder": "Team Alpha",
     "inviteCode": "邀請連結或代碼",
@@ -489,7 +493,11 @@
       "forkSetupNoWorkspace": "Continue without a workspace",
       "forkSetupAccount": "Account",
       "forkSetupModel": "Model",
-      "forkSetupContinue": "Fork & continue"
+      "forkSetupContinue": "Fork & continue",
+      "forkSnapshotIncomplete": "雲端快照不完整。請讓擁有者完成同步後重試。",
+      "forkAgentUnavailable": "請先選擇本機 Agent 再分叉。",
+      "forkBackendRegistrationFailed": "歷史已複製，但可執行的分叉工作階段註冊失敗。請重試。",
+      "forkReplayUnavailable": "此工作階段尚無完整回放。請讓擁有者共享完整回放後重試。"
     },
     "repoPicker": {
       "loading": "Loading repos…",
@@ -510,7 +518,22 @@
       "sendFailed": "已分叉，但訊息傳送失敗——內容已還原到輸入框",
       "forkedChipTooltip": "分叉自 {{name}}",
       "sourceChipTooltip": "Shared by {{name}}",
-      "continuePlaceholder": "傳送訊息，Fork 後在 ORGII 中繼續…"
+      "continuePlaceholder": "傳送訊息，Fork 後在 ORGII 中繼續…",
+      "snapshotError": "雲端快照不完整。請讓擁有者完成同步後重試。",
+      "agentError": "請先選擇本機 Agent 再分叉。",
+      "backendError": "歷史已複製，但可執行的分叉工作階段註冊失敗。請重試。",
+      "parentOpenUnavailable": "無法從此分叉開啟來源工作階段。",
+      "replayError": "此工作階段尚無完整回放。請讓擁有者共享完整回放後重試。",
+      "openParentButton": "開啟來自 {{name}} 的來源工作階段"
+    },
+    "continueCli": {
+      "headerButton": "在 {{agent}} 中繼續",
+      "headerTooltip": "在終端分頁中以 {{agent}} 重新開啟此工作階段（{{command}}）",
+      "notInstalled": "此裝置未安裝 {{agent}}",
+      "missingWorkspace": "工作階段的原始資料夾已不存在，{{agent}} 只能在原資料夾中恢復",
+      "sourceMissing": "原始工作階段資料已不在磁碟上",
+      "launchFailed": "開啟 {{agent}} 終端失敗",
+      "composerPlaceholder": "輸入訊息以在新的 ORGII 工作階段中繼續 — 也可透過標題列按鈕在 {{agent}} 中原生恢復…"
     }
   },
   "cloud": {
@@ -557,7 +580,61 @@
       "retentionUpgrade": "此工作階段已超出目前方案的重播期限 — 升級後即可檢視",
       "importError": "無法匯入工作階段",
       "manageBilling": "Manage billing",
-      "manageBillingNote": "Cancel or change your plan in the billing portal"
+      "manageBillingNote": "Cancel or change your plan in the billing portal",
+      "aboutMeTitle": "關於我",
+      "sync": {
+        "tabTitle": "同步",
+        "connectionTitle": "連線",
+        "endpointLabel": "後端端點",
+        "endpointOfficial": "託管 ORG2 雲端",
+        "endpointCustom": "自訂部署",
+        "endpointUnknown": "未知",
+        "signedInLabel": "已登入帳號",
+        "signedOut": "未登入",
+        "signedOutHint": "登入 ORG2 雲端後可查看帳號與功能詳細資料",
+        "tokenExpiresLabel": "存取權杖到期時間",
+        "tokenExpired": "已過期 — 請重新登入",
+        "schemaLabel": "後端結構版本",
+        "schemaChecking": "檢查中…",
+        "schemaMatched": "相符（v{{version}}）",
+        "schemaMismatch": "不相符 — 後端 v{{backend}}，應用程式需要 v{{expected}}",
+        "schemaUnknown": "無法讀取後端結構版本",
+        "capabilitiesLabel": "後端功能",
+        "capabilitiesChecking": "檢查中…",
+        "capabilitiesUnavailable": "無法使用",
+        "capabilityEnabled": "開啟",
+        "capabilityDisabled": "關閉",
+        "capability": {
+          "broadcastSignals": "即時訊號",
+          "storageSegments": "重播儲存分段",
+          "homeEndpoints": "區域端點",
+          "teamInboxMentions": "團隊收件匣提及",
+          "memberRuntime": "團隊執行環境共享"
+        },
+        "lastSyncTitle": "上次同步",
+        "lastSyncLabel": "上次成功同步",
+        "lastSyncNever": "從未同步",
+        "lastAttemptLabel": "上次嘗試",
+        "manualLabel": "立即執行一次同步",
+        "manualAction": "立即同步",
+        "manualRunning": "同步中…",
+        "manualSuccess": "同步完成",
+        "manualError": "同步失敗：{{message}}",
+        "coverageTitle": "工作階段涵蓋率",
+        "coverageSummary": "已同步 {{synced}}/{{syncable}}（{{percent}}%）",
+        "coveragePercentLabel": "涵蓋率",
+        "coverageEmpty": "此組織的存放庫範圍內尚無工作階段",
+        "logsTitle": "同步紀錄",
+        "logsHelp": "本機記錄的近期同步事件。重新啟動後清空，且不會上傳",
+        "logsEmpty": "尚無同步事件紀錄",
+        "logsClear": "清除",
+        "logsCopy": "複製",
+        "logsCopied": "已複製",
+        "logsOrg": "組織 {{orgId}}",
+        "levelInfo": "資訊",
+        "levelWarn": "警告",
+        "levelError": "錯誤"
+      }
     },
     "sidebar": {
       "teamSessions": "團隊工作階段",
@@ -573,7 +650,12 @@
       "viewerOverflow": "還有 {{count}} 人正在看",
       "memberViewing": "正在看：{{title}}",
       "viewerOverflow_one": "and 1 more viewer",
-      "viewerOverflow_other": "and {{count}} more viewers"
+      "viewerOverflow_other": "and {{count}} more viewers",
+      "mySessions": "我的工作階段",
+      "copyId": "複製 ID",
+      "loadingSession": "正在載入會話…",
+      "downloadProgress": "下載中… {{percent}}%",
+      "downloadProgressEta": "下載中… {{percent}}% · 剩餘約 {{eta}}"
     },
     "sync": {
       "quotaExceededToast": "ORG2 雲端同步已暫停：此組織的方案配額已用盡",
@@ -624,7 +706,9 @@
         "stateExhausted": "已用完",
         "linkOneTimeNote": "請立即複製——此連結只會在本裝置上顯示一次。",
         "copyLink": "複製連結",
-        "copied": "已複製"
+        "copied": "已複製",
+        "createTitle": "新建邀請",
+        "historyTitle": "歷史邀請"
       },
       "members": {
         "roleChangeTitle": "變更角色",
@@ -636,7 +720,8 @@
         "youTag": "我",
         "ownerTag": "擁有者",
         "floorOff": "無最低要求",
-        "floorTooltip": "該成員的最低分享級別。與組織級最低要求取更嚴格者生效。"
+        "floorTooltip": "該成員的最低分享級別。與組織級最低要求取更嚴格者生效。",
+        "floorOrgMinimum": "組織最低要求（{{mode}}）"
       },
       "leave": {
         "action": "退出組織",
@@ -677,7 +762,7 @@
         "joinedFallbackToast": "已加入雲端組織"
       },
       "create": {
-        "sourceCloud": "ORG2 Cloud（託管）",
+        "sourceCloud": "雲端",
         "signInFirst": "登入 ORG2 Cloud 以建立或加入託管組織。",
         "openSettings": "開啟登入設定",
         "createdToast": "雲端組織已建立"
@@ -694,7 +779,9 @@
         "inviteInvalid": "邀請碼無效。",
         "inviteRevoked": "該邀請已被撤銷。",
         "inviteExpired": "該邀請已過期。",
-        "inviteExhausted": "該邀請的使用次數已用完。"
+        "inviteExhausted": "該邀請的使用次數已用完。",
+        "alreadyMember": "你已經是該組織的成員。",
+        "network": "無法連線雲端服務。請檢查網路後重試。"
       }
     },
     "defaultAccess": {
@@ -712,7 +799,8 @@
       "visibilityOrg": "組織內所有人",
       "visibilityRestricted": "僅自己",
       "taggedNote": "此工作階段已移入此組織，在保持標記期間至少會共享中繼資料。",
-      "floorNote": "組織管理員要求至少分享到{{mode}}。"
+      "floorNote": "組織管理員要求至少分享到{{mode}}。",
+      "orgMinimumOption": "組織最低要求（{{mode}}）"
     },
     "share": {
       "menuItem": "雲端分享…",
@@ -743,7 +831,14 @@
       "importPasteClipboard": "從剪貼簿貼上",
       "importSubmit": "匯入",
       "importInvalidInput": "這不是有效的分享連結或權杖。",
-      "selectAll": "所有人（{{count}}）"
+      "selectAll": "所有人（{{count}}）",
+      "incomingEndpointMismatch": "此分享來自另一套自訂雲端。請先設定對應的雲端點再匯入。",
+      "incomingConnectionError": "無法連線雲端服務。請檢查網路後重試。",
+      "incomingIncompatibleError": "雲端服務回傳了不相容的分享資料。請更新 ORGII 或檢查雲端部署。",
+      "incomingServerError": "雲端服務暫時無法解析此分享，請重試。",
+      "incomingAlreadyOnDevice": "此 session 已在本機，無需建立重複副本。",
+      "incomingOpenExisting": "開啟 session",
+      "incomingRetry": "重試"
     },
     "agentRunner": {
       "title": "Agent 任務執行器",
@@ -769,7 +864,8 @@
         "openBadge_one": "{{count}} 個待認領的 Agent 任務",
         "openBadge": "{{count}} 個待認領的 Agent 任務",
         "activeBadge_one": "{{count}} 個 Agent 正在處理此工作階段",
-        "activeBadge": "{{count}} 個 Agent 正在處理此工作階段"
+        "activeBadge": "{{count}} 個 Agent 正在處理此工作階段",
+        "mentionSuggestion": "將這則評論指派給 Agent"
       },
       "toggleLabel": "評論",
       "notesButton": "工作階段備註",
@@ -807,7 +903,9 @@
       "addressRoundScope": "逐輪評論",
       "addressConfirm_one": "處理 {{count}} 條評論",
       "addressConfirm_other": "處理 {{count}} 條評論",
-      "agentAuthor": "Agent @{{name}}"
+      "agentAuthor": "Agent @{{name}}",
+      "mentionMembers": "提及成員",
+      "searchMembers": "搜尋成員"
     },
     "billing": {
       "openFailed": "無法開啟帳單頁，請重試。"
@@ -817,6 +915,165 @@
       "help": "設定本組織儲存庫中的工作階段，成員最少必須分享到什麼等級。成員無法設得更低。「無最低要求」維持目前行為",
       "optionNone": "無最低要求",
       "memberNote": "組織管理員要求至少分享到{{mode}}，因此你無法將工作階段設得比這更低"
+    },
+    "sessionExpired": "ORG2 雲端登入已過期，請重新登入後繼續。",
+    "sessionRef": {
+      "chipLabel": "團隊工作階段",
+      "notMember": "你不是此工作階段所屬組織的成員。",
+      "signInRequired": "登入 ORG2 Cloud 以開啟此工作階段。",
+      "sessionNotFound": "該工作階段不屬於此組織。",
+      "notPublished": "先將此工作階段共享給某個組織，再複製引用。",
+      "chooseOrg": "此工作階段屬於多個組織。切換到你要引用的組織，然後重新複製。",
+      "opening": "正在開啟團隊會話…"
+    },
+    "signedInAs": "已登入：{{name}}",
+    "renameDisplayName": "編輯顯示名稱",
+    "renameSaved": "顯示名稱已更新",
+    "renameFailed": "顯示名稱更新失敗",
+    "download": {
+      "title": "正在下載團隊會話…",
+      "events": "{{loaded}} / {{total}} 筆事件",
+      "eta": "預計剩餘 {{eta}}",
+      "finalizing": "正在整理…",
+      "complete": "下載完成",
+      "estimate": "該會話有 {{count}} 個事件待下載（約 {{eta}}）",
+      "start": "開始下載",
+      "pause": "暫停",
+      "paused": "已暫停",
+      "resume": "繼續"
+    },
+    "channels": {
+      "title": "頻道",
+      "createAction": "建立頻道",
+      "createFirst": "建立一個頻道",
+      "manageMembers": "管理成員",
+      "archiveAction": "封存頻道",
+      "unarchive": "取消封存",
+      "unarchiveFailed": "取消封存失敗",
+      "deleteAction": "刪除頻道",
+      "leave": "退出頻道",
+      "archivedGroup": "已封存",
+      "loadError": "無法載入頻道",
+      "settings": {
+        "action": "頻道設定",
+        "title": "#{{name}} 的設定",
+        "submit": "儲存",
+        "managerRequired": "只有頻道管理員才能編輯此頻道",
+        "error": "更新失敗，請重試。"
+      },
+      "local": {
+        "quotaExceeded": "此裝置的頻道數量已達上限",
+        "archiveBody": "封存後，頻道將從側邊欄隱藏。歷史紀錄會保留，之後可以隨時取消封存",
+        "deleteWarning": "此操作將永久刪除該頻道，且無法復原"
+      },
+      "cancel": "取消",
+      "create": {
+        "title": "建立頻道",
+        "nameLabel": "名稱",
+        "namePlaceholder": "例如：code-review",
+        "topicLabel": "主題",
+        "topicOptional": "（選填）",
+        "topicPlaceholder": "這個頻道要聊什麼？",
+        "visibilityLabel": "可見性",
+        "publicTitle": "公開",
+        "publicDesc": "組織內所有人都可以檢視並加入討論",
+        "privateTitle": "私密",
+        "privateDesc": "只有受邀成員才能檢視此頻道",
+        "membersLabel": "新增成員",
+        "membersHint": "你將自動成為頻道管理員",
+        "membersLoading": "正在載入成員…",
+        "membersEmpty": "組織裡還沒有其他成員",
+        "postPolicyLabel": "誰可以發言",
+        "postPolicyEveryone": "所有人",
+        "postPolicyManagers": "僅頻道管理員",
+        "submit": "建立",
+        "nameTaken": "該名稱已被使用",
+        "quotaExceeded": "該組織的頻道數量已達上限",
+        "error": "頻道建立失敗，請重試。"
+      },
+      "archive": {
+        "title": "封存 #{{name}}？",
+        "body": "封存後，頻道將對所有人從側邊欄隱藏。歷史紀錄會保留，之後可以隨時取消封存",
+        "confirm": "封存",
+        "managerRequired": "只有頻道管理員才能封存此頻道",
+        "error": "封存失敗，請重試。"
+      },
+      "delete": {
+        "title": "刪除 #{{name}}？",
+        "warning": "此操作將為所有人永久刪除該頻道，且無法復原",
+        "acknowledge": "是的，永久刪除該頻道",
+        "confirm": "刪除",
+        "adminRequired": "只有組織管理員才能刪除頻道",
+        "error": "刪除失敗，請重試。"
+      },
+      "members": {
+        "title": "#{{name}} 的成員",
+        "loading": "正在載入成員…",
+        "empty": "此頻道還沒有成員",
+        "loadError": "無法載入頻道成員，請重試。",
+        "managerBadge": "管理員",
+        "you": "你",
+        "addLabel": "新增成員",
+        "addEmpty": "組織內所有人都已加入此頻道",
+        "addSubmit": "新增",
+        "actions": "成員操作",
+        "remove": "移出頻道",
+        "makeManager": "設為頻道管理員",
+        "removeManager": "取消頻道管理員",
+        "leave": "退出頻道",
+        "lastManager": "請先指定另一位管理員",
+        "error": "操作失敗，請重試。"
+      },
+      "feed": {
+        "composerPlaceholder": "傳送訊息到 #{{name}}",
+        "save": "儲存",
+        "edit": "編輯訊息",
+        "delete": "刪除訊息",
+        "edited": "（已編輯）",
+        "deletedMessage": "訊息已刪除",
+        "today": "今天",
+        "yesterday": "昨天",
+        "you": "你",
+        "memberCount": "{{memberCount}} 位成員",
+        "emptyTitle": "這裡是 #{{name}} 的開始",
+        "emptySubtitle": "傳送第一則訊息，開啟對話",
+        "missingTitle": "頻道已不存在",
+        "missingSubtitle": "此頻道已從這台裝置刪除",
+        "cloudPendingTitle": "尚無訊息",
+        "cloudPendingSubtitle": "雲端頻道的歷史訊息將隨下一次後端升級提供",
+        "cloudComposerDisabled": "雲端頻道尚不支援傳送訊息——本次發布僅包含頻道建立與成員管理，傳訊功能將隨下一次後端升級提供",
+        "errorEmpty": "請先輸入訊息",
+        "errorTooLong": "訊息過長（最多 4000 個字元）",
+        "errorQuota": "此頻道在這台裝置上的訊息數量已達上限",
+        "errorGeneric": "訊息傳送失敗，請再試一次。",
+        "dropSessionHint": "放開以將該工作階段加入為參考",
+        "messageBodyLabel": "頻道訊息",
+        "sessionCardMissing": "此裝置上不可用",
+        "sessionCardOpen": "開啟工作階段 {{name}}",
+        "workItemCardMissing": "此裝置上不可用",
+        "workItemCardLoading": "正在載入…",
+        "workItemCardOpen": "開啟工作項目 {{name}}",
+        "githubCardOpen": "在 GitHub 中開啟 {{name}}",
+        "githubIssue": "Issue",
+        "githubPullRequest": "Pull Request",
+        "archivedComposerDisabled": "該頻道已封存,取消封存後才能發言。",
+        "errorPostForbidden": "只有頻道管理員才能在此頻道發訊息",
+        "errorArchived": "此頻道已封存，無法傳送新訊息",
+        "errorChannelFull": "此頻道訊息數已達上限，無法傳送新訊息",
+        "errorChannelMissing": "此頻道已無法使用",
+        "errorMessageMissing": "該訊息已無法使用",
+        "loadError": "訊息載入失敗",
+        "loadingMessages": "正在載入訊息…",
+        "loadOlder": "載入較早的訊息",
+        "unknownAuthor": "團隊成員"
+      }
+    },
+    "backgroundUpload": {
+      "label": "背景上傳",
+      "help": "即使未開啟該組織，也會依照組織最低分享層級和各會話設定，在背景上傳符合條件的成員會話。",
+      "on": "開啟",
+      "off": "關閉",
+      "memberNote": "由管理員開啟——無需開啟該組織，符合條件的會話也會在背景上傳。"
     }
   }
 }

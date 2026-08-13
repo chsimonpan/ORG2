@@ -18,12 +18,15 @@ import React, {
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
+import { STORY_SYNC_ADAPTER } from "@src/api/http/integrations/syncConnections";
 import {
   type LabelEntry,
   type MemberEntry,
   projectApi,
   projectDataToUI,
+  projectSyncApi,
 } from "@src/api/http/project";
+import Message from "@src/components/Message";
 import Select from "@src/components/Select";
 import type { SelectOption } from "@src/components/Select";
 import TabPill from "@src/components/TabPill";
@@ -37,12 +40,15 @@ import WorkItemSection from "@src/modules/ProjectManager/WorkItems/components/Wo
 import { MultiSelectBar } from "@src/modules/ProjectManager/WorkItems/components/WorkItemsFooterBars";
 import { getProjectStatusConfig } from "@src/modules/ProjectManager/config/manage";
 import { useProjectManagerWorkItemsTabBarRegistration } from "@src/modules/ProjectManager/hooks/useProjectManagerWorkItemsTabBarRegistration";
+import type { ProjectManagerBreadcrumbSegment } from "@src/modules/ProjectManager/shared/components/ProjectManagerBreadcrumb";
+import VirtualizedGroupedList from "@src/modules/ProjectManager/shared/components/VirtualizedGroupedList";
 import { PROJECT_MANAGER_PLACEHOLDER_PLACEMENT } from "@src/modules/ProjectManager/shared/placeholderTokens";
 import {
   WORKSPACE_SOURCE,
   type WorkspaceProject,
   loadWorkspaceLinearProjects,
 } from "@src/modules/ProjectManager/workspaceAggregate";
+import { WorkstationHeaderSectionSeparator } from "@src/modules/WorkStation/shared";
 import { Placeholder } from "@src/modules/shared/layouts/blocks";
 import { ContentSearchPalette } from "@src/scaffold/GlobalSpotlight/palettes";
 import { projectListRefreshAtom } from "@src/store/project/projectAtom";
@@ -68,7 +74,7 @@ const log = createLogger("ProjectsPage");
 const SECTION_BASE_CONFIG = getProjectStatusConfig("planned");
 
 export interface ProjectsPageProps {
-  breadcrumbSegments?: readonly { label: string }[];
+  breadcrumbSegments?: readonly ProjectManagerBreadcrumbSegment[];
   /** Callback to open a project as a tab (in the unified tab system) */
   onOpenProject?: (
     projectId: string,
@@ -120,6 +126,9 @@ const ProjectsPage: React.FC<ProjectsPageProps> = ({
     new Set()
   );
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [unlinkingProjectId, setUnlinkingProjectId] = useState<string | null>(
+    null
+  );
   const [workspaceSourceMode, setWorkspaceSourceMode] =
     useState<WorkspaceSourceMode>("local_only");
 
@@ -140,53 +149,61 @@ const ProjectsPage: React.FC<ProjectsPageProps> = ({
   const [fileProjectsLoading, setFileProjectsLoading] = useState(false);
   const [fileProjectsLoaded, setFileProjectsLoaded] = useState(false);
   const fileProjectsLoadedRef = useRef(false);
+  const loadLifecycleRef = useRef({ mounted: true, generation: 0 });
   const [fileError, setFileError] = useState<string | null>(null);
 
-  const loadProjectsForRepo = useCallback(
-    async (cancelled?: { current: boolean }) => {
-      setFileProjectsLoading(true);
-      setFileError(null);
-      try {
-        const [projectsData, linearProjects] = await Promise.all([
-          projectApi.readProjects({ orgId }),
-          includeExternalSources ? loadWorkspaceLinearProjects() : [],
-        ]);
-        if (cancelled?.current) return;
-        const localProjects = projectsData.map((project) =>
-          projectDataToUI(project, {
-            labelMap: EMPTY_LABEL_MAP,
-            memberMap: EMPTY_MEMBER_MAP,
-          })
-        );
-        setFileProjects([...localProjects, ...linearProjects]);
-        fileProjectsLoadedRef.current = true;
-        setFileProjectsLoaded(true);
-      } catch (err) {
-        if (cancelled?.current) return;
-        log.error("[ProjectsPage] Failed to load projects:", err);
-        if (!fileProjectsLoadedRef.current) {
-          setFileProjects([]);
-        }
-        setFileError(
-          err instanceof Error ? err.message : t("projects.loadProjectsFailed")
-        );
-      } finally {
-        if (!cancelled?.current) setFileProjectsLoading(false);
+  useEffect(() => {
+    const lifecycle = loadLifecycleRef.current;
+    lifecycle.mounted = true;
+    return () => {
+      lifecycle.mounted = false;
+      lifecycle.generation += 1;
+    };
+  }, []);
+
+  const loadProjectsForRepo = useCallback(async () => {
+    const generation = ++loadLifecycleRef.current.generation;
+    const isCurrent = () => {
+      const lifecycle = loadLifecycleRef.current;
+      return lifecycle.mounted && lifecycle.generation === generation;
+    };
+    setFileProjectsLoading(true);
+    setFileError(null);
+    try {
+      const [projectsData, linearProjects] = await Promise.all([
+        projectApi.readProjects({ orgId }),
+        includeExternalSources ? loadWorkspaceLinearProjects() : [],
+      ]);
+      if (!isCurrent()) return;
+      const localProjects = projectsData.map((project) =>
+        projectDataToUI(project, {
+          labelMap: EMPTY_LABEL_MAP,
+          memberMap: EMPTY_MEMBER_MAP,
+        })
+      );
+      setFileProjects([...localProjects, ...linearProjects]);
+      fileProjectsLoadedRef.current = true;
+      setFileProjectsLoaded(true);
+    } catch (err) {
+      if (!isCurrent()) return;
+      log.error("[ProjectsPage] Failed to load projects:", err);
+      if (!fileProjectsLoadedRef.current) {
+        setFileProjects([]);
       }
-    },
-    [includeExternalSources, orgId, t]
-  );
+      setFileError(
+        err instanceof Error ? err.message : t("projects.loadProjectsFailed")
+      );
+    } finally {
+      if (isCurrent()) setFileProjectsLoading(false);
+    }
+  }, [includeExternalSources, orgId, t]);
 
   const loadFileProjects = useCallback(async () => {
     await loadProjectsForRepo();
   }, [loadProjectsForRepo]);
 
   useEffect(() => {
-    const cancelled = { current: false };
-    loadProjectsForRepo(cancelled);
-    return () => {
-      cancelled.current = true;
-    };
+    void loadProjectsForRepo();
   }, [loadProjectsForRepo, refreshSignal]);
 
   useProjectDataChanged(
@@ -251,6 +268,15 @@ const ProjectsPage: React.FC<ProjectsPageProps> = ({
   const isProjectDeletable = useCallback(
     (project: WorkspaceProject) =>
       project.workspaceSource?.source !== WORKSPACE_SOURCE.LINEAR &&
+      canAdministerProjectOrg(project.orgId),
+    [canAdministerProjectOrg]
+  );
+
+  const isProjectSourceUnlinkable = useCallback(
+    (project: WorkspaceProject) =>
+      project.workspaceSource?.source !== WORKSPACE_SOURCE.LINEAR &&
+      project.syncAdapterId === STORY_SYNC_ADAPTER.GITHUB &&
+      Boolean(project.slug) &&
       canAdministerProjectOrg(project.orgId),
     [canAdministerProjectOrg]
   );
@@ -405,6 +431,53 @@ const ProjectsPage: React.FC<ProjectsPageProps> = ({
     [loadFileProjects]
   );
 
+  const handleUnlinkProjectSource = useCallback(
+    async (project: WorkspaceProject) => {
+      if (
+        unlinkingProjectId !== null ||
+        !project.slug ||
+        !isProjectSourceUnlinkable(project)
+      ) {
+        return;
+      }
+
+      const confirmed = await confirmDestructiveAction({
+        title: t("settings.sync.adapterPicker.detachProjectTitle", {
+          project: project.name,
+        }),
+        message: t("settings.sync.adapterPicker.detachProjectDescription"),
+        okLabel: t("settings.sync.adapterPicker.detachProjectMenuLabel"),
+        cancelLabel: t("common:actions.cancel"),
+      });
+      if (!confirmed) return;
+
+      setUnlinkingProjectId(project.id);
+      try {
+        await projectSyncApi.detachAdapter(project.slug);
+        setSelectedProjectIds((previous) => {
+          const next = new Set(previous);
+          next.delete(project.id);
+          return next;
+        });
+        await loadFileProjects();
+        Message.success(
+          t("settings.sync.adapterPicker.detachProjectSuccess", {
+            project: project.name,
+          })
+        );
+      } catch (error) {
+        Message.error(
+          t("settings.sync.errors.detachFailed", {
+            error: error instanceof Error ? error.message : String(error),
+          })
+        );
+      } finally {
+        setUnlinkingProjectId(null);
+      }
+    },
+    [isProjectSourceUnlinkable, loadFileProjects, t, unlinkingProjectId]
+  );
+
   const handleGroupModeChange = useCallback(
     (value: string | number | (string | number)[]) => {
       if (Array.isArray(value)) return;
@@ -428,18 +501,21 @@ const ProjectsPage: React.FC<ProjectsPageProps> = ({
     setWorkspaceSourceMode(key as WorkspaceSourceMode);
   }, []);
 
-  const groupModeSelect = (
-    <Select
-      value={groupMode}
-      onChange={handleGroupModeChange}
-      options={groupModeOptions}
-      size="small"
-      variant="ghost"
-      radius="lg"
-      dropdownWidthMode="auto"
-      dropdownAlign="right"
-      className="w-auto"
-    />
+  const groupModeSelect = useMemo(
+    () => (
+      <Select
+        value={groupMode}
+        onChange={handleGroupModeChange}
+        options={groupModeOptions}
+        size="small"
+        appearance="ghost"
+        radius="lg"
+        dropdownWidthMode="auto"
+        dropdownAlign="left"
+        className="w-auto"
+      />
+    ),
+    [groupMode, groupModeOptions, handleGroupModeChange]
   );
 
   const sourceModeSwitch = useMemo(() => {
@@ -462,21 +538,33 @@ const ProjectsPage: React.FC<ProjectsPageProps> = ({
     workspaceSourceTabs,
   ]);
 
-  const headerLeadingControls = useMemo(() => {
-    if (!orgSurfaceControls && !sourceModeSwitch) return undefined;
-    if (!orgSurfaceControls) return sourceModeSwitch;
-    if (!sourceModeSwitch) return orgSurfaceControls;
-    return (
-      <>
+  const headerLeadingControls = useMemo(
+    () => (
+      <div className="contents">
         {orgSurfaceControls}
-        <span
-          className="pointer-events-none mx-1.5 h-4 w-px shrink-0 bg-border-2"
-          aria-hidden
-        />
+        {orgSurfaceControls && <WorkstationHeaderSectionSeparator />}
+        {groupModeSelect}
+        {sourceModeSwitch && <WorkstationHeaderSectionSeparator />}
         {sourceModeSwitch}
-      </>
-    );
-  }, [orgSurfaceControls, sourceModeSwitch]);
+      </div>
+    ),
+    [groupModeSelect, orgSurfaceControls, sourceModeSwitch]
+  );
+
+  const virtualProjectGroups = useMemo(
+    () =>
+      groupedProjects.map((group) => ({
+        key: group.key,
+        group,
+        items: group.projects,
+      })),
+    [groupedProjects]
+  );
+
+  const defaultProjectGroupExpanded = useCallback(
+    () => collapseAllSignal === 0,
+    [collapseAllSignal]
+  );
 
   useProjectManagerWorkItemsTabBarRegistration({
     workStationTabId,
@@ -505,7 +593,6 @@ const ProjectsPage: React.FC<ProjectsPageProps> = ({
         onAddProject={onAddProject}
         refreshLoading={loading}
         leadingControls={headerLeadingControls}
-        trailingControls={groupModeSelect}
         publishToWorkstationHeader={publishToWorkstationHeader}
         workstationHeaderHost={workstationHeaderHost}
       />
@@ -561,10 +648,14 @@ const ProjectsPage: React.FC<ProjectsPageProps> = ({
                 fillParentHeight
               />
             ) : (
-              <div className="flex flex-col pb-3">
-                {groupedProjects.map((group) => (
+              <VirtualizedGroupedList
+                key={collapseAllSignal}
+                testId="projects-virtual-list"
+                groups={virtualProjectGroups}
+                defaultExpanded={defaultProjectGroupExpanded}
+                getItemKey={(project) => project.id}
+                renderGroupHeader={(group, expanded, onExpandedChange) => (
                   <WorkItemSection
-                    key={`${group.key}:${collapseAllSignal}`}
                     status={group.key}
                     statusConfig={{
                       ...SECTION_BASE_CONFIG,
@@ -574,27 +665,37 @@ const ProjectsPage: React.FC<ProjectsPageProps> = ({
                     }}
                     label={group.label}
                     count={group.projects.length}
-                    defaultExpanded={collapseAllSignal === 0}
-                  >
-                    {group.projects.map((project) => (
-                      <ProjectRow
-                        key={project.id}
-                        project={project}
-                        isSelected={false}
-                        isChecked={selectedProjectIds.has(project.id)}
-                        showCheckboxes={showCheckboxesOnAllRows}
-                        onSelect={handleProjectClick}
-                        onCheckedChange={handleProjectCheckedChange}
-                        onDelete={
-                          isProjectDeletable(project)
-                            ? handleDeleteProject
-                            : undefined
-                        }
-                      />
-                    ))}
-                  </WorkItemSection>
-                ))}
-              </div>
+                    expanded={expanded}
+                    onExpandedChange={onExpandedChange}
+                    virtualizedHeader
+                    variant="table"
+                  />
+                )}
+                renderItem={(project) => (
+                  <div>
+                    <ProjectRow
+                      project={project}
+                      isSelected={false}
+                      variant="table"
+                      isChecked={selectedProjectIds.has(project.id)}
+                      showCheckboxes={showCheckboxesOnAllRows}
+                      onSelect={handleProjectClick}
+                      onCheckedChange={handleProjectCheckedChange}
+                      onUnlinkSource={
+                        isProjectSourceUnlinkable(project)
+                          ? () => void handleUnlinkProjectSource(project)
+                          : undefined
+                      }
+                      unlinkingSource={unlinkingProjectId === project.id}
+                      onDelete={
+                        isProjectDeletable(project)
+                          ? handleDeleteProject
+                          : undefined
+                      }
+                    />
+                  </div>
+                )}
+              />
             )}
           </div>
         </div>

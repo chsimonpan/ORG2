@@ -13,6 +13,7 @@ import {
   createChatSessionTab,
   createFileTab,
   createGitDiffTab,
+  createGitHubIssueDetailTab,
   createProjectDashboardTab,
   createProjectWorkItemsIndexTab,
   createProjectWorkItemsTab,
@@ -21,6 +22,7 @@ import {
   createSourceControlTab,
   createSubagentDetailTab,
   createTerminalTab,
+  createWorkItemDetailTab,
   fileTabFactory,
   settingsTabFactory,
 } from "../factories";
@@ -317,7 +319,7 @@ describe("Chat Factories", () => {
       expect(tab.id).toBe("chat-session:session-1");
       expect(tab.type).toBe("chat-session");
       expect(tab.title).toBe("Chat Title");
-      expect(tab.icon).toBe("MessageSquare");
+      expect(tab.icon).toBeUndefined();
       expect(tab.data.workItemId).toBe("work-1");
     });
   });
@@ -378,6 +380,61 @@ describe("Project Manager Factories", () => {
       expect(tab.id).toBe("project-workitems:project-1");
       expect(tab.title).toBe("My Project");
       expect(tab.icon).toBe("ChartNoAxesGantt");
+    });
+  });
+
+  describe("createWorkItemDetailTab", () => {
+    it("preserves GitHub issue status for tab icon selection", () => {
+      const tab = createWorkItemDetailTab(
+        "project-1",
+        "ORGII issues",
+        "issue-128",
+        "community issue",
+        "orgii-issues",
+        undefined,
+        undefined,
+        "open"
+      );
+
+      expect(tab.data.workItemStatus).toBe("open");
+    });
+
+    it("isolates identical standalone short IDs by organization", () => {
+      const personal = createWorkItemDetailTab(
+        undefined,
+        "Standalone Work Items",
+        "WI-0001",
+        "Personal item"
+      );
+      const cloud = createWorkItemDetailTab(
+        undefined,
+        "Cloud",
+        "WI-0001",
+        "Cloud item",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "cloud-org"
+      );
+
+      expect(personal.id).not.toBe(cloud.id);
+      expect(cloud.data.orgId).toBe("cloud-org");
+    });
+  });
+
+  describe("createGitHubIssueDetailTab", () => {
+    it("keeps independent state scope for each dedicated issue tab", () => {
+      const tab = createGitHubIssueDetailTab(
+        42,
+        "Ship dedicated tabs",
+        "/workspace/ORGII",
+        "https://github.com/orgii/ORGII.git",
+        "repo:/workspace/ORGII:issue:42"
+      );
+
+      expect(tab.id).toBe("github-issue-detail:/workspace/ORGII:42");
+      expect(tab.data.stateScopeKey).toBe("repo:/workspace/ORGII:issue:42");
     });
   });
 });

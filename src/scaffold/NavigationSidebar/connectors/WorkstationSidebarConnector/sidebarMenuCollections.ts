@@ -13,71 +13,112 @@ import { toChatPanelTuiSessionId } from "@src/util/ui/terminal/chatPanelTuiSessi
 
 import { separator } from "../useSessionMenuItems/menuItemBuilders";
 import {
+  buildChannelsPinnedMenuItems,
   buildDraftMenuItems,
   buildPinnedMenuItems,
   buildProjectsPinnedMenuItems,
 } from "../workstationSidebarMenuItems";
-import type { WorkstationSidebarKey } from "./types";
+import type { WorkstationSidebarViewKey } from "./WorkstationSidebarViewSwitcher";
 
 interface UsePinnedMenuItemsParams {
-  activeSidebarKey: WorkstationSidebarKey;
+  activeViewKey: WorkstationSidebarViewKey;
   createProjectLabel: string;
   createWorkItemLabel: string;
   importGithubIssuesLabel: string;
   kanbanLabel: string;
   newSessionLabel: string;
+  runtimeLabel: string;
+  teamInboxLabel: string;
+  teamInboxUnreadCount?: number;
   workItemDestinations: NavigationMenuItem[];
   t: TFunction<"navigation">;
 }
 
 interface UsePinnedMenuItemsResult {
   pinnedMenuItems: NavigationMenuItem[];
-  sessionPinnedMenuItems: NavigationMenuItem[];
 }
 
 export function usePinnedMenuItems({
-  activeSidebarKey,
+  activeViewKey,
   createProjectLabel,
   createWorkItemLabel,
   importGithubIssuesLabel,
   kanbanLabel,
   newSessionLabel,
+  runtimeLabel,
+  teamInboxLabel,
+  teamInboxUnreadCount,
   workItemDestinations,
   t,
 }: UsePinnedMenuItemsParams): UsePinnedMenuItemsResult {
+  const teamInboxUnreadAriaLabel = useMemo(
+    () =>
+      teamInboxUnreadCount
+        ? t("common:teamInbox.unreadCount", { count: teamInboxUnreadCount })
+        : undefined,
+    [t, teamInboxUnreadCount]
+  );
   const sessionPinnedMenuItems = useMemo<NavigationMenuItem[]>(
     () =>
       buildPinnedMenuItems({
         newSessionLabel,
         newSessionShortcut: getShortcutKeys("new_session"),
-        workItemsLabel: t("labels.workItems"),
-        workItemDestinations,
         kanbanLabel,
         kanbanShortcut: getShortcutKeys("open_kanban"),
+        runtimeLabel,
+        teamInboxLabel,
+        teamInboxUnreadCount,
+        teamInboxUnreadAriaLabel,
       }),
-    [kanbanLabel, newSessionLabel, workItemDestinations, t]
+    [
+      kanbanLabel,
+      newSessionLabel,
+      runtimeLabel,
+      teamInboxLabel,
+      teamInboxUnreadCount,
+      teamInboxUnreadAriaLabel,
+    ]
   );
   const projectsPinnedMenuItems = useMemo<NavigationMenuItem[]>(
     () =>
       buildProjectsPinnedMenuItems({
+        browseLabel: t("common:actions.browse"),
         createProjectLabel,
         createWorkItemLabel,
         importGithubIssuesLabel,
+        teamInboxLabel,
+        teamInboxUnreadCount,
+        teamInboxUnreadAriaLabel,
         workItemDestinations,
       }),
     [
       createProjectLabel,
       createWorkItemLabel,
       importGithubIssuesLabel,
+      teamInboxLabel,
+      teamInboxUnreadCount,
+      teamInboxUnreadAriaLabel,
+      t,
       workItemDestinations,
     ]
   );
+  const channelsPinnedMenuItems = useMemo(
+    () =>
+      buildChannelsPinnedMenuItems({
+        teamInboxLabel,
+        teamInboxUnreadCount,
+        teamInboxUnreadAriaLabel,
+      }),
+    [teamInboxLabel, teamInboxUnreadAriaLabel, teamInboxUnreadCount]
+  );
   const pinnedMenuItems =
-    activeSidebarKey === "projects"
+    activeViewKey === "work-items"
       ? projectsPinnedMenuItems
-      : sessionPinnedMenuItems;
+      : activeViewKey === "channels"
+        ? channelsPinnedMenuItems
+        : sessionPinnedMenuItems;
 
-  return { pinnedMenuItems, sessionPinnedMenuItems };
+  return { pinnedMenuItems };
 }
 
 export function useSessionSidebarMenuItems({

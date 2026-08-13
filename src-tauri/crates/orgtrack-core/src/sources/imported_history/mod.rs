@@ -3,6 +3,11 @@ pub mod managed_mirror;
 pub mod managed_roots;
 pub mod metadata;
 pub mod paths;
+#[cfg(feature = "git")]
+pub mod repo_identity;
+pub mod scan_snapshot;
+pub mod watermark;
+pub mod window;
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
@@ -20,6 +25,9 @@ pub const ACTION_TYPE_RAW: &str = "raw";
 pub const ACTION_TYPE_ASSISTANT: &str = "assistant";
 pub const ACTION_TYPE_THINKING: &str = "thinking";
 pub const ACTION_TYPE_TOOL_CALL: &str = "tool_call";
+pub const ACTION_TYPE_TASK_START: &str = "task_start";
+pub const ACTION_TYPE_TASK_COMPLETED: &str = "task_completed";
+pub const ACTION_TYPE_TASK_FAILED: &str = "task_failed";
 pub const FUNCTION_USER_MESSAGE: &str = "user_message";
 pub const FUNCTION_ASSISTANT: &str = "assistant";
 pub const FUNCTION_THINKING: &str = "thinking";
@@ -28,7 +36,36 @@ pub const FUNCTION_RUN_COMMAND_LINE: &str = "run_command_line";
 pub const FUNCTION_EDIT_FILE: &str = "edit_file_by_replace";
 pub const FUNCTION_CODE_SEARCH: &str = "grep";
 pub const FUNCTION_GLOB_FILE_SEARCH: &str = "glob_file_search";
+pub const FUNCTION_AWAIT_OUTPUT: &str = "await_output";
 pub const DEFAULT_LIST_LIMIT: usize = 200;
+
+/// Drop one unparsable record from a source sync instead of failing the sync.
+///
+/// A sync that raises leaves `sync_source_cache_from_conn` unreached, so *no*
+/// session of that source is written — and because the record keeps its old
+/// cache signature, the next scan re-reads the same file and fails the same
+/// way. One malformed transcript would permanently cost a provider its entire
+/// sidebar. Skipping keeps that record on its last-known cached row (or absent
+/// if never cached) and still eligible for a later retry, while every other
+/// session in the source syncs normally.
+pub fn skip_unparsable_record<T>(
+    source: &str,
+    source_session_id: &str,
+    outcome: Result<T, String>,
+) -> Option<T> {
+    match outcome {
+        Ok(value) => Some(value),
+        Err(error) => {
+            tracing::warn!(
+                source,
+                source_session_id,
+                error = %error,
+                "imported history: skipping record that failed to parse"
+            );
+            None
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ImportedHistoryLoader {
@@ -44,6 +81,13 @@ enum ImportedHistoryLoader {
     Warp,
     ZCode,
     Qoder,
+    MimoCode,
+    Omp,
+    Pi,
+    QoderCli,
+    QwenCode,
+    Copilot,
+    Kimi,
 }
 
 fn imported_history_loader(session_id: &str) -> Option<ImportedHistoryLoader> {
@@ -71,6 +115,20 @@ fn imported_history_loader(session_id: &str) -> Option<ImportedHistoryLoader> {
         Some(ImportedHistoryLoader::ZCode)
     } else if session_id.starts_with(super::qoder::history::QODER_SESSION_PREFIX) {
         Some(ImportedHistoryLoader::Qoder)
+    } else if session_id.starts_with(super::mimo_code::history::MIMO_CODE_SESSION_PREFIX) {
+        Some(ImportedHistoryLoader::MimoCode)
+    } else if session_id.starts_with(super::omp::history::OMP_SESSION_PREFIX) {
+        Some(ImportedHistoryLoader::Omp)
+    } else if session_id.starts_with(super::pi::history::PI_SESSION_PREFIX) {
+        Some(ImportedHistoryLoader::Pi)
+    } else if session_id.starts_with(super::qoder_cli::history::QODER_CLI_SESSION_PREFIX) {
+        Some(ImportedHistoryLoader::QoderCli)
+    } else if session_id.starts_with(super::qwen_code::history::QWEN_CODE_SESSION_PREFIX) {
+        Some(ImportedHistoryLoader::QwenCode)
+    } else if session_id.starts_with(super::copilot::SESSION_PREFIX) {
+        Some(ImportedHistoryLoader::Copilot)
+    } else if session_id.starts_with(super::kimi::history::KIMI_SESSION_PREFIX) {
+        Some(ImportedHistoryLoader::Kimi)
     } else {
         None
     }
@@ -126,6 +184,27 @@ pub fn load_activity_chunks_for_session(
         Some(ImportedHistoryLoader::Qoder) => {
             super::qoder::history::load_qoder_history_for_session(conn, session_id)?
         }
+        Some(ImportedHistoryLoader::MimoCode) => {
+            super::mimo_code::history::load_mimo_code_history_for_session(conn, session_id)?
+        }
+        Some(ImportedHistoryLoader::Omp) => {
+            super::omp::history::load_omp_history_for_session(conn, session_id)?
+        }
+        Some(ImportedHistoryLoader::Pi) => {
+            super::pi::history::load_pi_history_for_session(conn, session_id)?
+        }
+        Some(ImportedHistoryLoader::QoderCli) => {
+            super::qoder_cli::history::load_qoder_cli_history_for_session(conn, session_id)?
+        }
+        Some(ImportedHistoryLoader::QwenCode) => {
+            super::qwen_code::history::load_qwen_code_history_for_session(conn, session_id)?
+        }
+        Some(ImportedHistoryLoader::Copilot) => {
+            super::copilot::history::load_copilot_history_for_session(conn, session_id)?
+        }
+        Some(ImportedHistoryLoader::Kimi) => {
+            super::kimi::history::load_kimi_history_for_session(conn, session_id)?
+        }
         None => return Ok(None),
     };
     Ok(Some(chunks))
@@ -146,6 +225,8 @@ pub struct ImportedHistorySessionRow {
     pub background: bool,
     pub is_active: bool,
     pub repo_path: Option<String>,
+    pub repo_root_path: Option<String>,
+    pub repo_remote_urls: Vec<String>,
     pub storage_path: Option<String>,
     pub repo_name: Option<String>,
     pub branch: Option<String>,
@@ -183,6 +264,17 @@ pub struct ImportedHistorySidebarRow {
     pub is_active: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repo_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_root_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repo_remote_urls: Vec<String>,
+    /// Git branch recorded by the source application itself (Claude Code's
+    /// `gitBranch` transcript field, Cursor/Windsurf tracked-repo metadata).
+    /// Never derived by scanning the working copy: sources that do not report
+    /// a branch leave this absent, and so do rows cached before it was
+    /// carried onto the sidebar projection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     /// The source app's own transcript file — the store of record for an
     /// imported session, which never has a `sessions.db` copy. Absent for
     /// rows cached before the path was recorded.
@@ -190,6 +282,16 @@ pub struct ImportedHistorySidebarRow {
     pub storage_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Continuation-family identity elected from source metadata. Sidebar
+    /// consumers use it only to avoid rendering both a force-revealed active
+    /// sibling and the family's canonical roster row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub continuation_lineage_id: Option<String>,
+    /// ORGII-owned pin state, read from `imported_history_session_pin`.
+    /// A pin belongs to ORGII, not to the source app, so it is stored beside
+    /// the rebuildable cache rather than on it.
+    #[serde(default)]
+    pub pinned: bool,
     pub total_tokens: i64,
     pub files_changed: i64,
     pub lines_added: i64,
@@ -222,6 +324,8 @@ pub struct ImportedHistoryRowInput {
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub repo_path: Option<String>,
+    pub repo_root_path: Option<String>,
+    pub repo_remote_urls: Vec<String>,
     pub storage_path: Option<String>,
     pub branch: Option<String>,
     pub files_changed: i64,
@@ -238,6 +342,68 @@ pub struct ImportedToolCall {
     pub canonical_name: String,
     pub args: Value,
     pub created_at: String,
+}
+
+/// Parse-state map for tool calls awaiting their output row. Drains in
+/// insertion (file-appearance) order: `HashMap` iteration order is randomized
+/// per process, and a nondeterministic emit order changes positional chunk
+/// ids across re-ingests of an unchanged transcript, which the cloud sync
+/// plane sees as an endless chain mismatch and answers with epoch rewrites.
+pub struct PendingCallMap<T> {
+    entries: HashMap<String, (u64, T)>,
+    next_order: u64,
+}
+
+impl<T> Default for PendingCallMap<T> {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::new(),
+            next_order: 0,
+        }
+    }
+}
+
+impl<T> PendingCallMap<T> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&mut self, key: String, value: T) {
+        let order = self.next_order;
+        self.next_order += 1;
+        self.entries.insert(key, (order, value));
+    }
+
+    /// Insert under a caller-supplied order slot, so an entry that moves
+    /// between keys (or maps) keeps its original file position.
+    pub fn reinsert(&mut self, key: String, order: u64, value: T) {
+        self.next_order = self.next_order.max(order.saturating_add(1));
+        self.entries.insert(key, (order, value));
+    }
+
+    pub fn remove(&mut self, key: &str) -> Option<T> {
+        self.entries.remove(key).map(|(_, value)| value)
+    }
+
+    pub fn take(&mut self, key: &str) -> Option<(u64, T)> {
+        self.entries.remove(key)
+    }
+
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut T> {
+        self.entries.get_mut(key).map(|(_, value)| value)
+    }
+
+    pub fn drain_in_file_order(self) -> impl Iterator<Item = T> {
+        let mut entries = self.entries.into_iter().collect::<Vec<_>>();
+        entries.sort_unstable_by(
+            |(left_key, (left_order, _)), (right_key, (right_order, _))| {
+                left_order
+                    .cmp(right_order)
+                    .then_with(|| left_key.cmp(right_key))
+            },
+        );
+        entries.into_iter().map(|(_, (_, value))| value)
+    }
 }
 
 pub fn effective_limit(limit: usize) -> usize {
@@ -275,6 +441,8 @@ pub fn row_from_input(input: ImportedHistoryRowInput) -> ImportedHistorySessionR
         background: false,
         is_active: false,
         repo_path: input.repo_path,
+        repo_root_path: input.repo_root_path,
+        repo_remote_urls: input.repo_remote_urls,
         storage_path: input.storage_path,
         repo_name,
         branch: input.branch,
@@ -355,7 +523,10 @@ pub fn recent_paths_from_paths(
 /// the full prompt verbatim, so replay readers must strip these to recover
 /// what the user actually typed.
 const INTERNAL_CONTEXT_BLOCKS: &[(&str, &str)] = &[
-    ("<orgii_cli_exec_mode_bridge>", "</orgii_cli_exec_mode_bridge>"),
+    (
+        "<orgii_cli_exec_mode_bridge>",
+        "</orgii_cli_exec_mode_bridge>",
+    ),
     ("<ide_context>", "</ide_context>"),
 ];
 
@@ -398,6 +569,15 @@ pub fn strip_internal_context_blocks(text: &str) -> &str {
 /// [`strip_internal_context_blocks`].
 pub fn strip_orgii_exec_mode_bridge(text: &str) -> &str {
     strip_internal_context_blocks(text)
+}
+
+/// Anthropic-family transcripts mark harness-injected user lines with
+/// `isMeta: true` (command caveats, hook feedback, loop ticks) or
+/// `origin.kind == "task-notification"` (background-task completion wakes).
+/// Such lines are transcript plumbing, not conversational rounds: they must
+/// not open a turn, become a round preview, or title the session.
+pub fn is_harness_injected_user_marker(is_meta: bool, origin_kind: Option<&str>) -> bool {
+    is_meta || origin_kind == Some("task-notification")
 }
 
 pub fn user_message_chunk(
@@ -457,6 +637,24 @@ pub fn thinking_chunk(
         "observation": thought,
         "is_delta": false,
     });
+    chunk
+}
+
+/// Hidden lifecycle marker used by imported providers that expose explicit
+/// turn boundaries. The chat filters these action types, while metadata
+/// projection uses them to distinguish an active tail from a finished turn.
+pub fn task_lifecycle_chunk(
+    session_id: &str,
+    provider_slug: &str,
+    sequence: usize,
+    created_at: &str,
+    action_type: &str,
+    provider_turn_id: &str,
+) -> ActivityChunk {
+    let mut chunk = ActivityChunk::new(session_id, action_type, action_type);
+    chunk.chunk_id = format!("{provider_slug}-lifecycle-{sequence}-{action_type}");
+    chunk.created_at = created_at.to_string();
+    chunk.args = json!({ "providerTurnId": provider_turn_id });
     chunk
 }
 
@@ -737,11 +935,18 @@ mod impact_tests {
             ("warpapp-id", ImportedHistoryLoader::Warp),
             ("zcodeapp-id", ImportedHistoryLoader::ZCode),
             ("qoderapp-id", ImportedHistoryLoader::Qoder),
+            ("mimocodeapp-id", ImportedHistoryLoader::MimoCode),
+            ("ompapp-id", ImportedHistoryLoader::Omp),
+            ("piapp-id", ImportedHistoryLoader::Pi),
+            ("qodercliapp-id", ImportedHistoryLoader::QoderCli),
+            ("qwencodeapp-id", ImportedHistoryLoader::QwenCode),
+            ("kimihistoryapp-id", ImportedHistoryLoader::Kimi),
         ];
 
         for (session_id, expected) in cases {
             assert_eq!(imported_history_loader(session_id), Some(expected));
         }
+        assert_eq!(imported_history_loader("kimiapp-hook-id"), None);
         assert_eq!(imported_history_loader("org2-native-id"), None);
     }
 

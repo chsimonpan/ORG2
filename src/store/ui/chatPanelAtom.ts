@@ -12,7 +12,14 @@ import {
 } from "@src/store/settings/settingsAtom";
 import type { Project } from "@src/types/core/project";
 import type { WorkItem } from "@src/types/core/workItem";
+import { CHAT_PANEL_SURFACE_KIND } from "@src/types/ui/chatPanel";
+import type { ProjectOrgSurfaceView } from "@src/types/ui/projectOrg";
 import { createZodJsonStorage } from "@src/util/core/storage/zodStorage";
+
+export {
+  CHAT_PANEL_SURFACE_KIND,
+  type ChatPanelSurfaceKind,
+} from "@src/types/ui/chatPanel";
 
 // ============================================
 // Chat Panel Layout Atoms
@@ -212,14 +219,19 @@ export const chatTokenUsageVisibleAtom = atomWithStorage<boolean>(
 );
 chatTokenUsageVisibleAtom.debugLabel = "chatTokenUsageVisibleAtom";
 
-/** Whether the chat pane's bottom status bar (repo · branch · context) shows. */
-export const chatStatusBarVisibleAtom = atomWithStorage<boolean>(
-  "orgii:chatStatusBarVisible",
-  false,
-  undefined,
+/**
+ * Whether the per-round edits/reads summary card (`TurnMetadataFooter`)
+ * renders at the end of each agent turn. On by default; turning it off
+ * only hides the card — turn metadata is still indexed and still backs
+ * the composer files pill and Agent Station diff scoping.
+ */
+export const chatTurnMetadataVisibleAtom = atomWithStorage<boolean>(
+  "orgii:chatTurnMetadataVisible",
+  true,
+  createZodJsonStorage(z.boolean()),
   { getOnInit: true }
 );
-chatStatusBarVisibleAtom.debugLabel = "chatStatusBarVisibleAtom";
+chatTurnMetadataVisibleAtom.debugLabel = "chatTurnMetadataVisibleAtom";
 
 /** Presentation style for the chat panel model picker. */
 export type ModelPickerStyle = "spotlight" | "dropdown";
@@ -279,22 +291,40 @@ export const chatPanelCreateTargetAtom = atom<ChatPanelCreateTarget>(
 );
 chatPanelCreateTargetAtom.debugLabel = "chatPanelCreateTargetAtom";
 
-export const chatPanelStartPageOpenAtom = atom<boolean>(true);
-chatPanelStartPageOpenAtom.debugLabel = "chatPanelStartPageOpenAtom";
-
-export const CHAT_PANEL_START_PAGE_TAB = {
-  WORK: "work",
-  MANAGE: "manage",
-  RUNTIME: "runtime",
+export const CHAT_PANEL_COLLAB_ORG_SOURCE = {
+  LOCAL: "local",
+  CLOUD: "cloud",
 } as const;
 
-export type ChatPanelStartPageTab =
-  (typeof CHAT_PANEL_START_PAGE_TAB)[keyof typeof CHAT_PANEL_START_PAGE_TAB];
+export type ChatPanelCollabOrgSource =
+  (typeof CHAT_PANEL_COLLAB_ORG_SOURCE)[keyof typeof CHAT_PANEL_COLLAB_ORG_SOURCE];
 
-export const chatPanelStartPageTabAtom = atom<ChatPanelStartPageTab>(
-  CHAT_PANEL_START_PAGE_TAB.WORK
-);
-chatPanelStartPageTabAtom.debugLabel = "chatPanelStartPageTabAtom";
+export const CHAT_PANEL_COLLAB_ORG_MODE = {
+  CREATE: "create",
+  JOIN: "join",
+} as const;
+
+export type ChatPanelCollabOrgMode =
+  (typeof CHAT_PANEL_COLLAB_ORG_MODE)[keyof typeof CHAT_PANEL_COLLAB_ORG_MODE];
+
+/**
+ * One-shot navigation intent for an explicitly requested Add ORG form state.
+ * The creator consumes and clears it; authoritative organization state remains
+ * owned by the local/cloud organization stores.
+ */
+export interface ChatPanelCollabOrgCreateIntent {
+  requestId: number;
+  source: ChatPanelCollabOrgSource;
+  mode: ChatPanelCollabOrgMode;
+}
+
+export const chatPanelCollabOrgCreateIntentAtom =
+  atom<ChatPanelCollabOrgCreateIntent | null>(null);
+chatPanelCollabOrgCreateIntentAtom.debugLabel =
+  "chatPanelCollabOrgCreateIntentAtom";
+
+export const chatPanelStartPageOpenAtom = atom<boolean>(true);
+chatPanelStartPageOpenAtom.debugLabel = "chatPanelStartPageOpenAtom";
 
 export interface ChatPanelCreateProjectContext {
   orgId: string;
@@ -343,6 +373,7 @@ chatPanelSelectedWorkItemAtom.debugLabel = "chatPanelSelectedWorkItemAtom";
 export interface ChatPanelSelectedProject {
   project: Project;
   projectSlug: string;
+  projectSyncAdapterId?: string | null;
   orgId: string;
   orgName?: string;
 }
@@ -356,6 +387,10 @@ export interface ChatPanelSelectedProjectOrg {
   orgName: string;
   orgScope: "personal_org" | "project_org";
   orgSyncProvider?: string | null;
+  /** Optional surface requested by the action opening/focusing this ORG. */
+  initialView?: ProjectOrgSurfaceView;
+  /** Changes when an opener explicitly requests `initialView` again. */
+  initialViewRequestId?: number;
 }
 
 export const chatPanelSelectedProjectOrgAtom =
@@ -381,7 +416,30 @@ chatPanelSelectedWorkspaceAtom.debugLabel = "chatPanelSelectedWorkspaceAtom";
  */
 export interface ChatPanelSelectedCloudOrg {
   orgId: string;
+  /** Optional management surface requested by the action opening this ORG. */
+  initialView?: CloudOrgManagementView;
+  /** Changes when an opener explicitly requests `initialView` again. */
+  initialViewRequestId?: number;
 }
+
+export type CloudOrgManagementView = "general" | "sync" | "members";
+
+export const CLOUD_ORG_MANAGEMENT_VIEW = {
+  GENERAL: "general",
+  SYNC: "sync",
+  MEMBERS: "members",
+} as const satisfies Record<string, CloudOrgManagementView>;
+
+/** The explicit provider variant owned by the shared organization tab. */
+export type ChatPanelSelectedOrganization =
+  | {
+      kind: "cloud";
+      cloudOrg: ChatPanelSelectedCloudOrg;
+    }
+  | {
+      kind: "local";
+      projectOrg: ChatPanelSelectedProjectOrg;
+    };
 
 export const chatPanelSelectedCloudOrgAtom =
   atom<ChatPanelSelectedCloudOrg | null>(null);
@@ -396,10 +454,6 @@ chatPanelSelectedCloudOrgAtom.debugLabel = "chatPanelSelectedCloudOrgAtom";
  */
 export const chatPanelExploreOpenAtom = atom<boolean>(false);
 chatPanelExploreOpenAtom.debugLabel = "chatPanelExploreOpenAtom";
-
-export const chatPanelExploreAgentSearchEnabledAtom = atom<boolean>(false);
-chatPanelExploreAgentSearchEnabledAtom.debugLabel =
-  "chatPanelExploreAgentSearchEnabledAtom";
 
 /**
  * Selected tab on the chat-panel workspace overview surface
@@ -425,25 +479,6 @@ export const chatPanelWorkspaceOverviewTabAtom = atom<WorkspaceOverviewTab>(
 );
 chatPanelWorkspaceOverviewTabAtom.debugLabel =
   "chatPanelWorkspaceOverviewTabAtom";
-
-export const CHAT_PANEL_SURFACE_KIND = {
-  SESSION: "session",
-  BENCHMARK_SESSION_GROUP: "benchmarkSessionGroup",
-  NEW_PROJECT: "newProject",
-  NEW_GITHUB_ISSUES_PROJECT: "newGithubIssuesProject",
-  NEW_WORK_ITEM: "newWorkItem",
-  NEW_COLLAB_ORG: "newCollabOrg",
-  PROJECT: "project",
-  PROJECT_ORG: "projectOrg",
-  WORK_ITEM: "workItem",
-  WORKSPACE_DASHBOARD: "workspaceDashboard",
-  WORKSPACE_EXPLORE: "workspaceExplore",
-  WORKSPACE_OVERVIEW: "workspaceOverview",
-  CLOUD_ORG: "cloudOrg",
-} as const;
-
-export type ChatPanelSurfaceKind =
-  (typeof CHAT_PANEL_SURFACE_KIND)[keyof typeof CHAT_PANEL_SURFACE_KIND];
 
 export type ChatPanelSurfaceState =
   | { kind: typeof CHAT_PANEL_SURFACE_KIND.SESSION }
@@ -503,7 +538,6 @@ export type ChatPanelNavigateCommand =
       kind: typeof CHAT_PANEL_SURFACE_KIND.WORK_ITEM;
       workItem: ChatPanelSelectedWorkItem;
     }
-  | { kind: typeof CHAT_PANEL_SURFACE_KIND.WORKSPACE_DASHBOARD }
   | { kind: typeof CHAT_PANEL_SURFACE_KIND.WORKSPACE_EXPLORE }
   | {
       kind: typeof CHAT_PANEL_SURFACE_KIND.WORKSPACE_OVERVIEW;
@@ -528,6 +562,7 @@ function resetChatPanelSurfaceState(set: SetAtom): void {
   set(chatPanelSelectedCloudOrgAtom, null);
   set(chatPanelExploreOpenAtom, false);
   set(chatPanelCreateProjectContextAtom, null);
+  set(chatPanelCollabOrgCreateIntentAtom, null);
   set(chatPanelCreateTargetAtom, DEFAULT_CHAT_PANEL_CREATE_TARGET);
   set(chatPanelWorkspaceOverviewTabAtom, WORKSPACE_OVERVIEW_TAB.OVERVIEW);
 }
@@ -591,12 +626,6 @@ export const chatPanelNavigateAtom = atom(
       case CHAT_PANEL_SURFACE_KIND.WORK_ITEM:
         set(chatPanelContentModeAtom, CHAT_PANEL_CONTENT_MODE.NON_SESSION);
         set(chatPanelSelectedWorkItemAtom, command.workItem);
-        return;
-      case CHAT_PANEL_SURFACE_KIND.WORKSPACE_DASHBOARD:
-        // Legacy dashboard navigation now lands on Launchpad's Manage tab.
-        set(chatPanelContentModeAtom, CHAT_PANEL_CONTENT_MODE.SESSION);
-        set(chatPanelStartPageTabAtom, CHAT_PANEL_START_PAGE_TAB.MANAGE);
-        set(chatPanelStartPageOpenAtom, true);
         return;
       case CHAT_PANEL_SURFACE_KIND.WORKSPACE_EXPLORE:
         set(chatPanelContentModeAtom, CHAT_PANEL_CONTENT_MODE.NON_SESSION);
@@ -692,10 +721,10 @@ export const activeChatPanelSurfaceAtom = atom<ChatPanelSurfaceState>((get) => {
 activeChatPanelSurfaceAtom.debugLabel = "activeChatPanelSurfaceAtom";
 
 /**
- * Whether the chat-panel slot covers the entire main content area.
- * Maximizing is purely a slot-side affordance; the underlying station
- * mode never changes, so un-maximize requires no bookkeeping. Persisted
- * so a maximized layout survives reloads.
+ * The user's persisted preference for whether the chat-panel slot covers the
+ * entire main content area. The active tab and viewport may force the effective
+ * layout full-screen temporarily, but that layout is derived without mutating
+ * this preference or the underlying Station mode.
  */
 export const chatPanelMaximizedAtom = atomWithStorage<boolean>(
   "orgii:chatPanelMaximized",

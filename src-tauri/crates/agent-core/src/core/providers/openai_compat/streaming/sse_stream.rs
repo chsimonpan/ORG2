@@ -23,7 +23,7 @@ use crate::providers::openai_policy::ChatTokenLimitField;
 use crate::providers::registry::provider_id;
 use crate::providers::safe_truncate::safe_truncate_utf8;
 use crate::providers::traits::{
-    finish_reason as finish, LLMResponse, ProviderError, StreamDelta, StreamErrorKind,
+    finish_reason as finish, usage_key, LLMResponse, ProviderError, StreamDelta, StreamErrorKind,
     ToolCallDelta, ToolCallRequest,
 };
 use crate::providers::wire_sanitize::{
@@ -57,7 +57,7 @@ pub(super) async fn run_chat_streaming(
     messages: &[Value],
     tools: Option<&[Value]>,
     model: &str,
-    max_tokens: Option<u32>,
+    max_tokens: u32,
     _temperature: f32,
     on_delta: &(dyn Fn(StreamDelta) + Send + Sync),
     cancel_flag: Option<&std::sync::atomic::AtomicBool>,
@@ -85,15 +85,7 @@ pub(super) async fn run_chat_streaming(
     let url = this.chat_url(&base_model);
 
     let sanitized_messages = sanitize_openai_compat_messages(messages);
-    // DeepSeek chat completions are text-only: image_url blocks must be
-    // replaced with text placeholders. The provider-spec check alone misses
-    // DeepSeek models routed through aggregators (e.g. zenmux), so also match
-    // the resolved wire model id.
-    let is_deepseek_wire = crate::providers::wire_sanitize::is_deepseek_text_only_wire(
-        this.provider_spec.name,
-        &resolved_model,
-    );
-    let wire_messages = if is_deepseek_wire {
+    let wire_messages = if this.provider_spec.name == provider_id::DEEPSEEK {
         sanitize_deepseek_messages(&sanitized_messages)
     } else {
         super::super::wire_expand::expand_tool_images_for_openai_wire(&sanitized_messages)
@@ -140,12 +132,12 @@ pub(super) async fn run_chat_streaming(
             None
         },
         max_tokens: match wire_policy.token_limit_field {
-            ChatTokenLimitField::MaxTokens => max_tokens,
+            ChatTokenLimitField::MaxTokens => Some(max_tokens),
             ChatTokenLimitField::MaxCompletionTokens => None,
         },
         max_completion_tokens: match wire_policy.token_limit_field {
             ChatTokenLimitField::MaxTokens => None,
-            ChatTokenLimitField::MaxCompletionTokens => max_tokens,
+            ChatTokenLimitField::MaxCompletionTokens => Some(max_tokens),
         },
         temperature: if wire_policy.send_temperature {
             Some(_temperature)
@@ -328,9 +320,11 @@ pub(super) async fn run_chat_streaming(
 
         buffer.push_str(&String::from_utf8_lossy(&chunk));
 
-        while let Some(line_end) = buffer.find('\n') {
-            let line = buffer[..line_end].trim().to_string();
-            buffer = buffer[line_end + 1..].to_string();
+        let mut consumed = 0usize;
+        while let Some(relative_end) = buffer[consumed..].find('\n') {
+            let line_end = consumed + relative_end;
+            let line = buffer[consumed..line_end].trim();
+            consumed = line_end + 1;
 
             if line.is_empty() || line.starts_with(':') {
                 continue;
@@ -522,23 +516,26 @@ pub(super) async fn run_chat_streaming(
 
             // Usage (usually on final chunk when stream_options.include_usage=true)
             if let Some(ref usage) = chunk.usage {
+                let normalized_usage = usage.to_usage_map();
                 debug!(
-                    "[streaming-usage] OpenAI chunk usage: prompt={}, completion={}, total={}",
-                    usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
+                    "[streaming-usage] OpenAI chunk usage: prompt={}, completion={}, total={}, cache_read={}, cache_write={}",
+                    usage.prompt_tokens,
+                    usage.completion_tokens,
+                    usage.total_tokens,
+                    normalized_usage
+                        .get(usage_key::CACHE_READ_TOKENS)
+                        .copied()
+                        .unwrap_or(0),
+                    normalized_usage
+                        .get(usage_key::CACHE_WRITE_TOKENS)
+                        .copied()
+                        .unwrap_or(0),
                 );
-                final_usage.insert("prompt_tokens".to_string(), usage.prompt_tokens);
-                final_usage.insert("completion_tokens".to_string(), usage.completion_tokens);
-                final_usage.insert("total_tokens".to_string(), usage.total_tokens);
-                if let Some(ref details) = usage.prompt_tokens_details {
-                    if details.cached_tokens > 0 {
-                        debug!(
-                            "[streaming-usage] OpenAI cached_tokens={}",
-                            details.cached_tokens
-                        );
-                        final_usage.insert("cache_read_tokens".to_string(), details.cached_tokens);
-                    }
-                }
+                final_usage.extend(normalized_usage);
             }
+        }
+        if consumed > 0 {
+            buffer.drain(..consumed);
         }
         if stream_done {
             break;
@@ -684,7 +681,7 @@ pub(super) async fn run_chat_streaming(
 mod tests {
     use super::*;
     use crate::providers::registry::{find_by_name, provider_id};
-    use crate::providers::traits::{LLMProvider, ProviderConfig};
+    use crate::providers::traits::{usage_key, LLMProvider, ProviderConfig};
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -758,7 +755,7 @@ mod tests {
                     }
                 })]),
                 "test-model",
-                Some(1024),
+                1024,
                 0.0,
                 &|_| {},
                 None,
@@ -773,5 +770,57 @@ mod tests {
         );
         assert!(response.tool_calls.is_empty());
         assert_eq!(response.content, None);
+    }
+
+    #[tokio::test]
+    async fn deepseek_stream_normalizes_cache_hit_and_miss_tokens() {
+        crate::test_support::install_crypto_provider_for_tests();
+
+        let server = MockServer::start().await;
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1200,\"completion_tokens\":300,\"total_tokens\":1500,\"prompt_cache_hit_tokens\":800,\"prompt_cache_miss_tokens\":400}}\n\n",
+            "data: [DONE]\n\n"
+        );
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(body),
+            )
+            .mount(&server)
+            .await;
+
+        let spec = find_by_name(provider_id::DEEPSEEK).expect("DeepSeek provider registered");
+        let client = OpenAICompatClient::new(
+            ProviderConfig {
+                api_key: "test-key".to_string(),
+                api_base: Some(server.uri()),
+                extra_headers: HashMap::new(),
+                is_azure: false,
+            },
+            spec,
+            "deepseek-chat".to_string(),
+        );
+
+        let response = client
+            .chat_streaming(
+                &[serde_json::json!({"role": "user", "content": "hello"})],
+                None,
+                "deepseek-chat",
+                1024,
+                0.0,
+                &|_| {},
+                None,
+            )
+            .await
+            .expect("DeepSeek stream should parse");
+
+        assert_eq!(response.usage[usage_key::PROMPT_TOKENS], 400);
+        assert_eq!(response.usage[usage_key::COMPLETION_TOKENS], 300);
+        assert_eq!(response.usage[usage_key::TOTAL_TOKENS], 1500);
+        assert_eq!(response.usage[usage_key::CACHE_READ_TOKENS], 800);
+        assert!(!response.usage.contains_key(usage_key::CACHE_WRITE_TOKENS));
     }
 }

@@ -94,6 +94,8 @@ pub fn batch_update_work_items(
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
+// Batch tests construct sparse updates incrementally for scenario readability.
 mod tests {
     use super::*;
     use crate::projects::io::labels::write_labels;
@@ -139,9 +141,11 @@ mod tests {
             labels: vec![],
             milestone: None,
             parent: None,
+            stage: None,
             start_date: None,
             target_date: None,
             created_by: None,
+            origin_session: None,
             created_at: String::new(),
             updated_at: String::new(),
             deleted_at: None,
@@ -151,6 +155,7 @@ mod tests {
             history: vec![],
             delegations: vec![],
             linked_sessions: vec![],
+            handoff: None,
             proof_of_work: None,
             orchestrator_config: None,
             orchestrator_state: None,

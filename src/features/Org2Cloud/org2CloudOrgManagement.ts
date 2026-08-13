@@ -10,6 +10,8 @@
  * (`cloud_list_invites`) never returns the code or even the hash — a lost
  * plaintext means minting a new invite.
  */
+import { ORG2_CLOUD_OFFICIAL_SUPABASE_URL } from "./config";
+import { isFetchTransportError } from "./org2CloudFetchRetry";
 
 // ---------------------------------------------------------------------------
 // Invite code generation / hashing
@@ -56,25 +58,29 @@ export async function sha256Hex(value: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Invite deep link (orgii://cloud/join?invite=…)
+// Invite links
 //
-// Rides the SAME OS-level `orgii://` scheme as the collaboration links
-// (registered in src-tauri/tauri.conf.json `deep-link.desktop.schemes`), so
-// no Rust change is needed — `useDeepLinkHandler` receives the raw URL from
-// the Tauri deep-link plugin and branches on the `cloud` host here, exactly
-// like `store/collaboration/deepLink.ts` does for `collaboration`.
+// Shareable links use HTTPS so messaging clients recognize them. The invite
+// is kept in the URL fragment (never sent to the web host), whose landing page
+// hands it to the existing OS-level `orgii://cloud/join` deep link.
 // ---------------------------------------------------------------------------
 
 export const CLOUD_INVITE_DEEP_LINK_HOST = "cloud";
 export const CLOUD_INVITE_DEEP_LINK_PATH = "join";
+// Page source lives in ORGII-cloud-infra (apps/invite-link); its code
+// validation must stay identical to CLOUD_INVITE_CODE_PATTERN below.
+export const CLOUD_INVITE_WEB_BASE_URL = "https://invite.org2.dev/";
+
+// Mirrors generateCloudInviteCode's output shape (32 bytes → 64 hex).
+const CLOUD_INVITE_CODE_PATTERN = /^[0-9a-f]{64}$/i;
 
 export interface CloudInviteDeepLink {
   inviteCode: string;
 }
 
 export function buildCloudInviteLink(inviteCode: string): string {
-  const params = new URLSearchParams({ invite: inviteCode });
-  return `orgii://${CLOUD_INVITE_DEEP_LINK_HOST}/${CLOUD_INVITE_DEEP_LINK_PATH}?${params.toString()}`;
+  const fragment = new URLSearchParams({ invite: inviteCode });
+  return `${CLOUD_INVITE_WEB_BASE_URL}#${fragment.toString()}`;
 }
 
 /**
@@ -114,10 +120,39 @@ export function parseCloudInviteDeepLink(
   }
 }
 
+function parseCloudInviteWebLink(url: string): CloudInviteDeepLink | null {
+  try {
+    const parsed = new URL(url.trim());
+    const expected = new URL(CLOUD_INVITE_WEB_BASE_URL);
+    if (
+      parsed.origin !== expected.origin ||
+      parsed.pathname.replace(/\/+$/, "/") !== expected.pathname
+    ) {
+      return null;
+    }
+
+    // New links use the fragment so the invite never appears in an HTTP
+    // request. Query parsing remains for already-shared compatibility links.
+    const fragmentInvite = new URLSearchParams(parsed.hash.replace(/^#/, ""))
+      .get("invite")
+      ?.trim();
+    const queryInvite = parsed.searchParams.get("invite")?.trim();
+    const inviteCode = fragmentInvite || queryInvite;
+    if (!inviteCode || !CLOUD_INVITE_CODE_PATTERN.test(inviteCode)) {
+      return null;
+    }
+    // The handoff page lowercases the code before building the deep link —
+    // match it so the same link hashes identically clicked or pasted.
+    return { inviteCode: inviteCode.toLowerCase() };
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Join-form input: accepts either a pasted `orgii://cloud/join?...` link or
- * a raw invite code. Returns the bare code, or `null` when empty / a link
- * without a code.
+ * Join-form input: accepts a shareable HTTPS link, a direct
+ * `orgii://cloud/join?...` link, or a raw invite code. Returns the bare code,
+ * or `null` when empty / a link without a code.
  */
 export function parseCloudInviteInput(input: string): string | null {
   const trimmed = input.trim();
@@ -125,6 +160,10 @@ export function parseCloudInviteInput(input: string): string | null {
   if (trimmed.toLowerCase().startsWith("orgii://")) {
     return parseCloudInviteDeepLink(trimmed)?.inviteCode ?? null;
   }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return parseCloudInviteWebLink(trimmed)?.inviteCode ?? null;
+  }
+  if (trimmed.includes("://")) return null;
   return trimmed;
 }
 
@@ -132,19 +171,69 @@ export function parseCloudInviteInput(input: string): string | null {
 // Session share deep link (orgii://cloud/session?share=…, migration 0012)
 //
 // Same OS-level delivery as the invite link above. The token is the WHOLE
-// credential — no supabase coordinates ride in the link (the managed cloud
-// endpoint is baked into the app), and the resolve response carries the
-// org/session coordinates the guest needs for segment reads.
+// credential. Links also carry non-secret endpoint provenance so a receiver
+// with a custom endpoint configured does not accidentally resolve an
+// official share against the wrong cloud (or silently switch its account).
+// The resolve response carries the org/session coordinates for segment reads.
 // ---------------------------------------------------------------------------
 
 export const CLOUD_SHARE_DEEP_LINK_PATH = "session";
 
+export type CloudShareEndpointProvenance =
+  | { kind: "official" }
+  | { kind: "custom"; supabaseUrl: string }
+  | { kind: "current" };
+
 export interface CloudShareDeepLink {
   shareToken: string;
+  endpoint: CloudShareEndpointProvenance;
 }
 
-export function buildCloudSessionShareLink(shareToken: string): string {
-  const params = new URLSearchParams({ share: shareToken });
+export interface CloudShareLinkEndpoint {
+  isOfficial: boolean;
+  supabaseUrl: string;
+}
+
+const DEFAULT_CLOUD_SHARE_LINK_ENDPOINT: CloudShareLinkEndpoint = {
+  isOfficial: true,
+  supabaseUrl: "",
+};
+
+function normalizeCloudShareEndpointUrl(value: string): string | null {
+  try {
+    const url = new URL(value.trim());
+    const isSecure = url.protocol === "https:";
+    const isLoopbackHttp =
+      url.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    if (!isSecure && !isLoopbackHttp) return null;
+    return value.trim().replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
+export function buildCloudSessionShareLink(
+  shareToken: string,
+  endpoint: CloudShareLinkEndpoint = DEFAULT_CLOUD_SHARE_LINK_ENDPOINT
+): string {
+  // A custom endpoint override that points at the OFFICIAL deployment must
+  // mint an official link: a receiver on a stock build has no override
+  // configured, and a `custom` link would fail its endpoint-mismatch gate
+  // even though the token resolves against the managed cloud.
+  const isOfficial =
+    endpoint.isOfficial ||
+    normalizeCloudShareEndpointUrl(endpoint.supabaseUrl) ===
+      ORG2_CLOUD_OFFICIAL_SUPABASE_URL;
+  const params = new URLSearchParams({
+    share: shareToken,
+    endpoint: isOfficial ? "official" : "custom",
+  });
+  if (!isOfficial) {
+    const normalized = normalizeCloudShareEndpointUrl(endpoint.supabaseUrl);
+    if (!normalized) throw new Error("Invalid custom cloud endpoint URL");
+    params.set("endpointUrl", normalized);
+  }
   return `orgii://${CLOUD_INVITE_DEEP_LINK_HOST}/${CLOUD_SHARE_DEEP_LINK_PATH}?${params.toString()}`;
 }
 
@@ -175,8 +264,25 @@ export function parseCloudShareDeepLink(
 ): CloudShareDeepLink | null {
   if (!isCloudShareDeepLink(url)) return null;
   try {
-    const shareToken = new URL(url.trim()).searchParams.get("share")?.trim();
-    return shareToken ? { shareToken } : null;
+    const params = new URL(url.trim()).searchParams;
+    const shareToken = params.get("share")?.trim();
+    if (!shareToken) return null;
+    const endpointKind = params.get("endpoint")?.trim().toLowerCase();
+    // Pre-provenance links were emitted only during pre-release. Treat them
+    // as managed-cloud links; newly generated custom links are explicit.
+    if (!endpointKind || endpointKind === "official") {
+      return { shareToken, endpoint: { kind: "official" } };
+    }
+    if (endpointKind !== "custom") return null;
+    const supabaseUrl = normalizeCloudShareEndpointUrl(
+      params.get("endpointUrl") ?? ""
+    );
+    if (!supabaseUrl) return null;
+    // Heal already-minted links whose custom URL IS the official deployment.
+    if (supabaseUrl === ORG2_CLOUD_OFFICIAL_SUPABASE_URL) {
+      return { shareToken, endpoint: { kind: "official" } };
+    }
+    return { shareToken, endpoint: { kind: "custom", supabaseUrl } };
   } catch {
     return null;
   }
@@ -192,7 +298,7 @@ export function parseCloudShareInput(raw: string): CloudShareDeepLink | null {
     return parseCloudShareDeepLink(trimmed);
   }
   return CLOUD_SHARE_TOKEN_PATTERN.test(trimmed)
-    ? { shareToken: trimmed }
+    ? { shareToken: trimmed, endpoint: { kind: "current" } }
     : null;
 }
 
@@ -317,6 +423,7 @@ export const ORG2_MANAGEMENT_ERROR_CODES = [
   "ORG2_NOT_FOUND",
   "ORG2_USE_LEAVE_ORG",
   "ORG2_VALIDATION",
+  "ORG2_ALREADY_MEMBER",
   "ORG2_INVITE_INVALID",
   "ORG2_INVITE_REVOKED",
   "ORG2_INVITE_EXPIRED",
@@ -365,6 +472,7 @@ const MANAGEMENT_ERROR_KEY_BY_CODE: Partial<
   ORG2_FORBIDDEN: "cloud.orgManagement.errors.forbidden",
   ORG2_MEMBER_NOT_FOUND: "cloud.orgManagement.errors.memberNotFound",
   ORG2_VALIDATION: "cloud.orgManagement.errors.validation",
+  ORG2_ALREADY_MEMBER: "cloud.orgManagement.errors.alreadyMember",
   ORG2_INVITE_INVALID: "cloud.orgManagement.errors.inviteInvalid",
   ORG2_INVITE_REVOKED: "cloud.orgManagement.errors.inviteRevoked",
   ORG2_INVITE_EXPIRED: "cloud.orgManagement.errors.inviteExpired",
@@ -380,7 +488,9 @@ export function cloudManagementErrorKey(error: unknown): string | null {
 
 /**
  * Human message for a management failure: the translated specific message
- * when the code is recognized, the raw error message otherwise.
+ * when the code is recognized, a translated connection message for fetch
+ * transport failures (WebKit's raw "Load failed" is meaningless to users),
+ * the raw error message otherwise.
  */
 export function cloudManagementErrorMessage(
   error: unknown,
@@ -388,5 +498,8 @@ export function cloudManagementErrorMessage(
 ): string {
   const key = cloudManagementErrorKey(error);
   if (key) return translate(key);
+  if (isFetchTransportError(error)) {
+    return translate("cloud.orgManagement.errors.network");
+  }
   return error instanceof Error ? error.message : String(error);
 }

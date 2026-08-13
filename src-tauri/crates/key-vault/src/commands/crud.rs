@@ -3,10 +3,14 @@ use std::collections::HashMap;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use regex::Regex;
 
+use super::validate::{
+    invalidate_key_quota_runtime, key_can_refresh_quota, quota_credential_revision,
+};
 use crate::key_store::{
     AuthMethod, DefaultVariant, HealthStatus, ModelKey, ModelType, ModelVariant, ProviderProtocol,
-    ReasoningEffort, KEY_SERVICE,
+    KEY_SERVICE,
 };
+use crate::types::DiscoveredModel;
 // Re-exported here so consumers keep the established
 // `key_vault::commands::` path (matching `model_supports_output_config_effort`).
 pub use crate::key_store::{is_claude_official_oauth_token, is_official_anthropic_endpoint};
@@ -32,7 +36,7 @@ pub struct ModelAliasInfo {
     pub icon: Option<String>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct ModelVariantInfo {
     pub model: String,
     pub base_model: String,
@@ -43,10 +47,6 @@ pub struct ModelVariantInfo {
     /// doesn't erase the value written by `update_key_health`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_window_override: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_effort_override: Option<ReasoningEffort>,
 }
 
 impl From<ModelVariantInfo> for ModelVariant {
@@ -57,14 +57,12 @@ impl From<ModelVariantInfo> for ModelVariant {
             reasoning: v.reasoning,
             fast: v.fast,
             context_window: v.context_window.filter(|ctx| *ctx > 0),
-            context_window_override: v.context_window_override.filter(|ctx| *ctx > 0),
-            reasoning_effort_override: v.reasoning_effort_override,
         }
     }
 }
 
 /// Serializable per-base-model default variant for API responses
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct DefaultVariantInfo {
     pub base_model: String,
     pub model: String,
@@ -88,11 +86,9 @@ pub struct KeyInfo {
     pub account_metadata: HashMap<String, String>,
     pub available_models: Vec<String>,
     pub enabled_models: Vec<String>,
-    pub side_query_model: Option<String>,
     pub model_aliases: Vec<ModelAliasInfo>,
     pub model_variants: Vec<ModelVariantInfo>,
     pub default_variants: Vec<DefaultVariantInfo>,
-    pub model_slugs: Vec<crate::key_store::ModelSlug>,
     pub quota_info: Option<serde_json::Value>,
     pub description: Option<String>,
     pub has_local_key: bool,
@@ -112,6 +108,7 @@ pub struct KeyInfo {
     pub created_at: String,
     pub updated_at: String,
     pub enabled: bool,
+    pub can_refresh_quota: bool,
     pub supports_rust_agents: bool,
     pub can_launch_cli: bool,
     pub can_use_native_harness: bool,
@@ -175,7 +172,7 @@ fn supports_rust_agents(
 
     let has_usable_key_material = has_api_key || has_session_token;
     match entry.model_type {
-        ModelType::CursorCli | ModelType::OrgiiOrchestrator | ModelType::EmbeddingApi => false,
+        ModelType::CursorCli | ModelType::OrgiiOrchestrator => false,
         ModelType::ClaudeCode
         | ModelType::Codex
         | ModelType::Copilot
@@ -302,6 +299,7 @@ fn account_uses_anthropic_native_messages(entry: &ModelKey) -> bool {
 }
 
 pub const CLAUDE_CODE_OAUTH_MODELS: &[&str] = &[
+    "claude-opus-5",
     "claude-sonnet-5",
     "claude-fable-5",
     "claude-opus-4-8",
@@ -313,6 +311,7 @@ pub const CLAUDE_CODE_OAUTH_MODELS: &[&str] = &[
 ];
 
 pub const CLAUDE_CODE_OAUTH_DEFAULT_ENABLED_MODELS: &[&str] = &[
+    "claude-opus-5",
     "claude-sonnet-5",
     "claude-fable-5",
     "claude-opus-4-8",
@@ -332,7 +331,8 @@ pub const CODEX_OAUTH_MODELS: &[&str] = &[
     "codex-auto-review",
 ];
 
-pub const CODEX_OAUTH_DEFAULT_ENABLED_MODELS: &[&str] = &["gpt-5.6-sol"];
+pub const CODEX_OAUTH_DEFAULT_ENABLED_MODELS: &[&str] =
+    &["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
 
 /// Claude models whose Messages requests carry `output_config.effort`.
 pub fn model_supports_output_config_effort(model: &str) -> bool {
@@ -341,6 +341,8 @@ pub fn model_supports_output_config_effort(model: &str) -> bool {
         return false;
     }
     lower.contains("fable-5")
+        || lower.contains("mythos-5")
+        || lower.contains("opus-5")
         || lower.contains("opus-4-8")
         || lower.contains("opus-4-7")
         || lower.contains("opus-4-6")
@@ -411,8 +413,6 @@ fn effort_variants_for_base_model(
             reasoning: Some((*reasoning).to_string()),
             fast: false,
             context_window,
-            context_window_override: None,
-            reasoning_effort_override: None,
         });
         if has_thinking_toggle {
             variants.push(ModelVariantInfo {
@@ -421,8 +421,6 @@ fn effort_variants_for_base_model(
                 reasoning: Some((*reasoning).to_string()),
                 fast: false,
                 context_window,
-                context_window_override: None,
-                reasoning_effort_override: None,
             });
         }
     }
@@ -458,8 +456,6 @@ fn codex_effort_variants_for_base_model(base_model: &str) -> Vec<ModelVariantInf
             reasoning: Some(effort.to_string()),
             fast: false,
             context_window: None,
-            context_window_override: None,
-            reasoning_effort_override: None,
         });
         if supports_fast {
             out.push(ModelVariantInfo {
@@ -468,12 +464,132 @@ fn codex_effort_variants_for_base_model(base_model: &str) -> Vec<ModelVariantInf
                 reasoning: Some(effort.to_string()),
                 fast: true,
                 context_window: None,
-                context_window_override: None,
-                reasoning_effort_override: None,
             });
         }
     }
     out
+}
+
+fn discovered_codex_variants(model: &DiscoveredModel) -> Vec<ModelVariantInfo> {
+    if model.supported_efforts.is_empty() {
+        return codex_effort_variants_for_base_model(&model.id);
+    }
+
+    let supports_fast = codex_model_supports_fast_tier(&model.id);
+    let mut out = Vec::new();
+    for effort in &model.supported_efforts {
+        if !matches!(
+            effort.as_str(),
+            "none" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
+        ) {
+            continue;
+        }
+        if effort == "none" {
+            continue;
+        }
+        out.push(ModelVariantInfo {
+            model: format!("{}-{effort}", model.id),
+            base_model: model.id.clone(),
+            reasoning: Some(effort.clone()),
+            fast: false,
+            context_window: model.context_window,
+        });
+        if supports_fast {
+            out.push(ModelVariantInfo {
+                model: format!("{}-{effort}-fast", model.id),
+                base_model: model.id.clone(),
+                reasoning: Some(effort.clone()),
+                fast: true,
+                context_window: model.context_window,
+            });
+        }
+    }
+    out
+}
+
+fn discovered_anthropic_variants(model: &DiscoveredModel) -> Vec<ModelVariantInfo> {
+    if model.supported_efforts.is_empty() {
+        return effort_variants_for_base_model(&model.id, model.context_window);
+    }
+
+    let has_thinking_toggle = model.supports_manual_thinking;
+    let mut variants = Vec::new();
+    for effort in &model.supported_efforts {
+        if !matches!(effort.as_str(), "low" | "medium" | "high" | "xhigh" | "max") {
+            continue;
+        }
+        let reasoning = if effort == "xhigh" {
+            "extra_high".to_string()
+        } else {
+            effort.clone()
+        };
+        variants.push(ModelVariantInfo {
+            model: format!("{}-{effort}", model.id),
+            base_model: model.id.clone(),
+            reasoning: Some(reasoning.clone()),
+            fast: false,
+            context_window: model.context_window,
+        });
+        if has_thinking_toggle {
+            variants.push(ModelVariantInfo {
+                model: format!("{}-thinking-{effort}", model.id),
+                base_model: model.id.clone(),
+                reasoning: Some(reasoning),
+                fast: false,
+                context_window: model.context_window,
+            });
+        }
+    }
+    variants
+}
+
+/// Produce the exact variant/default metadata rendered in the OAuth wizard
+/// and later returned for the saved account. Live capability metadata wins;
+/// the family tables supply metadata for the baked fallback catalog and for
+/// built-in Codex bases completed onto version-limited live discovery.
+pub(super) fn oauth_model_metadata(
+    agent_type: &str,
+    models: &[DiscoveredModel],
+) -> (Vec<ModelVariantInfo>, Vec<DefaultVariantInfo>) {
+    let mut variants = Vec::new();
+    let mut defaults = Vec::new();
+
+    for model in models {
+        let (model_variants, fallback_effort) = match agent_type {
+            "codex"
+                if !model.supported_efforts.is_empty()
+                    || codex_model_supports_variants(&model.id) =>
+            {
+                (discovered_codex_variants(model), Some("medium"))
+            }
+            "claude_code"
+                if !model.supported_efforts.is_empty()
+                    || model_supports_output_config_effort(&model.id) =>
+            {
+                (discovered_anthropic_variants(model), Some("high"))
+            }
+            _ => (Vec::new(), None),
+        };
+        append_missing_variants(&mut variants, model_variants);
+
+        let Some(fallback_effort) = fallback_effort else {
+            continue;
+        };
+        let effort = model.default_effort.as_deref().unwrap_or(fallback_effort);
+        let variant_id = if effort == "none" {
+            model.id.clone()
+        } else {
+            format!("{}-{effort}", model.id)
+        };
+        if variants.iter().any(|variant| variant.model == variant_id) {
+            defaults.push(DefaultVariantInfo {
+                base_model: model.id.clone(),
+                model: variant_id,
+            });
+        }
+    }
+
+    (variants, defaults)
 }
 
 /// GLM (Zhipu) models that expose a thinking-effort ladder (High / Max on top
@@ -502,8 +618,6 @@ fn glm_effort_variants_for_base_model(base_model: &str) -> Vec<ModelVariantInfo>
             reasoning: Some(effort.to_string()),
             fast: false,
             context_window: None,
-            context_window_override: None,
-            reasoning_effort_override: None,
         })
         .collect()
 }
@@ -590,8 +704,6 @@ fn model_variants_for_key(entry: &ModelKey) -> Vec<ModelVariantInfo> {
             reasoning: variant.reasoning.clone(),
             fast: variant.fast,
             context_window: variant.context_window.filter(|ctx| *ctx > 0),
-            context_window_override: variant.context_window_override.filter(|ctx| *ctx > 0),
-            reasoning_effort_override: variant.reasoning_effort_override,
         })
         .collect();
 
@@ -601,6 +713,13 @@ fn model_variants_for_key(entry: &ModelKey) -> Vec<ModelVariantInfo> {
             .iter()
             .filter(|model| codex_model_supports_variants(model))
         {
+            if entry
+                .model_variants
+                .iter()
+                .any(|variant| variant.base_model == *model && is_actionable_variant(variant))
+            {
+                continue;
+            }
             append_missing_variants(&mut out, codex_effort_variants_for_base_model(model));
         }
     }
@@ -682,6 +801,7 @@ impl From<ModelKey> for KeyInfo {
             can_use_native_harness,
         );
         let can_launch_cli = can_launch_cli(&entry);
+        let can_refresh_quota = key_can_refresh_quota(&entry);
 
         KeyInfo {
             id: entry.id.clone(),
@@ -700,7 +820,6 @@ impl From<ModelKey> for KeyInfo {
             account_metadata: entry.account_metadata.clone(),
             available_models: entry.available_models.clone(),
             enabled_models: entry.enabled_models.clone(),
-            side_query_model: entry.side_query_model.clone(),
             model_aliases: entry
                 .model_aliases
                 .iter()
@@ -712,7 +831,6 @@ impl From<ModelKey> for KeyInfo {
                 .collect(),
             model_variants: model_variants_for_key(&entry),
             default_variants: default_variants_for_key(&entry),
-            model_slugs: entry.model_slugs.clone(),
             quota_info: entry.quota_info.clone(),
             has_local_key: entry.has_local_key,
             is_listed: entry.is_listed,
@@ -743,6 +861,7 @@ impl From<ModelKey> for KeyInfo {
             created_at: entry.created_at.to_rfc3339(),
             updated_at: entry.updated_at.to_rfc3339(),
             enabled: entry.enabled,
+            can_refresh_quota,
             supports_rust_agents,
             can_launch_cli,
             can_use_native_harness,
@@ -766,68 +885,15 @@ pub struct SaveKeyRequest {
     pub account_metadata: Option<HashMap<String, String>>,
     pub available_models: Option<Vec<String>>,
     pub enabled_models: Option<Vec<String>>,
-    pub side_query_model: Option<String>,
     pub model_aliases: Option<Vec<ModelAliasInfo>>,
     pub model_variants: Option<Vec<ModelVariantInfo>>,
     pub default_variants: Option<Vec<DefaultVariantInfo>>,
-    pub model_slugs: Option<Vec<crate::key_store::ModelSlug>>,
     pub quota_info: Option<serde_json::Value>,
     pub has_local_key: Option<bool>,
     pub is_listed: Option<bool>,
     pub auth_method: Option<String>,
     pub listing_id: Option<String>,
     pub enabled: Option<bool>,
-}
-
-/// Narrow per-model runtime settings mutation.
-#[derive(serde::Deserialize)]
-pub struct UpdateModelRuntimeSettingsRequest {
-    pub key_id: String,
-    pub model: String,
-    #[serde(default)]
-    pub context_window_override: RuntimeSettingPatch<u64>,
-    #[serde(default)]
-    pub reasoning_effort_override: RuntimeSettingPatch<ReasoningEffort>,
-}
-
-/// Presence-aware JSON patch field. Omission uses `Default`; an explicit JSON
-/// null deserializes as `Clear`, and a non-null JSON value as `Set`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RuntimeSettingPatch<T> {
-    Unchanged,
-    Clear,
-    Set(T),
-}
-
-impl<T> RuntimeSettingPatch<T> {
-    fn into_option_option(self) -> Option<Option<T>> {
-        match self {
-            Self::Unchanged => None,
-            Self::Clear => Some(None),
-            Self::Set(value) => Some(Some(value)),
-        }
-    }
-}
-
-impl<T> Default for RuntimeSettingPatch<T> {
-    fn default() -> Self {
-        Self::Unchanged
-    }
-}
-
-impl<'de, T> serde::Deserialize<'de> for RuntimeSettingPatch<T>
-where
-    T: serde::Deserialize<'de>,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(match Option::<T>::deserialize(deserializer)? {
-            Some(value) => Self::Set(value),
-            None => Self::Clear,
-        })
-    }
 }
 
 /// Full key response (unmasked, for internal use)
@@ -880,8 +946,6 @@ impl From<ModelKey> for FullKeyResponse {
                     reasoning: variant.reasoning,
                     fast: variant.fast,
                     context_window: variant.context_window.filter(|ctx| *ctx > 0),
-                    context_window_override: variant.context_window_override.filter(|ctx| *ctx > 0),
-                    reasoning_effort_override: variant.reasoning_effort_override,
                 })
                 .collect(),
             default_variants: entry
@@ -976,6 +1040,7 @@ pub async fn save_key(request: SaveKeyRequest) -> Result<KeyInfo, String> {
             None => None,
         };
 
+        let prior_quota_revision = existing.as_ref().map(quota_credential_revision);
         let mut entry = if let Some(existing) = existing {
             existing
         } else {
@@ -1028,14 +1093,6 @@ pub async fn save_key(request: SaveKeyRequest) -> Result<KeyInfo, String> {
             // Filter out dated snapshot models (containing YYYY-MM-DD pattern)
             entry.enabled_models = filter_dated_models(enabled);
         }
-        if let Some(model) = request.side_query_model {
-            let model = model.trim();
-            entry.side_query_model = if model.is_empty() {
-                None
-            } else {
-                Some(model.to_string())
-            };
-        }
         if let Some(aliases) = request.model_aliases {
             entry.model_aliases = aliases
                 .into_iter()
@@ -1056,25 +1113,6 @@ pub async fn save_key(request: SaveKeyRequest) -> Result<KeyInfo, String> {
                     base_model: variant.base_model,
                     model: variant.model,
                 })
-                .collect();
-        }
-        if let Some(slugs) = request.model_slugs {
-            if let Some(slug) = slugs
-                .iter()
-                .find(|slug| !crate::key_store::ModelSlug::is_supported_slug(&slug.slug))
-            {
-                return Err(format!(
-                    "Unsupported provider slug '{}'. Supported values: {}",
-                    slug.slug,
-                    crate::key_store::ModelSlug::SUPPORTED_SLUGS.join(", ")
-                ));
-            }
-            // Deduplicate by base model; later entries win.
-            let mut seen = std::collections::HashSet::new();
-            entry.model_slugs = slugs
-                .into_iter()
-                .filter(|s| !s.model.trim().is_empty() && !s.slug.trim().is_empty())
-                .filter(|s| seen.insert(s.model.clone()))
                 .collect();
         }
         if let Some(quota) = request.quota_info {
@@ -1160,31 +1198,14 @@ pub async fn save_key(request: SaveKeyRequest) -> Result<KeyInfo, String> {
         }
 
         let saved = KEY_SERVICE.save_key(entry)?;
+        let saved_quota_revision = quota_credential_revision(&saved);
+        if prior_quota_revision.as_deref() != Some(saved_quota_revision.as_str()) {
+            invalidate_key_quota_runtime(&saved.id);
+        }
         key_info_from_entry(saved)
     })
     .await
     .map_err(|err| format!("Task join error: {}", err))?
-}
-
-/// Update only user-owned runtime settings for one discovered model. This
-/// intentionally does not accept `model_variants`, which are provider-owned
-/// discovery data and must not be replaced to edit a single setting.
-#[tauri::command]
-pub async fn update_model_runtime_settings(
-    request: UpdateModelRuntimeSettingsRequest,
-) -> Result<KeyInfo, String> {
-    tokio::task::spawn_blocking(move || {
-        KEY_SERVICE
-            .update_model_runtime_settings(
-                &request.key_id,
-                &request.model,
-                request.context_window_override.into_option_option(),
-                request.reasoning_effort_override.into_option_option(),
-            )
-            .map(KeyInfo::from)
-    })
-    .await
-    .map_err(|err| format!("Task join error: {err}"))?
 }
 
 /// Delete a key by agent type and optional ID
@@ -1192,7 +1213,16 @@ pub async fn update_model_runtime_settings(
 pub async fn delete_key(agent_type: String, key_id: Option<String>) -> Result<bool, String> {
     tokio::task::spawn_blocking(move || {
         let agent = ModelType::from_str(&agent_type).ok_or("Unknown agent type".to_string())?;
-        KEY_SERVICE.delete_key(&agent, key_id.as_deref())
+        let deleted_id = KEY_SERVICE
+            .get_key_checked(&agent, key_id.as_deref())?
+            .map(|key| key.id);
+        let deleted = KEY_SERVICE.delete_key(&agent, key_id.as_deref())?;
+        if deleted {
+            if let Some(deleted_id) = deleted_id {
+                invalidate_key_quota_runtime(&deleted_id);
+            }
+        }
+        Ok(deleted)
     })
     .await
     .map_err(|err| format!("Task join error: {}", err))?
@@ -1201,9 +1231,15 @@ pub async fn delete_key(agent_type: String, key_id: Option<String>) -> Result<bo
 /// Delete a key by ID only
 #[tauri::command]
 pub async fn delete_key_by_id(key_id: String) -> Result<bool, String> {
-    tokio::task::spawn_blocking(move || KEY_SERVICE.delete_key_by_id(&key_id))
-        .await
-        .map_err(|err| format!("Task join error: {}", err))?
+    tokio::task::spawn_blocking(move || {
+        let deleted = KEY_SERVICE.delete_key_by_id(&key_id)?;
+        if deleted {
+            invalidate_key_quota_runtime(&key_id);
+        }
+        Ok(deleted)
+    })
+    .await
+    .map_err(|err| format!("Task join error: {}", err))?
 }
 
 /// Update key health status after validation

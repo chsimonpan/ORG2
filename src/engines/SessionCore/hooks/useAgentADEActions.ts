@@ -46,6 +46,12 @@ import {
 import { adeManagerEnabledAtom } from "@src/store/ui/uiAtom";
 import { activeWorkspaceRootAtom } from "@src/store/workspace";
 import { getInstrumentedStore } from "@src/util/core/state/instrumentedStore";
+import { recordPushEvent } from "@src/util/monitoring/apiTracker";
+
+import {
+  extractInvokingSessionId,
+  resolveTrustedDispatchParams,
+} from "./adeReplyBinding";
 
 import {
   extractInvokingSessionId,
@@ -198,6 +204,7 @@ export function useAgentADEActions(): void {
 
     channel.onmessage = (rawMessage: string) => {
       if (cancelled) return;
+      recordPushEvent("channel", "ade-actions");
       try {
         const detail = parseAdeActionEnvelope(rawMessage);
         if (detail) dispatchAdeActionDetail(detail);

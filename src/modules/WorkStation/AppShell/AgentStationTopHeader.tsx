@@ -18,11 +18,12 @@ import React, { memo, startTransition, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 
+import { NoDragRegion } from "@src/components/WindowChrome";
 import CaptionBar from "@src/engines/Simulator/components/CaptionBar";
 import { useCurrentTurnLastAgentMessage } from "@src/engines/Simulator/hooks/useCurrentTurnLastAgentMessage";
 import { AppType } from "@src/engines/Simulator/types/appTypes";
 import {
-  COLLAPSED_SIDEBAR_CHROME_OFFSET,
+  getCollapsedSidebarChromeOffset,
   useShouldOffsetWorkStationTopBar,
 } from "@src/hooks/ui/sidebar/useCollapsedSidebarChromeOffset";
 import { HEADER_ICON_SIZE } from "@src/modules/WorkStation/shared/tokens";
@@ -45,7 +46,6 @@ import { sessionChatPositionAtom } from "@src/store/ui/workStationAtom";
 import { getViewportSize } from "@src/util/ui/window/viewport";
 
 import {
-  NoDragRegion,
   SimulatorAgentChip,
   StationModeChip,
   TabBarTrailingIconButton,
@@ -148,7 +148,7 @@ const AgentStationTopHeader: React.FC = memo(() => {
         style={
           {
             paddingLeft: shouldOffsetLeftChrome
-              ? COLLAPSED_SIDEBAR_CHROME_OFFSET
+              ? getCollapsedSidebarChromeOffset()
               : undefined,
             WebkitAppRegion: "drag",
           } as React.CSSProperties

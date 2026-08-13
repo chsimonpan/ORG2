@@ -106,9 +106,12 @@ pub enum ModelType {
     Autohand,
     Omp,
     Pi,
+    QoderCli,
+    TraeCli,
     // Direct API key providers
     AnthropicApi,
     OpenaiApi,
+    AtlascloudApi,
     DeepseekApi,
     GeminiApi,
     GroqApi,
@@ -130,8 +133,6 @@ pub enum ModelType {
     BedrockApi,
     /// Fully user-defined gateway: the user supplies base URL and protocol.
     CustomApi,
-    /// OpenAI-compatible embedding-only credential. Never used for chat.
-    EmbeddingApi,
     AzureOpenaiApi,
     /// Azure-hosted Anthropic gateway. Same auth shape as `AzureOpenaiApi`
     /// (an Azure resource key + base URL) but routed through the Anthropic
@@ -173,9 +174,12 @@ impl ModelType {
             ModelType::Autohand => "autohand",
             ModelType::Omp => "omp",
             ModelType::Pi => "pi",
+            ModelType::QoderCli => "qoder_cli",
+            ModelType::TraeCli => "trae_cli",
             // API key providers
             ModelType::AnthropicApi => "anthropic_api",
             ModelType::OpenaiApi => "openai_api",
+            ModelType::AtlascloudApi => "atlascloud_api",
             ModelType::DeepseekApi => "deepseek_api",
             ModelType::GeminiApi => "gemini_api",
             ModelType::GroqApi => "groq_api",
@@ -194,7 +198,6 @@ impl ModelType {
             ModelType::CherryinApi => "cherryin_api",
             ModelType::BedrockApi => "bedrock_api",
             ModelType::CustomApi => "custom_api",
-            ModelType::EmbeddingApi => "embedding_api",
             ModelType::AzureOpenaiApi => "azure_openai_api",
             ModelType::AzureAnthropicApi => "azure_anthropic_api",
             ModelType::OrgiiOrchestrator => "orgii_orchestrator",
@@ -233,9 +236,12 @@ impl ModelType {
             "autohand" => Some(ModelType::Autohand),
             "omp" => Some(ModelType::Omp),
             "pi" => Some(ModelType::Pi),
+            "qoder_cli" | "qodercli" => Some(ModelType::QoderCli),
+            "trae_cli" | "trae-agent" => Some(ModelType::TraeCli),
             // API key providers
             "anthropic_api" | "anthropic" => Some(ModelType::AnthropicApi),
             "openai_api" | "openai" => Some(ModelType::OpenaiApi),
+            "atlascloud_api" | "atlascloud" | "atlas_cloud" => Some(ModelType::AtlascloudApi),
             "deepseek_api" | "deepseek" => Some(ModelType::DeepseekApi),
             "gemini_api" | "gemini" | "google" => Some(ModelType::GeminiApi),
             "groq_api" | "groq" => Some(ModelType::GroqApi),
@@ -254,7 +260,6 @@ impl ModelType {
             "cherryin_api" | "cherryin" => Some(ModelType::CherryinApi),
             "bedrock_api" | "bedrock" => Some(ModelType::BedrockApi),
             "custom_api" | "custom" => Some(ModelType::CustomApi),
-            "embedding_api" | "embedding" => Some(ModelType::EmbeddingApi),
             "azure_openai_api" | "azure_openai" | "azure" => Some(ModelType::AzureOpenaiApi),
             "azure_anthropic_api" | "azure_anthropic" => Some(ModelType::AzureAnthropicApi),
             "orgii_orchestrator" | "orgii" => Some(ModelType::OrgiiOrchestrator),
@@ -265,16 +270,6 @@ impl ModelType {
     /// Returns `true` if this is a direct API key provider (not a CLI agent).
     pub fn is_api_key_provider(&self) -> bool {
         !self.is_cli_agent()
-    }
-
-    /// Embedding-only credentials are never valid chat/agent providers.
-    pub fn is_embedding_only(&self) -> bool {
-        matches!(self, ModelType::EmbeddingApi)
-    }
-
-    /// Providers eligible for generation runtimes and model selectors.
-    pub fn supports_generation(&self) -> bool {
-        !self.is_embedding_only()
     }
 
     /// Returns `true` if this is a CLI-based coding agent.
@@ -309,6 +304,8 @@ impl ModelType {
                 | ModelType::Autohand
                 | ModelType::Omp
                 | ModelType::Pi
+                | ModelType::QoderCli
+                | ModelType::TraeCli
         )
     }
 
@@ -439,10 +436,6 @@ pub struct ModelKey {
     pub last_validated_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub enabled_models: Vec<String>,
-    /// Explicit model used for side queries (compaction and memory extraction).
-    /// It must belong to this exact account's enabled/available model set.
-    #[serde(default)]
-    pub side_query_model: Option<String>,
     #[serde(default)]
     pub model_aliases: Vec<ModelAlias>,
     #[serde(default)]
@@ -452,9 +445,6 @@ pub struct ModelKey {
     /// concrete variant model id stored here (e.g. `claude-4.6-opus-high`).
     #[serde(default)]
     pub default_variants: Vec<DefaultVariant>,
-    /// Supplier slug pins per model (aggregator routing).
-    #[serde(default)]
-    pub model_slugs: Vec<ModelSlug>,
     #[serde(default)]
     pub oauth_refresh_failure_count: u32,
     #[serde(default, with = "optional_flexible_datetime")]
@@ -503,61 +493,6 @@ pub struct ModelVariant {
     /// `None` when the provider did not report one (official OpenAI/Anthropic).
     #[serde(default)]
     pub context_window: Option<u64>,
-    /// User-selected context window. This is intentionally distinct from the
-    /// provider-reported `context_window` above so discovery refreshes cannot
-    /// overwrite an explicit runtime setting.
-    #[serde(default)]
-    pub context_window_override: Option<u64>,
-    /// User-selected reasoning effort for this model (Auto when absent).
-    /// This must not be used for provider capability observations; those stay
-    /// in `reasoning`.
-    #[serde(default)]
-    pub reasoning_effort_override: Option<ReasoningEffort>,
-}
-
-/// Canonical user-selectable effort used by the Key Vault runtime setting.
-/// `Auto` is deliberately not representable: clearing the optional field is
-/// the only persisted representation of provider/model default behaviour.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ReasoningEffort {
-    None,
-    Baseline,
-    Low,
-    Medium,
-    High,
-    ExtraHigh,
-    Max,
-    Ultracode,
-}
-
-/// A user-configured ZenMux/aggregator supplier slug pin for one model.
-///
-/// When set, the effective model id sent to the aggregator becomes
-/// `{model}:{slug}` (e.g. `deepseek/deepseek-v4-flash:deepseek`), locking the
-/// upstream supplier instead of letting the aggregator free-route.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ModelSlug {
-    /// Base model id (e.g. `deepseek/deepseek-v4-flash`).
-    pub model: String,
-    /// Supplier slug (e.g. `deepseek`).
-    pub slug: String,
-}
-
-impl ModelSlug {
-    pub const SUPPORTED_SLUGS: [&str; 7] = [
-        "amazon-bedrock",
-        "google-vertex",
-        "anthropic",
-        "openai",
-        "bigmodel",
-        "deepseek",
-        "x-ai",
-    ];
-
-    pub fn is_supported_slug(slug: &str) -> bool {
-        Self::SUPPORTED_SLUGS.contains(&slug.trim())
-    }
 }
 
 /// A user-chosen default variant for one base model family. `base_model` is
@@ -595,11 +530,9 @@ impl ModelKey {
             last_validation_error: None,
             last_validated_at: None,
             enabled_models: Vec::new(),
-            side_query_model: None,
             model_aliases: Vec::new(),
             model_variants: Vec::new(),
             default_variants: Vec::new(),
-            model_slugs: Vec::new(),
             oauth_refresh_failure_count: 0,
             last_oauth_refresh_failed_at: None,
             temporary_unavailable_until: None,
@@ -609,6 +542,22 @@ impl ModelKey {
             rate_limit_reset_at: None,
             enabled: true,
         }
+    }
+
+    /// Whether this credential is a native OAuth account for the target CLI.
+    /// Cross-provider keys and native API keys must never enter OAuth retry,
+    /// token rotation, or OAuth health bookkeeping.
+    pub fn is_native_oauth_for(&self, target: &ModelType) -> bool {
+        self.auth_method == AuthMethod::Oauth
+            && &self.model_type == target
+            && matches!(target, ModelType::Codex | ModelType::ClaudeCode)
+    }
+
+    /// Whether this credential is handled by one of KeyService's OAuth
+    /// refresh implementations.
+    pub fn is_refreshable_native_oauth(&self) -> bool {
+        self.auth_method == AuthMethod::Oauth
+            && matches!(self.model_type, ModelType::Codex | ModelType::ClaudeCode)
     }
 
     /// Mask sensitive data for display
@@ -643,6 +592,28 @@ impl ModelKey {
                 )
             }
         })
+    }
+}
+
+/// Result of an explicit OAuth refresh attempt.
+///
+/// `AlreadyRotated` means another concurrent caller refreshed the access
+/// token while this caller waited for the per-key lock. `NotApplicable`
+/// makes API-key and cross-provider credentials impossible to mistake for a
+/// successful refresh.
+#[derive(Debug, Clone)]
+pub enum OAuthRefreshOutcome {
+    Refreshed(Box<ModelKey>),
+    AlreadyRotated(Box<ModelKey>),
+    NotApplicable,
+}
+
+impl OAuthRefreshOutcome {
+    pub fn into_key(self) -> Option<ModelKey> {
+        match self {
+            Self::Refreshed(key) | Self::AlreadyRotated(key) => Some(*key),
+            Self::NotApplicable => None,
+        }
     }
 }
 

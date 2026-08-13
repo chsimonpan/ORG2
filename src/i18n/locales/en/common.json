@@ -1,4 +1,48 @@
-﻿{
+{
+  "windowChrome": {
+    "menus": {
+      "file": "File",
+      "edit": "Edit",
+      "view": "View",
+      "window": "Window",
+      "help": "Help",
+      "aria": "{{label}} menu"
+    },
+    "items": {
+      "quitOrg2": "Quit ORG-2",
+      "newSession": "New Session",
+      "openFolder": "Open Folder...",
+      "addFolderToWorkspace": "Add Folder to Workspace...",
+      "saveWorkspaceAs": "Save Workspace As...",
+      "closeWindow": "Close Window",
+      "undo": "Undo",
+      "redo": "Redo",
+      "cut": "Cut",
+      "copy": "Copy",
+      "paste": "Paste",
+      "selectAll": "Select All",
+      "commandPalette": "Command Palette",
+      "goToFile": "Go to File...",
+      "selectModel": "Select Model...",
+      "switchWorkspace": "Switch Workspace...",
+      "switchBranch": "Switch Branch...",
+      "switchRunningLocation": "Switch Running Location...",
+      "settings": "Settings...",
+      "zoomIn": "Zoom In",
+      "zoomOut": "Zoom Out",
+      "actualSize": "Actual Size",
+      "minimize": "Minimize",
+      "maximizeRestore": "Maximize / Restore",
+      "maximizeWorkstation": "Maximize Workstation",
+      "documentation": "Documentation",
+      "reportIssue": "Report Issue"
+    },
+    "controls": {
+      "minimizeWindow": "Minimize window",
+      "maximizeRestoreWindow": "Maximize or restore window",
+      "closeWindow": "Close window"
+    }
+  },
   "toasts": {
     "replyEmpty": "Reply cannot be empty",
     "sessionNotFound": "Session not found",
@@ -169,6 +213,7 @@
     "goToSettings": "Go to Settings",
     "restart": "Restart",
     "switchToStation": "Switch to {{station}}",
+    "switchMethod": "Switch method",
     "rate": "Rate",
     "openInTab": "Open in Tab",
     "insert": "Insert",
@@ -194,6 +239,7 @@
     "viewOnGitHub": "View on GitHub",
     "selectRepository": "Select Repo",
     "collapse": "Collapse",
+    "toggle": "Toggle thread",
     "addRepo": "Add Repo",
     "addFolder": "Add Folder",
     "resume": "Resume",
@@ -286,6 +332,16 @@
     "testing": "Testing...",
     "empty": "Empty",
     "launching": "Launching..."
+  },
+  "workManagementTable": {
+    "columns": {
+      "id": "ID",
+      "titleContext": "Title / Context",
+      "status": "Status",
+      "assignee": "Assignee",
+      "updated": "Updated"
+    },
+    "selectRow": "Select {{id}}"
   },
   "pagination": {
     "totalItems": "{{count}} items",
@@ -557,6 +613,10 @@
     "failedToRenderEvent": "Failed to render event",
     "unknown": "Unknown error",
     "agentRequestFailed": "Agent request failed",
+    "codexLoginExpired": "Codex sign-in expired",
+    "codexLoginExpiredDescription": "Reconnect Codex to repair this account. You will return to this session after the new sign-in is saved.",
+    "reconnectCodex": "Reconnect Codex",
+    "technicalDetails": "Technical details",
     "failedToCopy": "Failed to copy",
     "api": {
       "titles": {
@@ -886,7 +946,7 @@
     "listDirParseSafetyHint": "Showing the first {{maxShown}} entries. The full listing was capped for performance.",
     "noTasks": "No tasks",
     "noTasksWithDates": "No tasks with dates to display",
-    "noTasksWithDatesSubtitle": "Add start and end dates to your tasks to see them here",
+    "noTasksWithDatesSubtitle": "Add start and end dates to show tasks here",
     "noItemsAvailable": "No items available",
     "loadingMore": "Loading more...",
     "scrollForMore": "Scroll for more",
@@ -894,10 +954,10 @@
     "typeToSearch": "Type to search",
     "pleaseTryAgain": "Please try again",
     "noFileOpen": "Open a file to start editing",
-    "selectFileToEdit": "Select a file from the explorer to start editing",
+    "selectFileToEdit": "Choose a file in Explorer",
     "noTabs": "Open a tab to get started",
     "noTabsOpen": "Open an item to get started",
-    "selectItemToStart": "Select an item from the sidebar to get started",
+    "selectItemToStart": "Choose an item in the sidebar",
     "noDatabaseConnected": "No database connected",
     "addConnectionToQuery": "Add a connection to start querying",
     "noQueryResults": "Run a query to see results",
@@ -906,7 +966,7 @@
     "chatHistoryEmpty": "No activity yet",
     "chatHistoryReloadHint": "Session data may not have loaded",
     "chatHistoryAgentWorking": "Agent is running",
-    "chatHistoryAgentWorkingHint": "Messages appear as the assistant streams. The toolbar may show idle until the first event.",
+    "chatHistoryAgentWorkingHint": "Messages appear with the first response; the toolbar may look idle until then",
     "pleaseSelect": "Please select",
     "noTerminalsAvailable": "Open a terminal to get started",
     "noSessionsFound": "No sessions found",
@@ -916,7 +976,7 @@
     "noQueryHistory": "No queries executed yet",
     "executedQueriesSubtitle": "Executed queries will appear here",
     "noOperationHistory": "No operations recorded yet",
-    "noOperationHistorySubtitle": "Commit, push, pull and other git operations will appear here",
+    "noOperationHistorySubtitle": "Git operations appear here",
     "selectFileToViewChanges": "Select a file to view changes",
     "failedToLoadHistory": "Failed to load history",
     "noGitHistory": "No Git history available",
@@ -983,13 +1043,12 @@
     "addCssVariables": "Add CSS variables to your project",
     "loadingAccountStatus": "Loading account status...",
     "noRepositorySelected": "No Repo Selected",
-    "selectRepositoryFromHome": "Please select a repo from the home page to open.",
     "noWorkspaceExplorerTitle": "No workspace open",
-    "noWorkspaceExplorerSubtitle": "Open workspace to view file",
+    "noWorkspaceExplorerSubtitle": "Open a workspace to view files",
     "cannotFindRepo": "Cannot find {{repoName}}",
     "lastSeenAtPath": "It was last seen at {{path}}",
     "unsupportedFileType": "Unsupported file type",
-    "binaryUnsupportedEncoding": "This file is not displayed because it is binary or uses an unsupported text encoding.",
+    "binaryUnsupportedEncoding": "Binary file or unsupported text encoding",
     "connectingDatabase": "Opening database...",
     "invalidDatabase": "Invalid Database File",
     "selectTable": "Select a table",
@@ -1014,7 +1073,8 @@
     "scanningFileExtensions": "Scanning file extensions...",
     "startBrowsingMarket": "Start browsing the marketplace",
     "previewUnavailable": "Preview unavailable",
-    "selectPrCommitToViewDiff": "Select a pull request commit from the header to view its diff."
+    "selectPrCommitToViewDiff": "Select a pull request commit from the header to view its diff.",
+    "selectRepositoryFromWorkspace": "Choose a workspace repository"
   },
   "inbox": {
     "searchPlaceholder": "Search messages...",
@@ -1092,6 +1152,18 @@
       "stopProcess": "Stop Process",
       "searchPlaceholder": "Search ports…",
       "noSearchResults": "No matching ports"
+    },
+    "ci": {
+      "openPullRequest": "Open pull request on GitHub",
+      "viewDetails": "View check details",
+      "refresh": "Refresh checks",
+      "unavailable": "Checks could not be read",
+      "sections": {
+        "failed": "Failed",
+        "running": "Running",
+        "skipped": "Skipped",
+        "passed": "Passed"
+      }
     },
     "noLanguageServicesActive": "No language services active",
     "linesSelected": "{{count}} lines selected",
@@ -1176,8 +1248,6 @@
       "tryVerifyUrl": "Verifying the URL is correct",
       "tryAgainLater": "Trying again later"
     },
-    "selectRepoFromHome": "Please select a repo from the home page",
-    "cloneRepoAgain": "Please clone the repo again from the home page",
     "unsavedChangesTitle": "Unsaved Changes",
     "prkPlaceholder": "PRJ",
     "gitSyncMenuTitle": "Git sync actions"
@@ -1217,7 +1287,14 @@
       "takeAction": "Take Action",
       "sync": "Sync",
       "createPR": "Create PR",
-      "stash": "Stash"
+      "stash": "Stash",
+      "compareBranch": "Compare branch"
+    },
+    "rail": {
+      "openTabs": "Open Tabs",
+      "closeItem": "Close {{label}}",
+      "expand": "Expand workstation info",
+      "collapse": "Collapse workstation info"
     },
     "messages": {
       "pushSuccess": "Successfully pushed changes to remote",
@@ -1257,10 +1334,16 @@
     },
     "pr": {
       "title": "Pull Request",
+      "linkedBranch": "Pull request #{{number}}",
       "baseBranch": "base",
       "noDescription": "No description provided.",
       "loadingConversation": "Loading…",
       "reviewNoBody": "Left review comments.",
+      "submitReview": "Submit review",
+      "reviewHeadNotice": "The review applies only if the displayed head commit still matches.",
+      "reviewDecision": "Review decision",
+      "reviewComment": "Review comment",
+      "reviewCommentPlaceholder": "Add a comment…",
       "commentPlaceholder": "Leave a comment…",
       "comment": "Comment",
       "approve": "Approve",
@@ -1268,6 +1351,85 @@
       "reply": "Reply",
       "replyPlaceholder": "Reply…",
       "reviewThreads": "Review comments",
+      "details": "Details",
+      "unknownAuthor": "Unknown",
+      "actions": {
+        "label": "Pull request actions",
+        "confirmMergeTitle": "Merge pull request?",
+        "confirmMergeMessage": "GitHub will merge the current pull request head into the base branch.",
+        "merge": "Merge",
+        "squash": "Squash and merge",
+        "rebase": "Rebase and merge",
+        "mergeSuccess": "Pull request merged",
+        "mergeRequested": "Merge requested",
+        "removedFromQueue": "Removed from merge queue",
+        "autoMergeEnabled": "Auto-merge enabled",
+        "autoMergeDisabled": "Auto-merge disabled",
+        "markReady": "Mark ready for review",
+        "markedReady": "Pull request marked ready for review",
+        "convertToDraft": "Convert to draft",
+        "convertedToDraft": "Pull request converted to draft",
+        "confirmCloseTitle": "Close pull request?",
+        "confirmCloseMessage": "The pull request will remain available and can be reopened later.",
+        "closeSuccess": "Pull request closed",
+        "reopen": "Reopen pull request",
+        "reopenSuccess": "Pull request reopened",
+        "enableAutoMerge": "Enable auto-merge",
+        "mergeWhenReady": "Merge when ready",
+        "disableAutoMerge": "Disable auto-merge",
+        "removeFromMergeQueue": "Remove from merge queue",
+        "merged": "Merged",
+        "closed": "Closed",
+        "draft": "Draft",
+        "inMergeQueue": "In merge queue",
+        "approvalRequired": "Approval required",
+        "changesRequested": "Changes requested",
+        "checksFailed": "Checks failed",
+        "checksPending": "Checks pending",
+        "mergeBlocked": "Merge blocked",
+        "searchReviewers": "Search reviewers",
+        "reviewersLoadFailed": "Could not load reviewers",
+        "noReviewers": "No reviewers available",
+        "reviewersUpdated": "Reviewers updated",
+        "reviewersCount_one": "{{count}} reviewer",
+        "reviewersCount_other": "{{count}} reviewers",
+        "reviewers": "Reviewers",
+        "tooltips": {
+          "merge": "Merge this pull request on GitHub",
+          "alreadyMerged": "This pull request is already merged",
+          "reopenBeforeMerging": "Reopen this pull request before merging",
+          "markReady": "Mark this pull request ready for review before merging",
+          "mergeQueue": "GitHub will merge this pull request through the merge queue",
+          "approvalRequired": "GitHub requires review approval before merging",
+          "changesRequested": "Requested changes must be resolved before merging",
+          "resolveConflicts": "Resolve merge conflicts before merging",
+          "checksFailed": "Required checks must pass before merging",
+          "checksPending": "Wait for required checks or enable auto-merge",
+          "mergeBlocked": "GitHub reports unmet merge requirements"
+        }
+      },
+      "activity": {
+        "opened": "opened this pull request",
+        "commented": "commented",
+        "approved": "approved these changes",
+        "changesRequested": "requested changes",
+        "reviewDismissed": "dismissed a review",
+        "reviewed": "reviewed"
+      },
+      "summary": {
+        "label": "Pull request summary",
+        "branch": "Branch",
+        "createdBy": "Created by",
+        "reviewers": "Reviewers",
+        "noReviewers": "No reviewers",
+        "comments": "Comments",
+        "commentCount_one": "{{count}} comment",
+        "commentCount_other": "{{count}} comments",
+        "checks": "Checks",
+        "noChecks": "No CI checks",
+        "checksFailed": "Checks failed",
+        "status": "Status"
+      },
       "tabs": {
         "conversation": "Conversation",
         "commits": "Commits",
@@ -1279,7 +1441,14 @@
         "noneHint": "No CI checks or statuses ran on this pull request's head commit.",
         "allPassed": "All checks passed",
         "someFailed": "Some checks failed",
-        "pending": "Checks in progress"
+        "pending": "Checks in progress",
+        "passedShort": "Passed",
+        "failedShort": "Failed",
+        "runningShort": "Running",
+        "checkingShort": "Checking",
+        "noneShort": "No CI",
+        "unavailableShort": "CI unavailable",
+        "branchStatus": "Pull request #{{number}} CI: {{status}}"
       },
       "commits": {
         "backToList": "All commits",
@@ -1338,6 +1507,85 @@
         "closed": "Closed",
         "completed": "Completed",
         "notPlanned": "Not planned"
+      },
+      "activity": {
+        "opened": "opened this issue",
+        "commented": "commented",
+        "timelineItemCount_one": "{{count}} timeline item",
+        "timelineItemCount_other": "{{count}} timeline items",
+        "noDescription": "No description provided.",
+        "assigned": "assigned",
+        "assignedIssue": "assigned this issue",
+        "unassigned": "unassigned",
+        "removedAssignee": "removed an assignee",
+        "added": "added",
+        "removed": "removed",
+        "label": "a label",
+        "milestoned": "added this issue to milestone {{milestone}}",
+        "demilestoned": "removed this issue from milestone {{milestone}}",
+        "closedViaCommit": "closed this issue via commit {{commit}}",
+        "closed": "closed this issue",
+        "reopened": "reopened this issue",
+        "renamedTo": "renamed this issue to",
+        "renamed": "renamed this issue",
+        "locked": "locked this conversation",
+        "lockedAs": "locked this conversation as {{reason}}",
+        "unlocked": "unlocked this conversation",
+        "crossReferencedFrom": "referenced this issue from",
+        "crossReferenced": "cross-referenced this issue",
+        "referencedInCommit": "referenced this issue in commit {{commit}}",
+        "referencedInACommit": "referenced this issue in a commit",
+        "connected": "linked this issue",
+        "disconnected": "unlinked this issue",
+        "markedAsDuplicate": "marked this issue as a duplicate",
+        "unmarkedAsDuplicate": "removed the duplicate marking",
+        "pinned": "pinned this issue",
+        "unpinned": "unpinned this issue",
+        "transferred": "transferred this issue",
+        "convertedToDiscussion": "converted this issue to a discussion",
+        "mentioned": "mentioned this issue",
+        "commentDeleted": "deleted a comment",
+        "subscribed": "subscribed to this issue",
+        "unsubscribed": "unsubscribed from this issue",
+        "addedToProject": "added this issue to a project",
+        "movedInProject": "moved this issue in a project",
+        "removedFromProject": "removed this issue from a project",
+        "archived": "archived this issue",
+        "unarchived": "unarchived this issue",
+        "merged": "merged this pull request",
+        "committed": "committed to this pull request",
+        "headRefDeleted": "deleted the head branch",
+        "headRefRestored": "restored the head branch",
+        "headRefForcePushed": "force-pushed the head branch",
+        "baseRefChanged": "changed the base branch",
+        "automaticBaseChangeFailed": "could not automatically change the base branch",
+        "automaticBaseChangeSucceeded": "automatically changed the base branch",
+        "deployed": "deployed this pull request",
+        "deploymentEnvironmentChanged": "changed the deployment environment",
+        "readyForReview": "marked this pull request ready",
+        "reviewRequested": "requested a review",
+        "reviewRequestRemoved": "removed a review request",
+        "reviewed": "reviewed these changes",
+        "reviewDismissed": "dismissed a review",
+        "userBlocked": "blocked this user"
+      },
+      "composer": {
+        "addComment": "Add a comment",
+        "commentingAs": "Commenting as {{login}}",
+        "identityUnavailable": "GitHub identity unavailable",
+        "commentPlaceholder": "Write a comment…",
+        "submitComment": "Comment",
+        "closeIssue": "Close issue",
+        "closeAsCompleted": "Close as completed",
+        "closeAsNotPlanned": "Close as not planned",
+        "closeAsDuplicate": "Close as duplicate",
+        "duplicateSearchPlaceholder": "Search issues",
+        "duplicateEmpty": "No matching issues",
+        "duplicateLoadFailed": "Failed to load issues",
+        "reopenIssue": "Reopen issue",
+        "commentFailed": "Failed to add comment",
+        "bodyUpdateFailed": "Failed to update issue description",
+        "statusFailed": "Failed to update issue status"
       },
       "authRequired": {
         "title": "Connect GitHub",
@@ -1803,7 +2051,6 @@
     "ramCurrentSession": "Current session",
     "ramChatRenderedTree": "Chat rendered tree",
     "ramSessionStore": "Session store",
-    "ramStartSidebar": "Start sidebar",
     "ramSessionSidebar": "Session sidebar",
     "ramSecondLevelSidebars": "Second-level sidebars",
     "ramSettingsSidebar": "Settings sidebar",
@@ -2299,20 +2546,7 @@
     "loadFailed": "Failed to load image: {{fileName}}"
   },
   "dragDrop": {
-    "dropFilesToUpload": "Drop files to upload",
-    "dropFileToChat": "Drop file to add to chat",
-    "dropFolderToAdd": "Drop folder to add repo",
-    "releaseToAddFiles": "Release to add files to your session",
-    "releaseToAddFileToChat": "Release to add file to chat (like ⌘L)",
-    "releaseToOpenFolder": "Release to open the folder",
-    "folderDetected": "Folder Detected",
-    "openSpotlightToAdd": "Open Spotlight to add this folder as a repo",
-    "openSpotlight": "Open Spotlight",
-    "addedToChat": "Added \"{{name}}\" to chat",
-    "couldNotExtractPath": "Could not extract file path from drop",
-    "couldNotExtractPathFromItem": "Could not extract file path from dropped item",
-    "dropFilesHere": "Drop files here",
-    "dragFilesFromIde": "Drag files or tabs from VS Code to add them to chat"
+    "couldNotExtractPathFromItem": "Could not extract file path from dropped item"
   },
   "contextList": {
     "task": "Task",
@@ -2423,6 +2657,202 @@
       "noRepo": "No repo"
     }
   },
+  "notifications": {
+    "backgroundSession": "Background Session",
+    "taskCompletedTitle": "Task completed",
+    "taskCompletedBody": "“{{name}}” completed — ready for review",
+    "taskCompletedToast": "“{{name}}” completed. Open the Session to review the result.",
+    "openSessionAction": "Open Session",
+    "taskFailedTitle": "Task failed",
+    "taskFailedBody": "“{{name}}” failed{{detail}}",
+    "taskCancelledToast": "“{{name}}” was cancelled"
+  },
+  "teamInbox": {
+    "title": "Team Inbox",
+    "listLabel": "Team Inbox list",
+    "itemsLabel": "Team Inbox items",
+    "unreadCount": "{{count}} unread",
+    "allRead": "All caught up",
+    "loadMore": "Load more",
+    "filters": {
+      "all": "All",
+      "mentions": "Mentions",
+      "assigned": "Assigned to me"
+    },
+    "sections": {
+      "reviewRequested": "Review requested",
+      "authoredByMe": "Authored by me",
+      "otherTodos": "Other todos"
+    },
+    "status": {
+      "read": "Read",
+      "unread": "Unread"
+    },
+    "notifications": {
+      "assignmentTitle": "New Work Item assigned to you",
+      "mentionTitle": "{{name}} mentioned you",
+      "handoffTitle": "Handoff from {{name}}",
+      "multipleTitle": "{{count}} new Team Inbox updates",
+      "multipleBody": "Open Team Inbox to review assignments and mentions."
+    },
+    "row": {
+      "assignedSummary": "{{status}} · {{priority}}",
+      "issueSource": "{{repository}} issue",
+      "issueSourceFallback": "Issue",
+      "ariaLabel": "{{title}}, {{status}}"
+    },
+    "search": {
+      "placeholder": "Search inbox",
+      "ariaLabel": "Search Team Inbox"
+    },
+    "groups": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "thisWeek": "This week",
+      "earlier": "Earlier"
+    },
+    "empty": {
+      "title": "Nothing here yet",
+      "subtitle": "Mentions and assigned work items will appear here.",
+      "selectTitle": "Select an item",
+      "selectSubtitle": "View its comment context or work item details",
+      "mentions": {
+        "title": "No mentions",
+        "subtitle": "When a teammate @mentions you in a comment, it shows up here"
+      },
+      "assigned": {
+        "title": "Nothing assigned to you",
+        "subtitle": "Work items assigned to you will appear here."
+      },
+      "noResults": {
+        "title": "No matches",
+        "subtitle": "No items match “{{query}}”."
+      }
+    },
+    "loading": "Loading Team Inbox…",
+    "drop": {
+      "title": "Drop to create a Work Item",
+      "subtitle": "Review the Session snapshot, then create or hand off the Work Item.",
+      "processing": "Creating a Work Item from “{{title}}”…",
+      "processingHint": "Reading the Session and resolving destination members.",
+      "success": "Work Item created",
+      "reused": "Existing Work Item updated",
+      "failed": "Couldn’t create the Work Item",
+      "error": "Unable to create a Work Item from this Session.",
+      "open": "Open",
+      "dismiss": "Dismiss"
+    },
+    "handoff": {
+      "title": "Create from Session",
+      "createFromSession": "Create team Work Item…",
+      "destination": "Destination",
+      "chooseDestination": "Choose a destination",
+      "cloudDestination": "{{name}} · Team Inbox",
+      "recipientSelf": "{{name}} (me)",
+      "chooseRecipient": "Choose a recipient",
+      "todoCount_one": "{{count}} to-do",
+      "todoCount_other": "{{count}} to-dos",
+      "workItemTitle": "Work Item title",
+      "assignTo": "Assign to",
+      "status": "Status",
+      "priority": "Priority",
+      "dueDate": "Due date",
+      "noDueDate": "No due date",
+      "note": "Handoff note",
+      "notePlaceholder": "Share what is ready, what is unresolved, and what should happen next.",
+      "selfHint": "Assigning this to yourself creates a normal Work Item without a handoff request.",
+      "submitHandoff": "Create & hand off",
+      "submitCreate": "Create Work Item",
+      "preparing": "Preparing “{{title}}”…",
+      "validation": {
+        "title_required": "Enter a Work Item title.",
+        "project_required": "Choose a destination.",
+        "project_unavailable": "This destination is no longer available. Choose another destination.",
+        "recipient_required": "Choose a recipient.",
+        "recipient_unavailable": "This recipient is no longer available. Choose another recipient."
+      },
+      "preparationError": {
+        "session_unavailable": "This Session is no longer available. Reopen it and try again.",
+        "project_unavailable": "This Session’s project is no longer available.",
+        "identity_unavailable": "Your signed-in identity is not an active member of this destination.",
+        "no_project": "No eligible destination is available. Join a team or project, then try again.",
+        "unknown": "Unable to prepare this Session. Refresh Team Inbox and try again."
+      },
+      "submitError": "The Work Item could not be created. Review the recipient and try again.",
+      "pendingTitle": "Handoff from {{name}}",
+      "acceptedTitle": "Accepted by {{name}}",
+      "returnedTitle": "Returned by {{name}}",
+      "noNote": "No handoff note.",
+      "statusLabel": "Work Item handoff",
+      "return": "Return",
+      "accept": "Accept",
+      "returnTitle": "Return this handoff?",
+      "confirmReturn": "Return to sender",
+      "returnHint": "Tell {{name}} what needs clarification or follow-up. The Work Item will be reassigned to them.",
+      "returnPlaceholder": "What needs to change before this can be handed off?",
+      "responseError": "The handoff response could not be saved. Try again.",
+      "identityUnavailable": "Your team identity could not be verified. Check your project profile before responding.",
+      "rowPending": "From {{name}} · Awaiting response",
+      "rowAccepted": "Handoff accepted · {{status}} · {{priority}}",
+      "rowReturned": "Returned by {{name}} · {{status}} · {{priority}}"
+    },
+    "errors": {
+      "loadTitle": "Unable to load Team Inbox",
+      "load": "Unable to load Team Inbox",
+      "loadMore": "Unable to load more Team Inbox items. Try again.",
+      "refresh": "Unable to refresh Team Inbox",
+      "markRead": "Unable to mark this item as read. Try again.",
+      "markUnread": "Unable to mark this item as unread. Try again.",
+      "markAllRead": "Unable to mark all items as read. Try again.",
+      "identity": "Your account could not be matched to a project member. Check your project profile email.",
+      "partialLoad": "Some Team Inbox sources could not be refreshed. Available items are still shown",
+      "pullRequestsPartialLoad": "Some pull requests could not be refreshed",
+      "pullRequestsPartialLoadHelp": "Available items are still shown; refresh to try loading the missing pull requests again",
+      "workItemContext": "Some project context is unavailable. The work item remains usable.",
+      "workItemLoad": "Unable to load this work item. Try again.",
+      "workItemUpdate": "Unable to save the latest work item change. Try again."
+    },
+    "detail": {
+      "assignedSubtitle": "Assigned work item",
+      "standaloneProject": "Standalone",
+      "mentionSubtitle": "Mentioned in a comment",
+      "mentionedYou": "mentioned you",
+      "threadComments_one": "{{count}} comment in this thread",
+      "threadComments_other": "{{count}} comments in this thread"
+    },
+    "actions": {
+      "markRead": "Mark as read",
+      "markUnread": "Mark as unread",
+      "openWorkItem": "Open work item",
+      "openSession": "Open session"
+    },
+    "fields": {
+      "status": "Status",
+      "priority": "Priority",
+      "assignee": "Assignee",
+      "workItemId": "Work item ID",
+      "session": "Session",
+      "comments": "Comments",
+      "threadId": "Thread ID",
+      "commentId": "Comment ID"
+    },
+    "workItemStatus": {
+      "backlog": "Backlog",
+      "todo": "To do",
+      "in_progress": "In Progress",
+      "in_review": "In Review",
+      "blocked": "Blocked",
+      "done": "Done",
+      "cancelled": "Cancelled"
+    },
+    "priority": {
+      "none": "No priority",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "urgent": "Urgent"
+    }
+  },
   "globalToolbar": {
     "selectWorkspaceToStart": "Select a workspace to start",
     "selectRepoToStart": "Select a repo to start"
@@ -2448,8 +2878,8 @@
     "previewAlt": "Preview"
   },
   "quitConfirmation": {
-    "title": "Quit ORGII?",
-    "subtitle": "Any running sessions will keep their current state. You can reopen ORGII later.",
+    "title": "Quit ORG-2?",
+    "subtitle": "Any running sessions will keep their current state. You can reopen ORG-2 later.",
     "cancel": "Cancel",
     "confirm": "Quit"
   },

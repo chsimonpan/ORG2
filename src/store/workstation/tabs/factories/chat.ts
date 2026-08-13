@@ -28,7 +28,6 @@ export const chatSessionTabFactory = defineTabFactory<
     getKey: (data) => data.sessionId,
   },
   getTitle: (data) => data.title,
-  icon: "MessageSquare",
 });
 
 export function createChatSessionTab(

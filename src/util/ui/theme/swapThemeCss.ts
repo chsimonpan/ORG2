@@ -7,12 +7,59 @@
  * loading, creating a mixed light/dark state. This utility avoids that
  * by keeping the old CSS active until the new one is fully loaded.
  */
+import { isWindows } from "@src/util/platform/tauri";
 
 const THEME_LINK_ATTR = "data-orgii-theme";
 const PRELOAD_LINK_ATTR = "data-orgii-theme-preload";
 const SWAP_TIMEOUT_MS = 4000;
 
 let latestRequestedCssPath = "";
+
+function isActiveThemeDark(cssPath: string): boolean {
+  const background = getComputedStyle(document.body)
+    .getPropertyValue("--color-bg-2")
+    .trim();
+  const hexMatch = /^#([\da-f]{6})$/i.exec(background);
+
+  if (hexMatch) {
+    const value = hexMatch[1];
+    const red = Number.parseInt(value.slice(0, 2), 16);
+    const green = Number.parseInt(value.slice(2, 4), 16);
+    const blue = Number.parseInt(value.slice(4, 6), 16);
+    const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+    return luminance < 0.5;
+  }
+
+  return (
+    cssPath.endsWith("/orgii_high_contrast.css") ||
+    cssPath.endsWith("/orgii_dark.css")
+  );
+}
+
+/** Keep CSS chrome and the Windows system backdrop on the same color scheme. */
+export function syncThemeAppearance(cssPath: string): void {
+  const isHighContrast = cssPath.endsWith("/orgii_high_contrast.css");
+  const isDark = isActiveThemeDark(cssPath);
+  const colorScheme = isDark ? "dark" : "light";
+  const root = document.documentElement;
+
+  root.dataset.theme = colorScheme;
+  root.dataset.themeId = isHighContrast
+    ? "orgii-high-contrast"
+    : isDark
+      ? "github-dark"
+      : "github-light";
+  root.style.colorScheme = colorScheme;
+
+  if (!isWindows()) return;
+
+  void import("@tauri-apps/api/window")
+    .then(({ getCurrentWindow }) => getCurrentWindow().setTheme(colorScheme))
+    .catch(() => {
+      // Browser previews and windows closing during a theme swap have no
+      // native backdrop to synchronize.
+    });
+}
 
 /**
  * Warm the browser's stylesheet cache for the given theme CSS files so a
@@ -51,10 +98,27 @@ function cssPathSelector(path: string): string {
   return path.replace(/"/g, '\\"');
 }
 
+/**
+ * WKWebView pauses `requestAnimationFrame` while the window is occluded or
+ * the display is asleep, and can leave it dead after system sleep until the
+ * next repaint. Waiting on frames must therefore never be unbounded: the
+ * timer keeps the swap moving when frames don't come (nobody is looking at
+ * the intermediate paint state in that case anyway).
+ */
+const PAINT_FALLBACK_MS = 250;
+
 function nextPaint(): Promise<void> {
   return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timerId);
+      resolve();
+    };
+    const timerId = setTimeout(finish, PAINT_FALLBACK_MS);
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => resolve());
+      requestAnimationFrame(finish);
     });
   });
 }
@@ -86,6 +150,7 @@ export function swapThemeCss(newCssPath: string): Promise<void> {
 
   if (existingLink.href.endsWith(newCssPath)) {
     removeOtherThemeLinks(existingLink);
+    syncThemeAppearance(newCssPath);
     return Promise.resolve();
   }
 
@@ -145,6 +210,7 @@ function swapFromExisting(
       await nextPaint();
       oldLink.remove();
       removeOtherThemeLinks(newLink);
+      syncThemeAppearance(newCssPath);
       resolve();
     };
 
@@ -187,6 +253,7 @@ function insertFreshLink(
       } else {
         await nextPaint();
         removeOtherThemeLinks(link);
+        syncThemeAppearance(cssPath);
       }
 
       resolve();

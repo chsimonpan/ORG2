@@ -27,6 +27,7 @@ export type PillIconType =
   | "skill"
   | "member"
   | "paste"
+  | "link"
   | "pr"
   | "issue";
 
@@ -47,6 +48,8 @@ export interface ComposerPillAttrs {
 export interface ComposerInputProps {
   /** Placeholder text shown while the editor is empty */
   placeholder?: string;
+  /** Accessible name for the content-editable surface. */
+  ariaLabel?: string;
   /**
    * Ghost text rendered inline after the last content node (e.g.
    * "<optional focus for the summary>" behind a /compact pill). Purely
@@ -75,10 +78,7 @@ export interface ComposerInputProps {
   /** Min/max heights (px or CSS size) — applied as inline style */
   minHeight?: number | string;
   maxHeight?: number | string;
-  /**
-   * Root overflow-y. The compact chat row should use `visible` so WebKit
-   * still paints the caret after a pill ↔ stacked layout swap.
-   */
+  /** Optional root overflow-y override for embedding surfaces. */
   overflowY?: "auto" | "hidden" | "visible";
   /** Whether the editor accepts input */
   editable?: boolean;
@@ -98,11 +98,6 @@ export interface ComposerInputProps {
   slashTriggerMode?: "command" | "context";
   /** Called for clipboard image attachments */
   onImagePaste?: (files: File[]) => void;
-  /**
-   * Called synchronously inside the keydown handler before a Shift+Enter
-   * newline is inserted, so the host can expand the layout eagerly.
-   */
-  onBeforeNewline?: () => void;
 }
 
 /**

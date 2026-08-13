@@ -142,7 +142,7 @@
     "timezoneAuto": "Automatisch (Browser)",
     "timezoneSearchPlaceholder": "Nächste Städte suchen",
     "sendOnEnter": "Nachrichten mit Enter senden",
-    "sendOnEnterDesc": "Wenn aktiviert, sendet Enter und Shift+Enter fügt eine neue Zeile ein. Wenn deaktiviert, sendet Ctrl/Cmd+Enter",
+    "sendOnEnterDesc": "Wenn aktiviert, sendet Enter; Shift+Enter und Ctrl/Cmd+Enter fügen eine neue Zeile ein. Wenn deaktiviert, sendet Ctrl/Cmd+Enter",
     "language": "Sprache",
     "languageSearchPlaceholder": "Sprachen suchen...",
     "languageNames": {
@@ -227,7 +227,10 @@
     "presenceGuidanceOnlineDefault": "Ich bin an der Tastatur. Du kannst mir jederzeit Rückfragen stellen und destruktive Aktionen vor der Ausführung von mir bestätigen lassen",
     "presenceGuidanceInvisibleDefault": "Ich bin in der Nähe, erscheine aber offline. Arbeite standardmäßig autonom und benachrichtige mich nur bei riskanten Aktionen oder größeren Refactorings; fasse alle anderen Fragen gesammelt zusammen, statt sie einzeln zu stellen",
     "presenceGuidanceAwayDefault": "Ich bin nicht an der Tastatur. Warte nicht auf mich, sondern triff mit den vorhandenen Informationen die beste Entscheidung, erledige alles Mögliche und hinterlasse eine knappe Zusammenfassung mit offenen Fragen für meine Rückkehr",
-    "followSystem": "System folgen"
+    "followSystem": "System folgen",
+    "preferences": "Präferenzen",
+    "usePointerCursors": "Zeiger-Cursor verwenden",
+    "usePointerCursorsDesc": "Den Cursor beim Bewegen über interaktive Elemente in einen Zeiger ändern"
   },
   "background": {
     "title": "Hintergrund",
@@ -703,8 +706,34 @@
     "test": {
       "sent": "Testbenachrichtigung gesendet",
       "permissionWarning": "Testbenachrichtigung konnte nicht gesendet werden. Berechtigungen prüfen.",
-      "sendFailed": "Testbenachrichtigung konnte nicht gesendet werden. Bitte Berechtigungen prüfen und erneut versuchen."
-    }
+      "sendFailed": "Testbenachrichtigung konnte nicht gesendet werden. Bitte Berechtigungen prüfen und erneut versuchen.",
+      "soundFailed": "Der Benachrichtigungston konnte nicht wiedergegeben werden. Prüfen Sie die Systemlautstärke."
+    },
+    "teamInbox": "Team-Posteingang",
+    "soundPreset": "Benachrichtigungston",
+    "soundPresetDesc": "Wähle den Ton für hörbare Benachrichtigungen",
+    "previewSound": "Anhören",
+    "soundPresets": {
+      "classic": "Klassisch",
+      "gentle": "Sanft",
+      "ascending": "Ansteigend",
+      "bell": "Glocke"
+    },
+    "criticalOnly": "Nur kritische Hinweise",
+    "criticalOnlyDesc": "Nur benachrichtigen, wenn eine Aktion freigegeben werden muss oder eine Aufgabe fehlschlägt",
+    "quietHours": "Nicht-stören-Zeitplan",
+    "quietHoursDesc": "Routinebenachrichtigungen in einem täglichen Zeitfenster stummschalten",
+    "quietHoursSchedule": "Ruhezeiten",
+    "quietHoursScheduleDesc": "Verwendet die lokale Zeit deines Geräts. Gleiche Start- und Endzeit deaktiviert das Zeitfenster.",
+    "quietHoursStart": "Von",
+    "quietHoursEnd": "Bis",
+    "allowCriticalDuringQuietHours": "Kritische Hinweise zulassen",
+    "allowCriticalDuringQuietHoursDesc": "Freigabeanfragen und Fehler dürfen eine Systembenachrichtigung zeigen, aber niemals einen Ton abspielen",
+    "backgroundCompletionSummary": "Hintergrundabschlüsse zusammenfassen",
+    "backgroundCompletionSummaryDesc": "Nach Ende der Ruhezeiten einen gesammelten Hinweis senden",
+    "mutedSessions": "Stummgeschaltete Sessions",
+    "mutedSessionsDesc": "{{count}} Sessions sind auf diesem Gerät stummgeschaltet",
+    "clearMutedSessions": "Alle aufheben"
   },
   "editor": {
     "tabEditor": "Editor",
@@ -923,7 +952,24 @@
     "diskCategory_screenshots": "Browser-Screenshots",
     "diskCategory_agentWorktrees": "Agent Session Worktrees",
     "diskCategory_lspBin": "LSP Server Binaries",
-    "loadZeroRows": "Klicken, um {{count}} weitere zu laden"
+    "loadZeroRows": "Klicken, um {{count}} weitere zu laden",
+    "appMemory": "App memory",
+    "appBackend": "ORG2 backend",
+    "appWebviewHelpers": "Owned WebView helpers",
+    "rssMappedDiagnostic": "RSS / mapped memory (diagnostic)",
+    "measurement": "Measurement",
+    "measurementKinds": {
+      "native": "Native effective memory",
+      "compatibility": "Compatibility metric",
+      "mixed": "Mixed native / fallback metrics",
+      "rss_fallback": "RSS fallback",
+      "unavailable": "Unavailable"
+    },
+    "toolProcessDiagnostics": "Terminal, CLI & tool processes (RSS diagnostic)",
+    "excludedFromAppMemory": "excluded from App memory",
+    "noToolProcesses": "No terminal, CLI, MCP, or tool processes detected",
+    "categoryAgentCli": "CLI agent",
+    "categoryMcpOrTool": "MCP / tool process"
   },
   "dependencies": {
     "systemDependencies": "System-Dependencies",
@@ -977,7 +1023,13 @@
     "tableSize": "Größe",
     "tablePercentage": "Proz.",
     "scanFailed": "Speichernutzung konnte nicht geprüft werden",
-    "openFolderFailed": "Ordner konnte nicht geöffnet werden"
+    "openFolderFailed": "Ordner konnte nicht geöffnet werden",
+    "browserCache": "Browser-Cache",
+    "browserCacheDesc": "{{used}} verwendet · {{cleanable}} können sicher bereinigt werden",
+    "cleanBrowserCache": "Bereinigen",
+    "browserCacheCleaned": "{{size}} Browserspeicher freigegeben",
+    "browserCacheAlreadyClean": "Der Browser-Cache ist bereits bereinigt",
+    "browserCacheCleanFailed": "Browser-Cache konnte nicht bereinigt werden"
   },
   "agentSessions": {
     "title": "Agent Session",
@@ -991,7 +1043,7 @@
     "decryptEffect": "Decrypt-Effekt",
     "decryptEffectDesc": "Decrypt-Animation für Agent-Nachrichten aktivieren",
     "sendOnEnter": "Nachrichten mit Enter senden",
-    "sendOnEnterDesc": "Wenn aktiviert, sendet Enter und Shift+Enter fügt eine neue Zeile ein. Wenn deaktiviert, sendet Ctrl/Cmd+Enter"
+    "sendOnEnterDesc": "Wenn aktiviert, sendet Enter; Shift+Enter und Ctrl/Cmd+Enter fügen eine neue Zeile ein. Wenn deaktiviert, sendet Ctrl/Cmd+Enter"
   },
   "languageServers": {
     "languageServersDesc": "LSP-Server für Autovervollständigung, Diagnose und Code-Intelligenz verwalten",

@@ -1,9 +1,10 @@
-import { useSetAtom } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { projectApi } from "@src/api/http/project";
 import type { ProjectOrg } from "@src/api/http/project";
+import { projectSyncApi } from "@src/api/http/project/sync";
 import { COLLAB_SYNC_PROVIDER } from "@src/features/Org2Cloud/org2CloudProjectOrgAlias";
 import { createLogger } from "@src/hooks/logger";
 import { useProjectDataChanged } from "@src/hooks/project";
@@ -15,10 +16,11 @@ import {
   STORY_ORG_SCOPE,
   createProjectLinearWorkItemsTab,
   createProjectOrgTab,
-  openTab,
-  workstationLayoutAtom,
+  openWorkstationTabAtom,
+  presentedWorkstationWorkspaceKeyAtom,
 } from "@src/store/workstation/tabs";
 import { STORY_PERSONAL_ORG_FILTER_ID } from "@src/store/workstation/tabs/factories/project";
+import { mapWithConcurrency } from "@src/util/collections/mapWithConcurrency";
 
 import { toChatPanelProject, toChatPanelWorkItem } from "./chatPanelMapping";
 import { buildByOrgMenuItems } from "./groupingBuilders";
@@ -35,6 +37,7 @@ import {
   isProjectsWorkItemLoadMoreId,
 } from "./idHelpers";
 import { getErrorMessage } from "./linearHelpers";
+import { getNavigableLinkedSessions } from "./menuRows";
 import type {
   LinearOrgLoadState,
   LinearOrgRecord,
@@ -70,7 +73,8 @@ export function useProjectsWorkItemMenuItems({
   selectedOrgId,
 }: UseProjectsWorkItemMenuItemsParams): UseProjectsWorkItemMenuItemsResult {
   const { t } = useTranslation(["projects", "common", "navigation"]);
-  const setLayout = useSetAtom(workstationLayoutAtom);
+  const openWorkstationTab = useSetAtom(openWorkstationTabAtom);
+  const presentedWorkspace = useAtomValue(presentedWorkstationWorkspaceKeyAtom);
   const [localOrgs, setLocalOrgs] = useState<ProjectOrg[]>([]);
   const [localProjects, setLocalProjects] = useState<SidebarProject[]>([]);
   const [workItems, setWorkItems] = useState<SidebarWorkItem[]>([]);
@@ -82,6 +86,25 @@ export function useProjectsWorkItemMenuItems({
     Map<string, LinearOrgLoadState>
   >(new Map());
   const [loading, setLoading] = useState(false);
+  const [
+    expandedLinkedSessionWorkItemIds,
+    setExpandedLinkedSessionWorkItemIds,
+  ] = useState<Set<string>>(() => new Set());
+
+  const handleToggleLinkedSessionExpansion = useCallback(
+    (workItemId: string) => {
+      setExpandedLinkedSessionWorkItemIds((previousIds) => {
+        const nextIds = new Set(previousIds);
+        if (nextIds.has(workItemId)) {
+          nextIds.delete(workItemId);
+        } else {
+          nextIds.add(workItemId);
+        }
+        return nextIds;
+      });
+    },
+    []
+  );
 
   /** Org ids accepted by the selector filter. */
   const selectedOrgIdSet = useMemo(() => {
@@ -123,13 +146,17 @@ export function useProjectsWorkItemMenuItems({
         [STORY_PERSONAL_ORG_FILTER_ID, t("projects:orgs.personalOrg")],
         ...orgs.map((org) => [org.id, org.name] as const),
       ]);
-      const projectResults = await Promise.all(
-        projects.map(async (project) => {
-          const [viewData, labelsFile, membersFile] = await Promise.all([
-            projectApi.readWorkItemsViewData(project.slug),
-            projectApi.readLabels(project.slug),
-            projectApi.readMembers(project.slug),
-          ]);
+      const projectResults = await mapWithConcurrency(
+        projects,
+        4,
+        async (project) => {
+          const [viewData, labelsFile, membersFile, syncStatus] =
+            await Promise.all([
+              projectApi.readWorkItemsViewData(project.slug, { view: "list" }),
+              projectApi.readLabels(project.slug),
+              projectApi.readMembers(project.slug),
+              projectSyncApi.status(project.slug).catch(() => null),
+            ]);
           const labelMap = new Map(
             labelsFile.labels.map((label) => [label.id, label])
           );
@@ -144,6 +171,7 @@ export function useProjectsWorkItemMenuItems({
               : t("navigation:labels.org", "Org"));
           const projectEntry: SidebarProject = {
             projectData: project,
+            projectSyncAdapterId: syncStatus?.adapter_id ?? null,
             orgId,
             orgName,
             labelMap,
@@ -158,10 +186,11 @@ export function useProjectsWorkItemMenuItems({
               projectSlug: project.slug,
               orgId,
               orgName,
+              projectSyncAdapterId: syncStatus?.adapter_id ?? null,
               source: "local",
             }));
           return { projectEntry, projectWorkItems };
-        })
+        }
       );
       setLocalProjects(
         projectResults.map((projectResult) => projectResult.projectEntry)
@@ -199,14 +228,16 @@ export function useProjectsWorkItemMenuItems({
         const visibleProjects = projectsResult.projects.filter((project) =>
           project.teams.some((team) => team.id === org.teamId)
         );
-        const issueResults = await Promise.all(
-          visibleProjects.map(async (project) => {
+        const issueResults = await mapWithConcurrency(
+          visibleProjects,
+          4,
+          async (project) => {
             const issueResult = await cachedLinearProjectsApi.listProjectIssues(
               org.connectionId,
               project.id
             );
             return { project, issues: issueResult.issues };
-          })
+          }
         );
         const nextWorkItems = issueResults.flatMap(({ project, issues }) =>
           issues.map((issue) => {
@@ -337,6 +368,18 @@ export function useProjectsWorkItemMenuItems({
     [scopedWorkItems]
   );
 
+  const linkedSessionIds = useMemo(
+    () =>
+      new Set(
+        scopedWorkItems.flatMap((workItem) =>
+          getNavigableLinkedSessions(workItem).map(
+            (session) => session.session_id
+          )
+        )
+      ),
+    [scopedWorkItems]
+  );
+
   const collabOrgIds = useMemo(
     () =>
       localOrgs
@@ -360,6 +403,8 @@ export function useProjectsWorkItemMenuItems({
           projectIds: pendingProjectIds,
           workItemIds: pendingWorkItemIds,
         },
+        expandedLinkedSessionWorkItemIds,
+        onToggleLinkedSessionExpansion: handleToggleLinkedSessionExpansion,
       }),
     [
       allWorkItems,
@@ -369,6 +414,8 @@ export function useProjectsWorkItemMenuItems({
       scopedLocalProjects,
       pendingProjectIds,
       pendingWorkItemIds,
+      expandedLinkedSessionWorkItemIds,
+      handleToggleLinkedSessionExpansion,
     ]
   );
 
@@ -387,12 +434,9 @@ export function useProjectsWorkItemMenuItems({
         PROJECT_ORG_SURFACE_VIEW.WORK_ITEMS,
         orgScope
       );
-      setLayout((layout) => ({
-        ...layout,
-        mainPane: openTab(layout.mainPane, tab),
-      }));
+      openWorkstationTab({ workspace: presentedWorkspace, tab });
     },
-    [setLayout]
+    [openWorkstationTab, presentedWorkspace]
   );
 
   const openLinearOrg = useCallback(
@@ -402,12 +446,9 @@ export function useProjectsWorkItemMenuItems({
         teamId: org.teamId,
         teamName: org.teamName,
       });
-      setLayout((layout) => ({
-        ...layout,
-        mainPane: openTab(layout.mainPane, tab),
-      }));
+      openWorkstationTab({ workspace: presentedWorkspace, tab });
     },
-    [setLayout]
+    [openWorkstationTab, presentedWorkspace]
   );
 
   const openLinearWorkItem = useCallback(
@@ -419,12 +460,9 @@ export function useProjectsWorkItemMenuItems({
         teamId: workItem.teamId,
         teamName: workItem.teamName,
       });
-      setLayout((layout) => ({
-        ...layout,
-        mainPane: openTab(layout.mainPane, tab),
-      }));
+      openWorkstationTab({ workspace: presentedWorkspace, tab });
     },
-    [setLayout]
+    [openWorkstationTab, presentedWorkspace]
   );
 
   return {
@@ -435,6 +473,7 @@ export function useProjectsWorkItemMenuItems({
     localOrgMap,
     linearOrgMap,
     loading,
+    linkedSessionIds,
     getLoadMoreGroupId: isProjectsWorkItemLoadMoreId,
     loadLinearOrgWorkItems: loadLinearOrgWorkItemsById,
     toChatPanelProject,

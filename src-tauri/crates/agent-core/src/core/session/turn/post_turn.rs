@@ -30,30 +30,23 @@ use core_types::providers::NativeHarnessType;
 
 #[derive(Clone)]
 pub(super) struct ForkProviderSpec {
+    pub model: String,
     pub account_id: Option<String>,
     pub reliability: ReliabilityConfig,
     pub native_harness_type: Option<NativeHarnessType>,
     pub workspace: SessionWorkspace,
 }
 
-async fn fresh_fork_provider(
-    spec: &ForkProviderSpec,
-) -> Result<(Arc<dyn LLMProvider>, String), String> {
-    let account_id = spec.account_id.as_deref().ok_or_else(|| {
-        "Side query configuration error: memory extraction requires the current account/key id"
-            .to_string()
-    })?;
-    let model = super::processor::resolve_side_query_model(account_id)?;
+async fn fresh_fork_provider(spec: &ForkProviderSpec) -> Result<Arc<dyn LLMProvider>, String> {
     crate::providers::factory::create_provider_with_native_harness_preflight(
-        &model,
+        &spec.model,
         spec.account_id.as_deref(),
         &spec.reliability,
         spec.native_harness_type,
         Some(spec.workspace.clone()),
-        None,
     )
     .await
-    .map(|provider| (Arc::from(provider), model))
+    .map(Arc::from)
     .map_err(|err| format!("Failed to create fork provider: {err}"))
 }
 
@@ -126,7 +119,7 @@ pub(super) async fn spawn_session_memory_extraction(input: SessionMemoryExtracti
         const SM_TIMEOUT: Duration = Duration::from_secs(60);
 
         let extraction = async {
-            let (provider, model) = fresh_fork_provider(&fork_provider).await?;
+            let provider = fresh_fork_provider(&fork_provider).await?;
             // `extract_session_memory` now manages the `sm_state` lock
             // internally (brief prepare + finalize, never across the LLM
             // call), so we pass the Arc instead of holding the guard here.
@@ -135,7 +128,7 @@ pub(super) async fn spawn_session_memory_extraction(input: SessionMemoryExtracti
                 sm_state.clone(),
                 &sm_config,
                 provider.as_ref(),
-                &model,
+                &fork_provider.model,
             )
             .await;
 
@@ -150,56 +143,6 @@ pub(super) async fn spawn_session_memory_extraction(input: SessionMemoryExtracti
                         warn!("[sm_extraction] Failed to persist SM state: {}", err);
                     }
                 });
-
-                let embed_cfg = crate::state::integrations_store::integrations_store()
-                    .snapshot()
-                    .embedding;
-                // Embedding is scheduled only when the summary has materially changed.
-                // The extractor itself already gates updates at 5k token growth; the
-                // provider adds bounded input, timeout, validation, and no fallback.
-                let embed_timeout =
-                    Duration::from_secs(embed_cfg.request_timeout_secs.clamp(1, 120));
-                let embedder =
-                    crate::memory::embeddings::AutoEmbeddingProvider::from_config(embed_cfg);
-                let embed_result = tokio::time::timeout(
-                    embed_timeout,
-                    crate::memory::embeddings::EmbeddingProvider::embed(&embedder, &content),
-                )
-                .await;
-                match embed_result {
-                    Ok(Ok(embedding)) => {
-                        let sid = sm_session_id.clone();
-                        let content = content.clone();
-                        let model = embedding.model.clone();
-                        let vector = embedding.vector;
-                        tokio::task::block_in_place(|| {
-                            if let Err(err) = unified_persistence::save_session_memory_index(
-                                &sid,
-                                &content,
-                                &vector,
-                                Some(&model),
-                                Some(&embedding.source),
-                            ) {
-                                warn!(
-                                    "[sm_extraction] Failed to persist SM embedding index: {}",
-                                    err
-                                );
-                            }
-                        });
-                    }
-                    Ok(Err(err)) => {
-                        warn!(
-                            "[sm_extraction] Session-memory embedding failed for {}: {}",
-                            sm_session_id, err
-                        );
-                    }
-                    Err(_) => {
-                        warn!(
-                            "[sm_extraction] Session-memory embedding timed out for {}",
-                            sm_session_id
-                        );
-                    }
-                }
             }
             result
         };
@@ -390,8 +333,8 @@ async fn run_extract_memories_task(task: RunExtractMemoriesTask) {
         // extractor runs a multi-iteration forked agent, neither of which may
         // block the next turn's brief `em_state` reads. `run_extraction`
         // manages the lock internally (brief prepare + finalize).
-        let (provider, model) = match fresh_fork_provider(&fork_provider).await {
-            Ok(route) => route,
+        let provider = match fresh_fork_provider(&fork_provider).await {
+            Ok(provider) => provider,
             Err(err) => {
                 warn!("[extract_memories] Failed for session {}: {}", sid, err);
                 em_state.lock().await.clear_in_progress();
@@ -401,7 +344,7 @@ async fn run_extract_memories_task(task: RunExtractMemoriesTask) {
         let params = crate::memory::MemoryAgentParams {
             messages: &current_msgs,
             provider,
-            model: &model,
+            model: &fork_provider.model,
             workspace: &ws_path,
             parent_tools: tool_registry.clone(),
             session_id: &sid,
@@ -477,17 +420,16 @@ pub(super) async fn spawn_auto_dream(input: AutoDreamInput<'_>) {
             sid
         );
 
-        let (provider, model) = match fresh_fork_provider(&fork_provider).await {
-            Ok(route) => route,
-            Err(err) => {
-                warn!("[auto_dream] Failed for session {}: {}", sid, err);
-                return;
-            }
-        };
         let params = crate::memory::MemoryAgentParams {
             messages: &messages,
-            provider,
-            model: &model,
+            provider: match fresh_fork_provider(&fork_provider).await {
+                Ok(provider) => provider,
+                Err(err) => {
+                    warn!("[auto_dream] Failed for session {}: {}", sid, err);
+                    return;
+                }
+            },
+            model: &fork_provider.model,
             workspace: &ws_path,
             parent_tools: tool_registry,
             session_id: &sid,

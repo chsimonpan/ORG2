@@ -13,6 +13,7 @@ pub use worktree_state::*;
 #[cfg(test)]
 mod resume_state_tests {
     use super::*;
+    use crate::agent_sessions::cli::types::SessionStatus;
     use crate::test_utils::test_env;
     use agent_core::foundation::session_bridge;
 
@@ -29,6 +30,8 @@ mod resume_state_tests {
                 account_id: Some(account_id.to_string()),
                 repo_path: Some("/tmp".to_string()),
                 branch: None,
+                worktree_path: None,
+                worktree_base_ref: None,
                 proxy_token: None,
                 proxy_url: None,
                 hosted_token: None,
@@ -46,9 +49,161 @@ mod resume_state_tests {
                 project_slug: None,
                 work_item_id: None,
                 agent_role: None,
+                product_mode: None,
             },
         )
         .expect("create test CLI session");
+    }
+
+    #[test]
+    fn status_snapshots_return_only_requested_existing_sessions() {
+        let _sandbox = test_env::sandbox();
+        create_test_session("cli-status-a", "account-a");
+        create_test_session("cli-status-b", "account-b");
+        update_status("cli-status-b", SessionStatus::Running).expect("mark running");
+
+        let rows =
+            status_snapshots(&["cli-status-b".to_string(), "cli-status-missing".to_string()])
+                .expect("load status batch");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].session_id, "cli-status-b");
+        assert_eq!(rows[0].status, SessionStatus::Running);
+        assert!(!rows[0].updated_at.is_empty());
+    }
+
+    #[test]
+    fn sidebar_page_filters_pinned_and_child_rows_before_limit() {
+        let _sandbox = test_env::sandbox();
+        for session_id in [
+            "cli-regular-a",
+            "cli-regular-b",
+            "cli-regular-c",
+            "cli-pinned",
+            "cli-child",
+        ] {
+            create_test_session(session_id, "account-a");
+        }
+        let conn = database::db::get_connection().expect("sandbox database");
+        for (session_id, updated_at) in [
+            ("cli-regular-a", "2026-07-30T10:00:00Z"),
+            ("cli-regular-b", "2026-07-30T11:00:00Z"),
+            ("cli-regular-c", "2026-07-30T12:00:00Z"),
+            ("cli-pinned", "2026-07-30T14:00:00Z"),
+            ("cli-child", "2026-07-30T13:00:00Z"),
+        ] {
+            conn.execute(
+                "UPDATE code_sessions SET updated_at = ?2 WHERE session_id = ?1",
+                rusqlite::params![session_id, updated_at],
+            )
+            .expect("set deterministic activity time");
+        }
+        conn.execute(
+            "UPDATE code_sessions SET pinned = 1 WHERE session_id = 'cli-pinned'",
+            [],
+        )
+        .expect("pin fixture");
+        conn.execute(
+            "UPDATE code_sessions
+             SET parent_session_id = 'cli-regular-c'
+             WHERE session_id = 'cli-child'",
+            [],
+        )
+        .expect("make child fixture");
+
+        let first = list_unpinned_root_sessions_page(2, None).expect("first CLI page");
+        assert_eq!(
+            first
+                .iter()
+                .map(|session| session.session_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["cli-regular-c", "cli-regular-b"]
+        );
+        let cursor = first.last().expect("first page cursor");
+        let second =
+            list_unpinned_root_sessions_page(2, Some((&cursor.updated_at, &cursor.session_id)))
+                .expect("second CLI page");
+        assert_eq!(
+            second
+                .iter()
+                .map(|session| session.session_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["cli-regular-a"]
+        );
+
+        let mut plan = conn
+            .prepare(
+                "EXPLAIN QUERY PLAN
+                 SELECT session_id
+                 FROM code_sessions
+                 WHERE pinned = 0 AND parent_session_id IS NULL
+                 ORDER BY updated_at DESC, session_id DESC
+                 LIMIT 11",
+            )
+            .expect("prepare CLI sidebar query plan");
+        let details = plan
+            .query_map([], |row| row.get::<_, String>(3))
+            .expect("read CLI sidebar query plan")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect CLI sidebar query plan")
+            .join("\n");
+        assert!(
+            details.contains("idx_code_sessions_sidebar"),
+            "CLI page did not use the sidebar index:\n{details}"
+        );
+    }
+
+    #[test]
+    fn cli_session_and_turn_intent_lifecycle_commit_atomically() {
+        let _sandbox = test_env::sandbox();
+        let session_id = "cli-atomic-lifecycle";
+        let turn_intent_id = "intent-atomic";
+        create_test_session(session_id, "account-a");
+
+        accept_cli_turn(session_id, turn_intent_id, "message-atomic").expect("accept lifecycle");
+        assert_eq!(
+            get_session(session_id)
+                .expect("load session")
+                .expect("session exists")
+                .status,
+            SessionStatus::Running
+        );
+        assert_eq!(
+            session_persistence::turn_intents::list_for_session(session_id).expect("load intent")
+                [0]
+            .status,
+            session_persistence::turn_intents::TurnIntentStatus::Running
+        );
+
+        update_cli_turn_lifecycle(
+            session_id,
+            SessionStatus::Completed,
+            None,
+            Some((
+                turn_intent_id,
+                session_persistence::turn_intents::TurnIntentStatus::Completed,
+            )),
+        )
+        .expect("complete lifecycle");
+
+        let rejected = update_cli_turn_lifecycle(
+            session_id,
+            SessionStatus::Running,
+            None,
+            Some((
+                turn_intent_id,
+                session_persistence::turn_intents::TurnIntentStatus::Running,
+            )),
+        );
+        assert!(rejected.is_err());
+        assert_eq!(
+            get_session(session_id)
+                .expect("load session")
+                .expect("session exists")
+                .status,
+            SessionStatus::Completed,
+            "failed intent transition must roll back the adjacent session status"
+        );
     }
 
     #[test]

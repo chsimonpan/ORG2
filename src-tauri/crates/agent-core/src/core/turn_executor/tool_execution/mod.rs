@@ -247,6 +247,8 @@ pub(crate) async fn execute_tool_calls(
     tools: &ToolRegistry,
     policy: &ResolvedToolPolicy,
     session_id: &str,
+    turn_intent_id: &str,
+    projected_inbox_ids: &[i64],
     handler: &dyn TurnEventHandler,
     permission_provider: Option<&dyn PermissionProvider>,
     cancel_flag: Option<&Arc<AtomicBool>>,
@@ -269,6 +271,8 @@ pub(crate) async fn execute_tool_calls(
                     tools,
                     policy,
                     session_id,
+                    turn_intent_id,
+                    projected_inbox_ids,
                     handler,
                     permission_provider,
                     cancel_flag,
@@ -298,6 +302,8 @@ pub(crate) async fn execute_tool_calls(
                         tools,
                         policy,
                         session_id,
+                        turn_intent_id,
+                        projected_inbox_ids,
                         handler,
                         permission_provider,
                         cancel_flag,
@@ -325,6 +331,8 @@ pub(crate) async fn execute_tool_calls(
                     tools,
                     policy,
                     session_id,
+                    turn_intent_id,
+                    projected_inbox_ids,
                     handler,
                     permission_provider,
                     cancel_flag,
@@ -351,6 +359,8 @@ pub(crate) async fn execute_tool_calls(
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
+// Budget tests mutate the one field whose boundary behavior they exercise.
 mod tests {
     use super::*;
     use crate::tools::traits::{Tool, ToolError};

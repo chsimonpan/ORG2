@@ -6,6 +6,8 @@ import type {
 } from "@src/components/ComposerInput";
 import Message from "@src/components/Message";
 import { capPillText, storePillText } from "@src/config/pillTokens";
+import { parseCloudSessionReference } from "@src/features/Org2Cloud/cloudSessionReference";
+import { referenceInsertText } from "@src/features/Org2Cloud/referenceInsertText";
 import i18n from "@src/i18n";
 import { loadWorkItemPillContent } from "@src/util/contextPillContent";
 
@@ -41,6 +43,8 @@ interface InsertPillOptions {
   pointerX?: number;
   pointerY?: number;
   contextText?: string;
+  /** Suppress the toast when a caller inserts several pills as one action. */
+  notify?: boolean;
 }
 
 function getDisplayName(path: string, name: string | undefined): string {
@@ -54,11 +58,22 @@ export function insertPillFromTabPayload(
   if (!composerInputRef.current) return;
   if (!payload.path) return;
 
+  // A teammate's cloud session goes in as reference TEXT, matching what
+  // the `@` menu inserts. As a pill it would ride the session-pill path,
+  // which assumes a bare local id and mangles the reference in three
+  // places: icon lookup, serialization, and the agent context line.
+  if (parseCloudSessionReference(payload.path)) {
+    composerInputRef.current.insertMentionText(
+      referenceInsertText(payload.path)
+    );
+    return;
+  }
+
   const iconType = payload.iconType ?? (payload.isFolder ? "folder" : "file");
   const isFolder = payload.isFolder ?? iconType === "folder";
   const displayName = getDisplayName(payload.path, payload.name);
 
-  if (payload.contextText) {
+  if (payload.contextText && iconType !== "workitem") {
     storePillText(payload.path, capPillText(payload.contextText));
   }
 
@@ -80,14 +95,21 @@ export function insertPillFromTabPayload(
 
   if (iconType === "workitem") {
     const pillPath = `workitem://${payload.path}/${Date.now()}`;
+    if (payload.contextText) {
+      storePillText(pillPath, capPillText(payload.contextText));
+    }
     composerInputRef.current.insertFilePill(
       pillPath,
       false,
       "workitem",
       displayName
     );
-    loadWorkItemPillContent(payload.path, pillPath);
-    Message.success(i18n.t("toasts.addedAsContext", { name: displayName }));
+    if (!payload.contextText) {
+      loadWorkItemPillContent(payload.path, pillPath);
+    }
+    if (payload.notify !== false) {
+      Message.success(i18n.t("toasts.addedAsContext", { name: displayName }));
+    }
     return;
   }
 
@@ -97,7 +119,9 @@ export function insertPillFromTabPayload(
     iconType,
     displayName
   );
-  Message.success(i18n.t("toasts.addedAsContext", { name: displayName }));
+  if (payload.notify !== false) {
+    Message.success(i18n.t("toasts.addedAsContext", { name: displayName }));
+  }
 }
 
 export function insertTabAsPill(

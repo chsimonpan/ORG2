@@ -2047,18 +2047,18 @@
       "previewEmpty": "添加 Agent 以查看组织架构预览",
       "hierarchyMode": {
         "label": "层级模式",
-        "description": "运行时如何解释成员之间的 Reports-to 关系",
+        "description": "运行时 Reports-to 如何控制沟通路由与任务派发权限",
         "flat": {
           "label": "扁平",
-          "description": "无汇报层级。每个成员都可以直接给其他任何成员发消息。Reports-to 列将被隐藏"
+          "description": "无汇报层级。平级之间可以直接沟通，但非协调员成员只能管理自己的任务。Reports-to 列将被隐藏"
         },
         "soft": {
           "label": "柔性（推荐）",
-          "description": "Reports-to 作为组织提示传给 LLM。运行时路由不受限——LLM 可在合适时直接联系平级"
+          "description": "平级沟通不受限，但任务权限仍会强制执行：成员只能管理自己和直属下属。能联系平级不代表能给平级派活"
         },
         "strict": {
           "label": "严格",
-          "description": "运行时强制 Reports-to。成员只能给其直属上级、直接下属或协调员发送消息，平级 → 平级会被拒绝"
+          "description": "沟通和任务权限都会强制 Reports-to：成员只能联系直属上级、直接下属或协调员，且只能给自己或直属下属派任务"
         }
       },
       "strictBanner": "严格模式：成员只能给其直属上级、直接下属或协调员发送消息。平级之间互发将在运行时被拒绝。",
@@ -2093,7 +2093,23 @@
       "dangerZone": "危险区域",
       "deleteOrg": "删除此 Org",
       "deleteOrgDesc": "永久删除此 Agent 团队。成员 Agent 不会受影响。此操作无法撤销",
-      "deleteThisOrg": "删除此 Org"
+      "deleteThisOrg": "删除此 Org",
+      "planApprovalPolicy": {
+        "label": "计划审批",
+        "description": "Planner 提交计划后，由谁确认计划可以解锁下游任务",
+        "coordinator": {
+          "label": "Coordinator（推荐）",
+          "description": "Coordinator 在本次运行中审阅计划，然后批准或要求 Planner 修改"
+        },
+        "user": {
+          "label": "用户",
+          "description": "Group chat 会安静等待，并显示批准、编辑后批准和要求修改操作"
+        },
+        "automatic": {
+          "label": "自动",
+          "description": "Planner 提交有效计划后立即批准，并解锁依赖它的任务"
+        }
+      }
     },
     "agentWizard": {
       "title": "配置 Agent",
@@ -2486,7 +2502,9 @@
           "rename": "重命名",
           "search": "搜索"
         }
-      }
+      },
+      "liveStatusToggle": "实时 Agent 状态",
+      "liveStatusToggleDesc": "显示运行中 CLI Agent 的工作或等待状态；关闭后仍会采集溯源记录。"
     },
     "cliManagedConfig": {
       "title": "CLI 配置切换",

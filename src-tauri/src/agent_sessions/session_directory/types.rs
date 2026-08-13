@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 
 use core_types::key_source::KeySource;
 use orgtrack_core::sources::imported_history::ImportedHistorySidebarRow;
-use core_types::session::ParentSessionRelation;
 
 // ============================================================================
 // Core Types
@@ -22,7 +21,7 @@ pub struct SessionAggregateRecord {
     pub status: String,
     pub created_at: String,
     pub updated_at: String,
-    /// Session category: "cli", "agent" (Coding), or "os"
+    /// Session category: "cli", "agent" (Coding), "os", or "human"
     pub category: SessionCategory,
     /// Imported external-history source subtype, when this row comes from an external DB.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -33,6 +32,14 @@ pub struct SessionAggregateRecord {
     /// Repository path (CLI sessions)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repo_path: Option<String>,
+    /// Canonical Git worktree root discovered for an imported session's
+    /// recorded working folder. The original `repo_path` remains unchanged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_root_path: Option<String>,
+    /// Raw Git remote URLs captured by the imported-history cache. Consumers
+    /// normalize these into collaboration scope keys without live Git I/O.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_remote_urls: Option<Vec<String>>,
     /// Path to the file or directory where this session's persisted data lives.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub storage_path: Option<String>,
@@ -103,9 +110,6 @@ pub struct SessionAggregateRecord {
     /// Parent/root session id for child sessions such as Agent Org member sessions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
-    /// Explicit semantics for the parent ID. Absent means no lineage claim.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_session_relation: Option<ParentSessionRelation>,
     /// Agent Org roster member id for org member session rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub org_member_id: Option<String>,
@@ -132,6 +136,11 @@ pub struct SessionAggregateRecord {
     /// commits a value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_exec_mode: Option<String>,
+    /// Persistent product mode (`orgtrack/v1` §5.2):
+    /// `build | plan | ask | project`. Source of truth for whether the
+    /// session may mutate WorkItems/Routines. `None` = build.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub product_mode: Option<String>,
     /// Per-session unsent draft text. The contents the user has
     /// typed into the chat composer for this session but not yet sent.
     /// Persisted across navigation and app restarts. `None` means "no
@@ -159,10 +168,6 @@ pub struct SessionAggregateRecord {
     /// Source-impact touched file paths.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub touched_files: Option<Vec<String>>,
-    /// Channel origin for OS Agent sessions (e.g. "feishu", "telegram", "discord").
-    /// `None` for non-channel sessions (CLI, SDE, local GUI OS Agent).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub channel: Option<String>,
 }
 
 /// Session category enum.
@@ -175,6 +180,8 @@ pub enum SessionCategory {
     Agent,
     /// OS Agent session (external channels)
     Os,
+    /// User-authored proof-of-work session
+    Human,
 }
 
 impl SessionCategory {
@@ -183,6 +190,7 @@ impl SessionCategory {
             Self::Cli => "cli",
             Self::Agent => "agent",
             Self::Os => "os",
+            Self::Human => "human",
         }
     }
 
@@ -191,6 +199,7 @@ impl SessionCategory {
             "cli" => Ok(Self::Cli),
             "agent" => Ok(Self::Agent),
             "os" => Ok(Self::Os),
+            "human" => Ok(Self::Human),
             other => Err(format!("Unknown session category: {other}")),
         }
     }
@@ -208,7 +217,7 @@ pub struct SessionFilter {
     /// that must hydrate an older row without walking sidebar pagination.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_ids: Option<Vec<String>>,
-    /// Filter by category: "cli", "agent", "os"
+    /// Filter by category: "cli", "agent", "os", "human"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
     /// Filter by status (comma-separated for multiple)
@@ -263,6 +272,12 @@ pub struct SessionFilter {
     /// Only return active (ongoing) sessions
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_only: Option<bool>,
+    /// Exact-id lookups normally report continuation-superseded siblings as
+    /// absent so hydration surfaces never re-add rows the listing demoted.
+    /// Existence checks (the cloud vanished-session sweep) opt out: a
+    /// superseded sibling still exists locally and must not read as vanished.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_continuation_superseded: Option<bool>,
 }
 
 // ============================================================================
@@ -274,6 +289,39 @@ pub struct SessionFilter {
 #[serde(rename_all = "camelCase")]
 pub struct SessionListResponse {
     pub sessions: Vec<SessionAggregateRecord>,
+}
+
+/// Independent native sidebar streams. Classification happens in SQL before
+/// pagination so neither stream can consume the other's page capacity.
+#[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NativeSidebarSessionStream {
+    PinnedNative,
+    StandaloneAgent,
+    AgentOrgRoot,
+    OsAgent,
+    CliAgent,
+    HumanSession,
+}
+
+/// Stable keyset cursor for a native sidebar stream.
+///
+/// Native pages are ordered by `(updated_at DESC, session_id DESC)`. Carrying
+/// both values prevents ties from duplicating or skipping rows, and avoids
+/// deriving a database offset from the frontend's merged entity cache.
+#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSidebarSessionCursor {
+    pub updated_at: String,
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSidebarSessionPageResponse {
+    pub sessions: Vec<SessionAggregateRecord>,
+    pub next_cursor: Option<NativeSidebarSessionCursor>,
+    pub has_more: bool,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -315,6 +363,12 @@ pub struct ExternalHistorySidebarBucketPage {
 pub struct ExternalHistorySidebarResponse {
     pub source: String,
     pub buckets: Vec<ExternalHistorySidebarBucketPage>,
+    /// Set when this source's own store could not be read. The other sources in
+    /// the batch still carry their rows, and the caller must treat a failed
+    /// source as "unknown", never as "empty" — an empty page would let the
+    /// sidebar retire every row this source owns.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

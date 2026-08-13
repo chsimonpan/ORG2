@@ -13,6 +13,19 @@ use database::db::{get_connection, with_sessions_writer};
 use super::super::super::types::{SessionListFilter, SessionStatus};
 use super::record::{row_to_record, session_type, UnifiedSessionRecord, UNIFIED_SESSION_SELECT};
 
+const SESSION_DELETE_TABLES: &[&str] = &[
+    "agent_messages",
+    "agent_todos",
+    "agent_snapshots",
+    "agent_file_resolutions",
+    "session_token_usage",
+    "session_llm_usage_spans",
+    "session_tool_usage",
+    "events",
+    "pending_plan_approvals",
+    "agent_sessions",
+];
+
 /// Process-global mirror hook, registered once at app startup (see
 /// `lib.rs` setup). Fired after a successful write to any column the
 /// orgtrack canonical session store carries (name, status, model,
@@ -36,6 +49,7 @@ fn notify_session_mirror(session_id: &str) {
     if let Some(hook) = SESSION_MIRROR_HOOK.get() {
         hook(session_id);
     }
+    crate::coordination::agent_org_run_events::notify_agent_org_session_changed(session_id);
 }
 
 /// Companion delete hook: the upsert-style mirror hook cannot serve deletes
@@ -67,9 +81,9 @@ INSERT INTO agent_sessions (
     workspace_path, org_id, project_id, project_name,
     work_item_id, agent_role, worktree_path,
     worktree_branch, base_branch, merge_status,
-    project_slug, agent_definition_id, org_member_id, parent_session_id, parent_session_relation, parent_event_id,
+    project_slug, agent_definition_id, org_member_id, parent_session_id, parent_event_id,
     workspace_additional_json, key_source, agent_exec_mode, native_harness_type,
-    draft_text, reply_target_event_id, pinned
+    draft_text, reply_target_event_id, pinned, product_mode
 )
 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)
 ON CONFLICT(session_id) DO UPDATE SET
@@ -96,7 +110,6 @@ ON CONFLICT(session_id) DO UPDATE SET
     agent_definition_id        = COALESCE(excluded.agent_definition_id, agent_sessions.agent_definition_id),
     org_member_id              = COALESCE(excluded.org_member_id, agent_sessions.org_member_id),
     parent_session_id          = COALESCE(excluded.parent_session_id, agent_sessions.parent_session_id),
-    parent_session_relation    = COALESCE(excluded.parent_session_relation, agent_sessions.parent_session_relation),
     parent_event_id            = COALESCE(excluded.parent_event_id, agent_sessions.parent_event_id),
     -- Preserve existing workspace JSON unless the caller
     -- explicitly wrote a non-default value. This stops
@@ -137,7 +150,12 @@ ON CONFLICT(session_id) DO UPDATE SET
     reply_target_event_id      = agent_sessions.reply_target_event_id,
     -- `pinned` is user-set metadata. Only the explicit `update_pinned`
     -- helper writes it; upserts must preserve whatever the user set last.
-    pinned                     = agent_sessions.pinned
+    pinned                     = agent_sessions.pinned,
+    -- `product_mode` (orgtrack/v1 §5.2) is resolved once at create
+    -- (launch-from-work/routine → 'project') or by the explicit
+    -- `update_product_mode` path; background upserts must never
+    -- downgrade a Project session — same posture as agent_exec_mode.
+    product_mode               = COALESCE(agent_sessions.product_mode, excluded.product_mode)
 "#;
 
 /// Upsert a unified session.
@@ -173,7 +191,6 @@ pub fn upsert_session(record: &UnifiedSessionRecord) -> SqliteResult<()> {
                 record.agent_definition_id,
                 record.org_member_id,
                 record.parent_session_id,
-                record.parent_session_relation.map(|relation| relation.as_str()),
                 record.parent_event_id,
                 record.workspace_additional_json,
                 key_source_str,
@@ -182,6 +199,7 @@ pub fn upsert_session(record: &UnifiedSessionRecord) -> SqliteResult<()> {
                 record.draft_text,
                 record.reply_target_event_id,
                 record.pinned as i64,
+                record.product_mode,
             ],
         )?;
         Ok(())
@@ -302,13 +320,27 @@ pub fn mark_stale_running_sessions_abandoned() -> SqliteResult<usize> {
             params![
                 SessionStatus::Abandoned.as_str(),
                 now,
-                SessionStatus::Running.as_str(),
-                SessionStatus::WaitingForUser.as_str(),
-                SessionStatus::WaitingForFunds.as_str(),
+                SessionStatus::IN_FLIGHT[0].as_str(),
+                SessionStatus::IN_FLIGHT[1].as_str(),
+                SessionStatus::IN_FLIGHT[2].as_str(),
             ],
         )?;
         Ok(updated)
     })
+}
+
+/// Statuses that settle a turn from the Work Item's point of view: the
+/// linked-session mirror only runs once a session leaves the in-flight /
+/// pre-flight set, so `linked_sessions` never flaps mid-turn.
+fn settles_linked_session(status: SessionStatus) -> bool {
+    !matches!(
+        status,
+        SessionStatus::Pending
+            | SessionStatus::Running
+            | SessionStatus::WaitingForUser
+            | SessionStatus::WaitingForFunds
+            | SessionStatus::Paused
+    )
 }
 
 /// Update session status.
@@ -324,6 +356,9 @@ pub fn update_status(session_id: &str, status: SessionStatus) -> SqliteResult<bo
     })?;
     if changed {
         notify_session_mirror(session_id);
+        if settles_linked_session(status) {
+            super::super::linked_work_item::mirror_session_status_to_linked_work_item(session_id);
+        }
     }
     Ok(changed)
 }
@@ -365,6 +400,9 @@ pub fn finalize_terminal_turn_status(
     })?;
     if changed {
         notify_session_mirror(session_id);
+        if settles_linked_session(session_status) {
+            super::super::linked_work_item::mirror_session_status_to_linked_work_item(session_id);
+        }
     }
     Ok(changed)
 }
@@ -381,18 +419,19 @@ pub fn reconcile_sessions_with_terminal_turn_markers() -> SqliteResult<usize> {
         let updated = conn.execute(
             "UPDATE agent_sessions
              SET status = CASE
-                   WHEN last_terminal_turn_status = ?4 THEN ?5
-                   WHEN last_terminal_turn_status = ?6 THEN ?7
+                   WHEN last_terminal_turn_status = ?5 THEN ?6
+                   WHEN last_terminal_turn_status = ?7 THEN ?8
                    ELSE ?1
                  END,
                  updated_at = COALESCE(last_terminal_turn_at, updated_at)
-             WHERE status IN (?2, ?3)
+             WHERE status IN (?2, ?3, ?4)
                AND last_terminal_turn_id IS NOT NULL
-               AND last_terminal_turn_status IN (?4, ?6, ?8)",
+               AND last_terminal_turn_status IN (?5, ?7, ?9)",
             params![
                 SessionStatus::Completed.as_str(),
-                SessionStatus::Running.as_str(),
-                SessionStatus::WaitingForFunds.as_str(),
+                SessionStatus::IN_FLIGHT[0].as_str(),
+                SessionStatus::IN_FLIGHT[1].as_str(),
+                SessionStatus::IN_FLIGHT[2].as_str(),
                 "cancelled",
                 SessionStatus::Cancelled.as_str(),
                 "failed",
@@ -418,13 +457,19 @@ pub fn update_work_item_link(
     with_sessions_writer(|| {
         let conn = get_connection()?;
         let updated = conn.execute(
+            // Linking to a Work Item makes this a Project session — the same
+            // rule the launch resolver applies when work_item_id is present.
+            // Without this, a post-hoc-linked session keeps product_mode NULL
+            // and the PM tools stay policy-denied while the linked-work-item
+            // prompt block tells the model to call them.
             "UPDATE agent_sessions
              SET org_id = ?2,
                  project_id = COALESCE(?3, project_id),
                  project_name = COALESCE(?4, project_name),
                  work_item_id = ?5,
                  project_slug = ?6,
-                 agent_role = COALESCE(?7, agent_role)
+                 agent_role = COALESCE(?7, agent_role),
+                 product_mode = 'project'
              WHERE session_id = ?1",
             params![
                 session_id,
@@ -440,27 +485,20 @@ pub fn update_work_item_link(
     })
 }
 
-/// Associate a session with a project without manufacturing a work-item link.
-/// This is deliberately separate from `update_work_item_link`: an empty work
-/// item id otherwise leaks into the persisted session model.
-pub fn update_project_link(
-    session_id: &str,
-    org_id: &str,
-    project_id: &str,
-    project_name: &str,
-    project_slug: &str,
-) -> SqliteResult<bool> {
+/// Link the bootstrap-created root WorkItem to a Project session
+/// (orgtrack/v1 §7.2). Narrower than [`update_work_item_link`]: the
+/// session is already `product_mode='project'` and carries its own
+/// org/project fields; only the missing `work_item_id` is filled, and
+/// only if still unset — a concurrent link wins and this becomes a
+/// no-op.
+pub fn link_bootstrap_work_item(session_id: &str, work_item_id: &str) -> SqliteResult<bool> {
     with_sessions_writer(|| {
         let conn = get_connection()?;
         let updated = conn.execute(
             "UPDATE agent_sessions
-             SET org_id = ?2,
-                 project_id = ?3,
-                 project_name = ?4,
-                 project_slug = ?5,
-                 work_item_id = NULL
-             WHERE session_id = ?1",
-            params![session_id, org_id, project_id, project_name, project_slug],
+             SET work_item_id = ?2
+             WHERE session_id = ?1 AND work_item_id IS NULL",
+            params![session_id, work_item_id],
         )?;
         Ok(updated > 0)
     })
@@ -608,6 +646,52 @@ pub fn update_agent_exec_mode(session_id: &str, mode: &str) -> SqliteResult<bool
     Ok(changed)
 }
 
+/// Atomically update the product-mode and execution-mode axes behind one
+/// composer selection. This prevents a concurrently dispatched turn from
+/// observing Project capability with a stale Ask/Plan execution policy (or
+/// the inverse while leaving Project).
+pub fn update_mode_axes(
+    session_id: &str,
+    product_mode: &str,
+    agent_exec_mode: &str,
+) -> SqliteResult<bool> {
+    let changed = with_sessions_writer(|| -> SqliteResult<bool> {
+        let conn = get_connection()?;
+        let affected = conn.execute(
+            "UPDATE agent_sessions
+             SET product_mode = ?2, agent_exec_mode = ?3
+             WHERE session_id = ?1",
+            params![session_id, product_mode, agent_exec_mode],
+        )?;
+        Ok(affected > 0)
+    })?;
+    if changed {
+        notify_session_mirror(session_id);
+    }
+    Ok(changed)
+}
+
+/// Explicitly set the session's product mode (`orgtrack/v1` §5.2:
+/// build | plan | ask | project). Only user selection and the
+/// launch-from-work/routine resolver drive this — never exec mode,
+/// never background upserts (which preserve the column on conflict).
+///
+/// Does not bump `updated_at` (see invariant note above).
+pub fn update_product_mode(session_id: &str, mode: &str) -> SqliteResult<bool> {
+    let changed = with_sessions_writer(|| -> SqliteResult<bool> {
+        let conn = get_connection()?;
+        let affected = conn.execute(
+            "UPDATE agent_sessions SET product_mode = ?2 WHERE session_id = ?1",
+            params![session_id, mode],
+        )?;
+        Ok(affected > 0)
+    })?;
+    if changed {
+        notify_session_mirror(session_id);
+    }
+    Ok(changed)
+}
+
 /// Update the per-session unsent draft text. `text = None` clears the
 /// column (i.e. "no draft"); `Some("")` is treated the same as `None`
 /// so a debounced patch coming from an empty editor doesn't keep an
@@ -709,10 +793,14 @@ pub fn backfill_agent_definition_id(session_id: &str, definition_id: &str) -> Re
 
 /// Delete a session and all related data.
 ///
-/// Cascade order — each step is best-effort; a failure in a later step does
-/// not roll back earlier ones because the row-level cleanups are independent:
+/// Cascade order — hard-delete database rows and optional Agent Org
+/// materialization receipts are committed atomically; filesystem/lineage
+/// cleanup remains best-effort after that database boundary:
 ///
-/// 1. **Hard-delete tables** via `delete_session_cascade` (keyed by
+/// 1. Delete optional `agent_inbox_materializations` receipts when the Agent
+///    Org coordination schema is installed. Source Inbox rows stay unread so
+///    a replacement Session can retry.
+/// 2. **Hard-delete tables** via `delete_session_cascade` (keyed by
 ///    `session_id`):
 ///    - `agent_messages` (with associated image-file cleanup)
 ///    - `agent_todos`
@@ -724,16 +812,18 @@ pub fn backfill_agent_definition_id(session_id: &str, definition_id: &str) -> Re
 ///    - `events` (event-sourced history)
 ///    - `pending_plan_approvals` (Plan-mode approval state)
 ///    - `agent_sessions` (the row itself, always last)
-/// 2. **Lineage rows** via `lineage::delete_session_lineage`. Both
+/// 3. **Lineage rows** via `lineage::delete_session_lineage`. Both
 ///    `node_provenance` (keyed by `session_id`) and `commit_lineage`
 ///    (keyed by `provenance_id` → `node_provenance.id`) — `commit_lineage`
 ///    can't ride the generic cascade because it has no `session_id` column.
-/// 3. **Null-out soft references** in `learnings.source_session_id` — a
+/// 4. **Null-out soft references** in `learnings.source_session_id` — a
 ///    learning is a knowledge artefact that outlives the session that
 ///    produced it; we keep the row and only drop the back-pointer so it
 ///    never dangles to a dead session.
-/// 4. **Per-session file-history directory** under `~/.orgii/file-history/`.
-/// 5. **Agent worktree** (git worktree + `agent/<sid>` branch) under
+/// 5. **Per-session file-history directory** under `~/.orgii/file-history/`.
+/// 6. **Append-only shell replay artifacts and manifest rows** under the
+///    global `app_paths::shell_replays_dir()` root.
+/// 7. **Agent worktree** (git worktree + `agent/<sid>` branch) under
 ///    `~/.orgii/agent-worktrees/<repo_hash>/<sid>/`. Only attempted when
 ///    the session had a `workspace_path` (worktree is rooted under the
 ///    project repo). The CLI-agent path cleans up via
@@ -747,41 +837,8 @@ pub fn backfill_agent_definition_id(session_id: &str, definition_id: &str) -> Re
 /// run_deferred_cleanup` instead, which can delete DB rows without
 /// racing the runtime because the cache rehydrates from DB at startup.
 pub fn delete_session(session_id: &str) -> SqliteResult<()> {
-    let workspace_path = {
-        let conn = get_connection()?;
-        let row: SqliteResult<Option<String>> = conn.query_row(
-            "SELECT workspace_path FROM agent_sessions WHERE session_id = ?1",
-            [session_id],
-            |row| row.get::<_, Option<String>>(0),
-        );
-        match row {
-            Ok(p) => p,
-            Err(rusqlite::Error::QueryReturnedNoRows) => None,
-            Err(err) => {
-                warn!(
-                    "Failed to read workspace_path for session {}: {}",
-                    session_id, err
-                );
-                None
-            }
-        }
-    };
-
-    shared::delete_session_cascade(
-        session_id,
-        &[
-            "agent_messages",
-            "agent_todos",
-            "agent_snapshots",
-            "agent_file_resolutions",
-            "session_token_usage",
-            "session_llm_usage_spans",
-            "session_tool_usage",
-            "events",
-            "pending_plan_approvals",
-            "agent_sessions",
-        ],
-    )?;
+    prepare_session_delete(session_id)?;
+    shared::delete_session_cascade(session_id, SESSION_DELETE_TABLES)?;
     notify_session_delete_mirror(session_id);
 
     // Lineage tables can't ride the generic cascade: `commit_lineage` is keyed
@@ -813,6 +870,99 @@ pub fn delete_session(session_id: &str) -> SqliteResult<()> {
         );
     }
 
+    cleanup_session_derived_resources(session_id);
+    Ok(())
+}
+
+/// Validate and perform the existing pre-database resource cleanup for a
+/// session. Agent Org hierarchy deletion calls this for every Rust session
+/// before opening its shared SQLite transaction.
+pub(crate) fn prepare_session_delete(session_id: &str) -> SqliteResult<()> {
+    if let Err(error) =
+        crate::tools::impls::coding::exec::shell_replay::ensure_session_replays_deletable(
+            session_id,
+        )
+    {
+        return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+            std::io::Error::other(error),
+        )));
+    }
+    crate::tools::impls::coding::exec::shell_replay::queue_session_replay_cleanup(session_id)
+        .map_err(|error| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(error)))
+        })?;
+    let cleanup_context = {
+        let conn = get_connection()?;
+        let row: SqliteResult<(Option<String>, Option<String>, Option<String>)> = conn.query_row(
+            "SELECT workspace_path, worktree_path, base_branch FROM agent_sessions WHERE session_id = ?1",
+            [session_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        );
+        match row {
+            Ok(context) => Some(context),
+            Err(rusqlite::Error::QueryReturnedNoRows) => None,
+            Err(err) => return Err(err),
+        }
+    };
+
+    // Session-owned worktrees must be removed before the row that identifies
+    // their repo/path/branch. A failed Git cleanup keeps the row intact so a
+    // later delete can retry. Reused linked worktrees have no `base_branch`
+    // metadata and are deliberately not removed.
+    if let Some((Some(repo_path), worktree_path, Some(_base_branch))) = cleanup_context.as_ref() {
+        let repo_path = std::path::PathBuf::from(repo_path);
+        let worktree_still_exists = worktree_path
+            .as_deref()
+            .is_some_and(|path| std::path::Path::new(path).exists());
+        if repo_path.exists() {
+            git::worktree::remove_session_worktree(&repo_path, session_id, true)
+                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
+        } else if worktree_still_exists {
+            return Err(rusqlite::Error::ToSqlConversionFailure(
+                format!(
+                    "Cannot clean worktree for session {session_id}: repository path no longer exists: {}",
+                    repo_path.display()
+                )
+                .into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Delete the SQLite-owned data for one session through a caller-owned
+/// transaction. Unlike ordinary SDE deletion, hierarchy deletion treats
+/// lineage and learning unlink failures as transaction failures so no subset
+/// of the Agent Org tree can commit.
+pub(crate) fn delete_session_with_connection(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+) -> SqliteResult<()> {
+    let exists = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE session_id=?1)",
+        [session_id],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if !exists {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+    shared::delete_session_cascade_with_connection(conn, session_id, SESSION_DELETE_TABLES)?;
+    project_management::lineage::delete_session_lineage_with_connection(conn, session_id)?;
+    conn.execute(
+        "UPDATE learnings SET source_session_id = NULL WHERE source_session_id = ?1",
+        [session_id],
+    )?;
+    Ok(())
+}
+
+/// Run post-commit mirrors and derived filesystem cleanup for one deleted
+/// session.
+pub(crate) fn finish_session_delete(session_id: &str) {
+    notify_session_delete_mirror(session_id);
+    cleanup_session_derived_resources(session_id);
+}
+
+fn cleanup_session_derived_resources(session_id: &str) {
     // Per-session file-history is addressed by session_id alone, so drop the
     // whole directory regardless of workspace_path. Other sessions on the same
     // project are untouched.
@@ -823,22 +973,16 @@ pub fn delete_session(session_id: &str) -> SqliteResult<()> {
         );
     }
 
-    // Tear down the per-session worktree + `agent/<sid>` branch. Only
-    // meaningful when the session was grounded in a project; pure-channel
-    // OS sessions without a `workspace_path` never had a worktree.
-    if let Some(ref repo_path_str) = workspace_path {
-        let repo_path = std::path::PathBuf::from(repo_path_str);
-        if repo_path.exists() {
-            if let Err(err) = git::worktree::remove_session_worktree(&repo_path, session_id, true) {
-                warn!(
-                    "Failed to remove agent worktree for deleted session {}: {}",
-                    session_id, err
-                );
-            }
-        }
+    // Replays deliberately outlive EventStore/cache TTL eviction. They are
+    // removed only on this explicit durable Session deletion path.
+    if let Err(err) =
+        crate::tools::impls::coding::exec::shell_replay::remove_session_replays(session_id)
+    {
+        warn!(
+            "Failed to remove shell replays for deleted session {}: {}",
+            session_id, err
+        );
     }
-
-    Ok(())
 }
 
 /// Get all child sessions for a given parent session.
@@ -867,7 +1011,6 @@ pub fn get_parent_session(session_id: &str) -> SqliteResult<Option<UnifiedSessio
 mod tests {
     use super::*;
     use core_types::key_source::KeySource;
-    use core_types::session::ParentSessionRelation;
 
     /// Mirror the production `agent_sessions` schema columns referenced by
     /// [`UPSERT_SESSION_SQL`] and [`UNIFIED_SESSION_SELECT`]. Kept in this
@@ -901,7 +1044,6 @@ mod tests {
             agent_definition_id TEXT,
             org_member_id TEXT,
             parent_session_id TEXT,
-            parent_session_relation TEXT,
             parent_event_id TEXT,
             workspace_additional_json TEXT NOT NULL DEFAULT '{}',
             key_source TEXT NOT NULL DEFAULT 'own_key',
@@ -909,7 +1051,8 @@ mod tests {
             native_harness_type TEXT,
             draft_text TEXT,
             reply_target_event_id TEXT,
-            pinned INTEGER NOT NULL DEFAULT 0
+            pinned INTEGER NOT NULL DEFAULT 0,
+            product_mode TEXT
         );
         CREATE TABLE session_token_usage (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -993,7 +1136,6 @@ mod tests {
                 record.agent_definition_id,
                 record.org_member_id,
                 record.parent_session_id,
-                record.parent_session_relation.map(|relation| relation.as_str()),
                 record.parent_event_id,
                 record.workspace_additional_json,
                 key_source_str,
@@ -1002,6 +1144,7 @@ mod tests {
                 record.draft_text,
                 record.reply_target_event_id,
                 record.pinned as i64,
+                record.product_mode,
             ],
         )
         .unwrap();
@@ -1033,30 +1176,6 @@ mod tests {
         assert_eq!(market_back.key_source, KeySource::HostedKey);
         let own_back = select_one(&conn, "sid-own");
         assert_eq!(own_back.key_source, KeySource::OwnKey);
-    }
-
-    #[test]
-    fn parent_session_relation_round_trips_as_exact_wire_value() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute_batch(TEST_SCHEMA).unwrap();
-        let record = UnifiedSessionRecord {
-            parent_session_id: Some("archived-parent".to_string()),
-            parent_session_relation: Some(ParentSessionRelation::CompactContinuation),
-            ..make_record("compact-child", KeySource::OwnKey)
-        };
-        upsert_into(&conn, &record);
-        let saved: String = conn
-            .query_row(
-                "SELECT parent_session_relation FROM agent_sessions WHERE session_id = 'compact-child'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(saved, "compact_continuation");
-        assert_eq!(
-            select_one(&conn, "compact-child").parent_session_relation,
-            Some(ParentSessionRelation::CompactContinuation)
-        );
     }
 
     #[test]

@@ -83,9 +83,9 @@ pub fn read_all_projects_scoped(org_id: Option<&str>) -> Result<Vec<ProjectData>
 
     if let Some(org_id) = org_id {
         let mut stmt = map_db(connection.prepare(
-            "SELECT id, name, slug, org_id, workspace_id, status, priority, health, lead, description,
+            "SELECT id, name, slug, org_id, status, priority, health, lead, description,
                     short_id_prefix, next_work_item_id, start_date, target_date,
-                    linked_repos_json, agent_defaults_json, created_at, updated_at
+                    linked_repos_json, agent_defaults_json, created_at, updated_at, sync_kind
              FROM projects
              WHERE org_id = ?1
              ORDER BY updated_at DESC, created_at DESC",
@@ -98,9 +98,9 @@ pub fn read_all_projects_scoped(org_id: Option<&str>) -> Result<Vec<ProjectData>
     }
 
     let mut stmt = map_db(connection.prepare(
-        "SELECT id, name, slug, org_id, workspace_id, status, priority, health, lead, description,
+        "SELECT id, name, slug, org_id, status, priority, health, lead, description,
                 short_id_prefix, next_work_item_id, start_date, target_date,
-                linked_repos_json, agent_defaults_json, created_at, updated_at
+                linked_repos_json, agent_defaults_json, created_at, updated_at, sync_kind
          FROM projects
          ORDER BY updated_at DESC, created_at DESC",
     ))?;
@@ -122,9 +122,9 @@ pub fn read_project_scoped(slug: &str, org_id: Option<&str>) -> Result<ProjectDa
         map_db(
             connection
                 .query_row(
-                    "SELECT id, name, slug, org_id, workspace_id, status, priority, health, lead, description,
+                    "SELECT id, name, slug, org_id, status, priority, health, lead, description,
                             short_id_prefix, next_work_item_id, start_date, target_date,
-                            linked_repos_json, agent_defaults_json, created_at, updated_at
+                            linked_repos_json, agent_defaults_json, created_at, updated_at, sync_kind
                      FROM projects WHERE slug = ?1 AND org_id = ?2",
                     params![slug, org_id],
                     row_to_project_data,
@@ -135,9 +135,9 @@ pub fn read_project_scoped(slug: &str, org_id: Option<&str>) -> Result<ProjectDa
         map_db(
             connection
                 .query_row(
-                    "SELECT id, name, slug, org_id, workspace_id, status, priority, health, lead, description,
+                    "SELECT id, name, slug, org_id, status, priority, health, lead, description,
                             short_id_prefix, next_work_item_id, start_date, target_date,
-                            linked_repos_json, agent_defaults_json, created_at, updated_at
+                            linked_repos_json, agent_defaults_json, created_at, updated_at, sync_kind
                      FROM projects WHERE slug = ?1",
                     params![slug],
                     row_to_project_data,
@@ -249,27 +249,36 @@ fn write_project_inner(
     // project edits propagate through the per-field resolver on peers.
     let prior: Option<PriorProjectSnapshot> = map_db(
         tx.query_row(
-            "SELECT name, status, priority, health, lead, description,
+            "SELECT org_id, name, status, priority, health, lead, description,
                     short_id_prefix, start_date, target_date, field_revisions_json
                FROM projects WHERE id = ?1",
             params![&next_meta.id],
             |row| {
                 Ok(PriorProjectSnapshot {
-                    name: row.get(0)?,
-                    status: row.get(1)?,
-                    priority: row.get(2)?,
-                    health: row.get(3)?,
-                    lead: row.get(4)?,
-                    description: row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                    short_id_prefix: row.get(6)?,
-                    start_date: row.get(7)?,
-                    target_date: row.get(8)?,
-                    field_revisions_json: row.get(9)?,
+                    org_id: row.get(0)?,
+                    name: row.get(1)?,
+                    status: row.get(2)?,
+                    priority: row.get(3)?,
+                    health: row.get(4)?,
+                    lead: row.get(5)?,
+                    description: row.get::<_, Option<String>>(6)?.unwrap_or_default(),
+                    short_id_prefix: row.get(7)?,
+                    start_date: row.get(8)?,
+                    target_date: row.get(9)?,
+                    field_revisions_json: row.get(10)?,
                 })
             },
         )
         .optional(),
     )?;
+
+    if let Some(prior) = prior.as_ref() {
+        if prior.org_id != next_meta.org_id {
+            return Err(
+                "Project organization changes must use the project move operation".to_string(),
+            );
+        }
+    }
 
     let mut field_revisions: HashMap<String, FieldRevision> = prior
         .as_ref()
@@ -309,20 +318,20 @@ fn write_project_inner(
 
     map_db(tx.execute(
         "INSERT INTO projects (
-            id, name, slug, org_id, workspace_id, status, priority, health, lead, description,
+            id, name, slug, org_id, status, priority, health, lead, description,
             short_id_prefix, next_work_item_id, start_date, target_date,
             linked_repos_json, agent_defaults_json, created_at, updated_at,
             field_revisions_json
          ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-            ?11, ?12, ?13, ?14,
-            ?15, ?16, ?17, ?18, ?19
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+            ?10, ?11, ?12, ?13,
+            ?14, ?15, ?16, ?17,
+            ?18
          )
          ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             slug = excluded.slug,
             org_id = excluded.org_id,
-            workspace_id = excluded.workspace_id,
             status = excluded.status,
             priority = excluded.priority,
             health = excluded.health,
@@ -341,7 +350,6 @@ fn write_project_inner(
             next_meta.name,
             slug,
             next_meta.org_id,
-            next_meta.workspace_id,
             next_meta.status,
             next_meta.priority,
             next_meta.health,
@@ -416,6 +424,7 @@ fn parse_field_revisions_json(
 /// fields they actually changed. Mirrors the work-item
 /// `PriorSyncSnapshot`.
 struct PriorProjectSnapshot {
+    org_id: String,
     name: String,
     status: String,
     priority: String,
@@ -426,6 +435,90 @@ struct PriorProjectSnapshot {
     start_date: Option<String>,
     target_date: Option<String>,
     field_revisions_json: Option<String>,
+}
+
+/// Move a project and every project-scoped work item to another organization.
+///
+/// Organization ownership is denormalized onto work items so standalone org
+/// queries do not need to join through projects. Both tables and the cloud
+/// replication handoff therefore change in one immediate transaction.
+pub fn move_project_to_org(slug: &str, destination_org_id: &str) -> Result<ProjectData, String> {
+    let destination_org_id = destination_org_id.trim();
+    if destination_org_id.is_empty() {
+        return Err("Destination organization is required".to_string());
+    }
+
+    let mut connection = conn()?;
+    let tx = map_db(connection.transaction_with_behavior(TransactionBehavior::Immediate))?;
+    let destination_exists = map_db(
+        tx.query_row(
+            "SELECT 1 FROM project_orgs WHERE id = ?1",
+            params![destination_org_id],
+            |_| Ok(true),
+        )
+        .optional(),
+    )?
+    .unwrap_or(false);
+    if !destination_exists {
+        return Err(format!("Organization '{}' not found", destination_org_id));
+    }
+
+    let project: Option<(String, String)> = map_db(
+        tx.query_row(
+            "SELECT id, org_id FROM projects WHERE slug = ?1",
+            params![slug],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional(),
+    )?;
+    let Some((project_id, source_org_id)) = project else {
+        return Err(format!("Project '{}' not found", slug));
+    };
+    if source_org_id == destination_org_id {
+        drop(tx);
+        return read_project(slug);
+    }
+
+    let work_item_ids = {
+        let mut statement =
+            map_db(tx.prepare("SELECT id FROM workitems WHERE project_id = ?1 ORDER BY id"))?;
+        let rows = map_db(statement.query_map(params![&project_id], |row| row.get(0)))?;
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(map_db(row)?);
+        }
+        ids
+    };
+
+    crate::sync::collab_bridge::record_project_org_move_in_connection(
+        &tx,
+        &source_org_id,
+        destination_org_id,
+        &project_id,
+        slug,
+        &work_item_ids,
+    )?;
+
+    let now = now_ms();
+    map_db(tx.execute(
+        "UPDATE projects
+            SET org_id = ?1, updated_at = ?2,
+                local_version = local_version + 1,
+                collab_remote_version = NULL
+          WHERE id = ?3",
+        params![destination_org_id, now, &project_id],
+    ))?;
+    map_db(tx.execute(
+        "UPDATE workitems
+            SET org_id = ?1, updated_at = ?2,
+                local_version = local_version + 1,
+                collab_remote_version = NULL
+          WHERE project_id = ?3",
+        params![destination_org_id, now, &project_id],
+    ))?;
+    map_db(tx.commit())?;
+    crate::projects::events::notify_data_changed();
+    read_project(slug)
 }
 
 impl PriorProjectSnapshot {
@@ -496,6 +589,7 @@ pub fn delete_project(slug: &str) -> Result<(), String> {
     ))?;
     map_db(tx.execute("DELETE FROM projects WHERE id = ?1", params![&project_id]))?;
     map_db(tx.commit())?;
+    crate::projects::events::notify_work_item_schedule_changed();
 
     // Collab orgs propagate one project tombstone; the server atomically
     // cascades it to the remote work-item rows.
@@ -516,20 +610,22 @@ fn row_to_project_data(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectData>
     let name: String = row.get(1)?;
     let slug: String = row.get(2)?;
     let org_id: String = row.get(3)?;
-    let workspace_id: Option<String> = row.get(4)?;
-    let status: String = row.get(5)?;
-    let priority: String = row.get(6)?;
-    let health: String = row.get(7)?;
-    let lead: Option<String> = row.get(8)?;
-    let description: String = row.get::<_, Option<String>>(9)?.unwrap_or_default();
-    let short_id_prefix: String = row.get(10)?;
-    let next_work_item_id: i64 = row.get(11)?;
-    let start_date: Option<String> = row.get(12)?;
-    let target_date: Option<String> = row.get(13)?;
-    let linked_repos_json: String = row.get(14)?;
-    let agent_defaults_json: Option<String> = row.get(15)?;
-    let created_at_ms: i64 = row.get(16)?;
-    let updated_at_ms: i64 = row.get(17)?;
+    let status: String = row.get(4)?;
+    let priority: String = row.get(5)?;
+    let health: String = row.get(6)?;
+    let lead: Option<String> = row.get(7)?;
+    let description: String = row.get::<_, Option<String>>(8)?.unwrap_or_default();
+    let short_id_prefix: String = row.get(9)?;
+    let next_work_item_id: i64 = row.get(10)?;
+    let start_date: Option<String> = row.get(11)?;
+    let target_date: Option<String> = row.get(12)?;
+    let linked_repos_json: String = row.get(13)?;
+    let agent_defaults_json: Option<String> = row.get(14)?;
+    let created_at_ms: i64 = row.get(15)?;
+    let updated_at_ms: i64 = row.get(16)?;
+    let sync_adapter_id = row
+        .get::<_, Option<String>>(17)?
+        .filter(|adapter_id| adapter_id != "none");
 
     // `linked_repos_json` is a DB-stored JSON array of repo paths. Silent
     // empty fallback would make a project's repo links disappear from the
@@ -572,7 +668,6 @@ fn row_to_project_data(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectData>
         id,
         name,
         org_id,
-        workspace_id,
         status,
         priority,
         health,
@@ -594,6 +689,7 @@ fn row_to_project_data(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectData>
         meta,
         description,
         slug,
+        sync_adapter_id,
     })
 }
 
@@ -602,12 +698,25 @@ mod tests {
     use super::*;
     use test_helpers::test_env;
 
+    fn insert_org(id: &str, sync_provider: &str) {
+        let connection = conn().expect("project connection");
+        connection
+            .execute(
+                "INSERT INTO project_orgs
+                    (id, name, slug, org_key, source, sync_provider,
+                     external_org_id, created_at, updated_at)
+                 VALUES (?1, ?1, ?1, ?1, 'local', ?2,
+                         CASE WHEN ?2 = 'orgii_collab' THEN ?1 ELSE NULL END, 0, 0)",
+                params![id, sync_provider],
+            )
+            .expect("insert org");
+    }
+
     fn fixture(meta_id: &str, name: &str, slug_hint: &str) -> (String, ProjectMeta) {
         let meta = ProjectMeta {
             id: meta_id.to_string(),
             name: name.to_string(),
             org_id: "personal-org".to_string(),
-            workspace_id: None,
             status: "active".to_string(),
             priority: "none".to_string(),
             health: "no_updates".to_string(),
@@ -666,6 +775,44 @@ mod tests {
     }
 
     #[test]
+    fn reads_bound_sync_adapter_without_exposing_unbound_none() {
+        let _sandbox = test_env::sandbox();
+        let (slug, meta) = fixture("p1", "GitHub Project", "github-project");
+        write_project(&slug, &meta, "", true).expect("project");
+
+        assert_eq!(
+            read_project(&slug)
+                .expect("unbound project")
+                .sync_adapter_id,
+            None
+        );
+
+        let connection = crate::sync::io::conn().expect("sync connection");
+        crate::sync::io::attach_adapter(&connection, &slug, "github", "{}", "github-connection")
+            .expect("attach adapter");
+        drop(connection);
+
+        assert_eq!(
+            read_project(&slug)
+                .expect("bound project")
+                .sync_adapter_id
+                .as_deref(),
+            Some("github")
+        );
+
+        let connection = crate::sync::io::conn().expect("sync connection");
+        crate::sync::io::detach_adapter(&connection, &slug).expect("detach adapter");
+        drop(connection);
+
+        assert_eq!(
+            read_project(&slug)
+                .expect("detached project")
+                .sync_adapter_id,
+            None
+        );
+    }
+
+    #[test]
     fn read_all_returns_every_project_regardless_of_repo_links() {
         let _sandbox = test_env::sandbox();
 
@@ -715,6 +862,136 @@ mod tests {
         assert_eq!(back.meta.name, "Alpha Renamed");
         assert_eq!(back.meta.priority, "high");
         assert_eq!(back.description, "v2");
+    }
+
+    #[test]
+    fn generic_write_rejects_an_org_change() {
+        let _sandbox = test_env::sandbox();
+        insert_org("destination", "none");
+        let (slug, mut meta) = fixture("p1", "Alpha", "alpha");
+        write_project(&slug, &meta, "", true).expect("create");
+
+        meta.org_id = "destination".to_string();
+        let error = write_project(&slug, &meta, "", false).unwrap_err();
+
+        assert!(error.contains("project move operation"), "error: {error}");
+        assert_eq!(
+            read_project(&slug).expect("read").meta.org_id,
+            "personal-org"
+        );
+    }
+
+    #[test]
+    fn move_updates_project_and_children_as_one_org_invariant() {
+        let _sandbox = test_env::sandbox();
+        insert_org("destination", "none");
+        let (slug, meta) = fixture("p1", "Alpha", "alpha");
+        write_project(&slug, &meta, "", true).expect("create");
+        let connection = conn().expect("project connection");
+        connection
+            .execute(
+                "UPDATE projects
+                    SET local_version = 2, collab_remote_version = 8
+                  WHERE id = 'p1'",
+                [],
+            )
+            .expect("seed project versions");
+        connection
+            .execute(
+                "INSERT INTO workitems
+                    (id, org_id, project_id, short_id, title, created_at, updated_at,
+                     local_version, collab_remote_version)
+                 VALUES ('w1', 'personal-org', 'p1', 'ALP-1', 'Child', 0, 0, 3, 9)",
+                [],
+            )
+            .expect("insert work item");
+        drop(connection);
+
+        let moved = move_project_to_org(&slug, "destination").expect("move");
+        assert_eq!(moved.meta.org_id, "destination");
+
+        let connection = conn().expect("project connection");
+        let project_versions: (String, i64, Option<i64>) = connection
+            .query_row(
+                "SELECT org_id, local_version, collab_remote_version
+                   FROM projects WHERE id = 'p1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("project row");
+        assert_eq!(project_versions, ("destination".to_string(), 3, None));
+        let child: (String, i64, Option<i64>) = connection
+            .query_row(
+                "SELECT org_id, local_version, collab_remote_version
+                   FROM workitems WHERE id = 'w1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("child row");
+        assert_eq!(child, ("destination".to_string(), 4, None));
+    }
+
+    #[test]
+    fn cloud_move_enqueues_source_delete_and_destination_snapshots() {
+        let _sandbox = test_env::sandbox();
+        insert_org("cloud-source", "orgii_collab");
+        insert_org("cloud-destination", "orgii_collab");
+        let (slug, mut meta) = fixture("p1", "Alpha", "alpha");
+        meta.org_id = "cloud-source".to_string();
+        write_project(&slug, &meta, "", true).expect("create");
+        let connection = conn().expect("project connection");
+        connection
+            .execute("DELETE FROM outbox_entries", [])
+            .expect("clear");
+        connection
+            .execute(
+                "INSERT INTO workitems
+                    (id, org_id, project_id, short_id, title, created_at, updated_at)
+                 VALUES ('w1', 'cloud-source', 'p1', 'ALP-1', 'Child', 0, 0)",
+                [],
+            )
+            .expect("insert work item");
+        drop(connection);
+
+        move_project_to_org(&slug, "cloud-destination").expect("move");
+
+        let connection = conn().expect("project connection");
+        let mut statement = connection
+            .prepare(
+                "SELECT org_id, entity_type, entity_id, op
+                   FROM outbox_entries ORDER BY org_id, entity_type, entity_id",
+            )
+            .expect("prepare outbox");
+        let rows: Vec<(String, String, String, String)> = statement
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .expect("query outbox")
+            .map(|row| row.expect("outbox row"))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "cloud-destination".to_string(),
+                    "project".to_string(),
+                    "p1".to_string(),
+                    "update".to_string(),
+                ),
+                (
+                    "cloud-destination".to_string(),
+                    "work_item".to_string(),
+                    "w1".to_string(),
+                    "update".to_string(),
+                ),
+                (
+                    "cloud-source".to_string(),
+                    "project".to_string(),
+                    "p1".to_string(),
+                    "delete".to_string(),
+                ),
+            ]
+        );
     }
 
     #[test]

@@ -14,7 +14,6 @@ members = [
     "crates/bin-telegram-smoke",
     "crates/browser",
     "crates/container",
-    "crates/code-map",
     "crates/ui-indexer",
     "crates/database",
     "crates/db-browser",
@@ -27,7 +26,9 @@ members = [
     "crates/integrations",
     "crates/key-vault",
     "crates/lsp",
+    "crates/orgtrack-cli",
     "crates/orgtrack-core",
+    "crates/orgtrack-pm-cli",
     "crates/orgtrack-protocol",
     "crates/orgtrack-graph",
     "crates/orgtrack-sync",
@@ -203,6 +204,10 @@ tauri-plugin-webdriver-automation = { version = "0.1", optional = true }
 portable-pty = "0.9"
 tokio = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
+flate2 = "1"
+tar = "0.4"
+plist = "1"
+tempfile = "3.13"
 
 # Shared cross-crate type definitions (Phase 1 of workspace migration).
 # See `docs/rust-backend/modularization-plan--0504.md`.
@@ -240,7 +245,6 @@ browser = { path = "crates/browser" }
 # Local Docker container inspection and lifecycle commands for Launchpad.
 # Pure leaf — `app` re-registers its Tauri commands in `commands/handler_list.inc`.
 container = { path = "crates/container" }
-code_map = { path = "crates/code-map" }
 
 # Tauri commands for reading / writing the on-disk config files of
 # external CLI agents (Cursor, Claude Code, Codex). The `app` crate just
@@ -259,7 +263,6 @@ agent_cli = { path = "crates/agent-cli" }
 # event_pipeline_bridge, db_bridge, session_bridge}`; the wire crate fills
 # them in once at startup from `app::run()`.
 agent_core = { path = "crates/agent-core" }
-orgtrack_graph = { path = "crates/orgtrack-graph" }
 
 # Frontend-source-aware component index: parses tsx/jsx/vue/svelte to
 # build a component-name → source-location map for the Browser inspector
@@ -557,7 +560,12 @@ foreign-types = "0.5"   # ForeignType trait used by core-graphics types
 tauri-plugin-updater = "=2.9.0"
 
 [dev-dependencies]
-tempfile = "3.13"
+
+# `test-util` only for the test build: it is what lets a test drive Tokio's
+# clock (`#[tokio::test(start_paused = true)]`) rather than really sleeping out
+# a multi-second timeout. Deliberately absent from the production features.
+tokio = { workspace = true, features = ["test-util"] }
+
 insta = { version = "1", features = ["yaml", "redactions"] }
 assert_matches = "1"
 # HTTP mock server for sync adapter integration tests.

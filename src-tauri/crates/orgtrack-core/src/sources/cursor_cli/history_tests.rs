@@ -360,10 +360,34 @@ fn candidate_paths_include_home_chats_root() {
     // profile dirs exist on the machine, so they can't be asserted here —
     // but any that do appear must use the CLI's real `<config-dir>/chats`
     // layout, never a `.cursor` component under a profile dir.
-    assert!(!paths
-        .iter()
-        .any(|path| path.to_string_lossy().contains("cursor-cli-profiles")
-            && path.to_string_lossy().contains(".cursor")));
+    assert!(!paths.iter().any(
+        |path| path.to_string_lossy().contains("cursor-cli-profiles")
+            && path.to_string_lossy().contains(".cursor")
+    ));
+}
+
+#[test]
+fn candidate_paths_include_explicit_xdg_config_chats_root() {
+    // cursor-agent honors `$XDG_CONFIG_HOME/cursor` even on macOS, where
+    // `dirs::config_dir()` ignores XDG — the explicit env probe must appear
+    // as its own candidate. Restore the var afterwards so parallel tests on
+    // XDG-configured machines keep their real environment.
+    let key = "XDG_CONFIG_HOME";
+    let original = std::env::var_os(key);
+    std::env::set_var(key, "/orgii-test-xdg/config-home");
+
+    let paths = cursor_cli_history_candidate_paths();
+
+    match original {
+        Some(value) => std::env::set_var(key, value),
+        None => std::env::remove_var(key),
+    }
+
+    assert!(paths.contains(
+        &PathBuf::from("/orgii-test-xdg/config-home")
+            .join("cursor")
+            .join("chats")
+    ));
 }
 
 #[test]

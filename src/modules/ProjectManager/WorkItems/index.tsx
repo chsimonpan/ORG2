@@ -9,12 +9,17 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 
+import { STORY_SYNC_ADAPTER } from "@src/api/http/integrations/syncConnections";
+import { projectSyncApi } from "@src/api/http/project/sync";
+import IntegrationIcon from "@src/components/IntegrationIcon";
 import TabPill from "@src/components/TabPill";
 import type { TabPillItem } from "@src/components/TabPill";
+import { HEADER_ICON_SIZE } from "@src/config/workstation/tokens";
 import { useProjectOrgCloudPermissions } from "@src/features/Org2Cloud/useProjectOrgCloudPermissions";
 import { useCurrentUserMemberIds } from "@src/hooks/project/useCurrentUserMemberId";
 import type { WorkstationTabHeaderHost } from "@src/hooks/workStation";
 import type { LinkedRepoOption } from "@src/modules/ProjectManager/shared";
+import type { ProjectManagerBreadcrumbSegment } from "@src/modules/ProjectManager/shared/components/ProjectManagerBreadcrumb";
 import { Placeholder } from "@src/modules/shared/layouts/blocks";
 import { ContentSearchPalette } from "@src/scaffold/GlobalSpotlight/palettes";
 import { reposAtom } from "@src/store/repo";
@@ -25,6 +30,7 @@ import {
   type ProjectDetailSurfaceView,
 } from "@src/store/workstation/tabs";
 import type { WorkItemStatus } from "@src/types/core/workItem";
+import type { WorkItem } from "@src/types/core/workItem";
 import { confirmDestructiveAction } from "@src/util/dialogs/confirmDestructiveAction";
 
 import { ProjectDetailSurfacePillSwitch } from "../ProjectManagerLayout/components/ProjectDetailSurfacePillSwitch";
@@ -66,7 +72,7 @@ const WORK_ITEMS_VIEW_TABS: readonly WorkItemsViewTab[] = ["List", "Kanban"];
 export type { EmbeddedWorkItemDetailState } from "./hooks/useWorkItemsTabBarState";
 
 export interface WorkItemsPageProps {
-  breadcrumbSegments?: readonly { label: string }[];
+  breadcrumbSegments?: readonly ProjectManagerBreadcrumbSegment[];
   /** Project ID from the active tab */
   projectId: string;
   /** Project name from the active tab (for display) */
@@ -83,6 +89,8 @@ export interface WorkItemsPageProps {
   onProjectViewChange?: (view: ProjectDetailSurfaceView) => void;
   /** Called when the resolved project slug is known, so the layout can persist it to the tab */
   onProjectSlugResolved?: (slug: string) => void;
+  /** Navigate back to the Projects index from the breadcrumb. */
+  onOpenProjects?: () => void;
   /** Callback to open the "New Project" modal */
   onCreateProject?: () => void;
   /** Callback to open a "New Work Item" tab */
@@ -97,15 +105,15 @@ export interface WorkItemsPageProps {
   onSetUnsaved?: (unsaved: boolean) => void;
   /** Notify parent tab system when the project title changes */
   onProjectNameUpdated?: (projectName: string) => void;
-  /** Navigate to the repo-level Projects list. */
-  onOpenProjects?: () => void;
   /** Navigate to repo-level settings (Projects > Settings tab) */
   onOpenRepoSettings?: () => void;
   /** Open a work item in its own dedicated tab (carries unsaved changes) */
   onExpandWorkItemToTab?: (
     workItemId: string,
     workItemName: string,
-    pendingUpdates?: Record<string, unknown>
+    pendingUpdates?: Record<string, unknown>,
+    workItemStatus?: string,
+    workItem?: WorkItem
   ) => void;
   /** Notify parent tab system when the embedded work item title changes */
   onEmbeddedWorkItemNameUpdated?: (workItemName: string) => void;
@@ -141,12 +149,12 @@ const WorkItemsPage: React.FC<WorkItemsPageProps> = ({
   projectView = PROJECT_DETAIL_SURFACE_VIEW.WORK_ITEMS,
   onProjectViewChange,
   onProjectSlugResolved,
+  onOpenProjects,
   onCreateProject,
   onCreateWorkItem,
   onProjectDeleted,
   onSetUnsaved,
   onProjectNameUpdated,
-  onOpenProjects,
   onOpenRepoSettings,
   onExpandWorkItemToTab,
   onEmbeddedWorkItemNameUpdated,
@@ -157,8 +165,17 @@ const WorkItemsPage: React.FC<WorkItemsPageProps> = ({
   workstationHeaderHost = "project",
 }) => {
   const { t } = useTranslation("projects");
+  const interactiveBreadcrumbSegments = useMemo(
+    () =>
+      breadcrumbSegments?.map((segment, index) =>
+        index === 0 && onOpenProjects && !segment.onClick
+          ? { ...segment, onClick: onOpenProjects }
+          : segment
+      ),
+    [breadcrumbSegments, onOpenProjects]
+  );
   const { canAdminister: canAdministerProjectOrg } =
-    useProjectOrgCloudPermissions();
+    useProjectOrgCloudPermissions(isActive);
   const activeWorkspaceRootPath = useAtomValue(activeWorkspaceRootPathAtom);
   const allRepos = useAtomValue(reposAtom);
   const availableRepos = useMemo<LinkedRepoOption[]>(
@@ -267,6 +284,25 @@ const WorkItemsPage: React.FC<WorkItemsPageProps> = ({
     },
     [confirmWorkItemDelete, data.workItems, handlers]
   );
+  const handleOpenWorkItem = useCallback(
+    (workItemId: string) => {
+      const workItem = data.workItems.find(
+        (candidate) => candidate.session_id === workItemId
+      );
+      if (!workItem || !onExpandWorkItemToTab) {
+        handlers.handleSelect(workItemId);
+        return;
+      }
+      onExpandWorkItemToTab(
+        workItem.session_id,
+        workItem.name || t("workItems.untitled"),
+        undefined,
+        workItem.workItemStatus ?? workItem.status,
+        workItem
+      );
+    },
+    [data.workItems, handlers, onExpandWorkItemToTab, t]
+  );
 
   const {
     selectedIds,
@@ -315,6 +351,10 @@ const WorkItemsPage: React.FC<WorkItemsPageProps> = ({
   const [hasWorkItemPendingChanges, setHasWorkItemPendingChanges] =
     useState(false);
   const [workItemPropertiesOpen, setWorkItemPropertiesOpen] = useState(true);
+  const [projectSyncAdapter, setProjectSyncAdapter] = useState<{
+    projectSlug: string;
+    adapterId: string | null;
+  } | null>(null);
 
   const handleCloseDetail = useCallback(() => {
     handlers.handleCloseWorkItemDetail();
@@ -324,9 +364,51 @@ const WorkItemsPage: React.FC<WorkItemsPageProps> = ({
   const linkedRepoPath = sourceProject?.linkedRepos?.[0]?.id;
   const resolvedRepoPath = linkedRepoPath ?? activeWorkspaceRootPath ?? null;
   const resolvedProjectSlug = projectData.project?.slug ?? null;
+  const projectSyncAdapterId =
+    projectSyncAdapter && projectSyncAdapter.projectSlug === resolvedProjectSlug
+      ? projectSyncAdapter.adapterId
+      : undefined;
+  const projectIdentityIcon = useMemo(
+    () =>
+      projectSyncAdapterId === STORY_SYNC_ADAPTER.GITHUB ? (
+        <IntegrationIcon
+          type={STORY_SYNC_ADAPTER.GITHUB}
+          size={HEADER_ICON_SIZE.sm}
+        />
+      ) : undefined,
+    [projectSyncAdapterId]
+  );
   const selectedShortId = data.selectedWorkItem
     ? (data.getShortId(data.selectedWorkItem.session_id) ?? null)
     : null;
+
+  useEffect(() => {
+    if (!resolvedProjectSlug) return;
+
+    let cancelled = false;
+    void projectSyncApi
+      .status(resolvedProjectSlug)
+      .then((status) => {
+        if (!cancelled) {
+          setProjectSyncAdapter({
+            projectSlug: resolvedProjectSlug,
+            adapterId: status.adapter_id,
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setProjectSyncAdapter({
+            projectSlug: resolvedProjectSlug,
+            adapterId: null,
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedProjectSlug]);
 
   const {
     actionsInStationTabBar: tabBarActionsInStationTabBar,
@@ -368,8 +450,13 @@ const WorkItemsPage: React.FC<WorkItemsPageProps> = ({
       onRefreshWorkItem={data.refresh}
       onOpenSession={onOpenChatSession}
       onWorkItemNameUpdated={onEmbeddedWorkItemNameUpdated}
-      onExpandWorkItemToTab={onExpandWorkItemToTab}
+      breadcrumbSegments={interactiveBreadcrumbSegments}
       breadcrumbProjectName={headerTitle}
+      breadcrumbIcon={projectIdentityIcon}
+      titleEditable={
+        projectSyncAdapterId !== undefined &&
+        projectSyncAdapterId !== STORY_SYNC_ADAPTER.GITHUB
+      }
       propertiesOpen={workItemPropertiesOpen}
       onToggleProperties={() => setWorkItemPropertiesOpen((prev) => !prev)}
       publishHeaderToWorkstation={tabBarActionsInStationTabBar && isActive}
@@ -543,19 +630,18 @@ const WorkItemsPage: React.FC<WorkItemsPageProps> = ({
   const resolvedProjectDescription =
     displayProject.description ?? projectData.project?.description;
 
-  // When a work item is selected, the detail's own header (with the
-  // `Project > Item` breadcrumb) replaces the page header. Otherwise the
-  // page header with view tabs / status filter is shown.
+  // When a work item is selected, the detail keeps the page's full parent
+  // hierarchy and appends the item. Otherwise the page header is shown.
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {!isDetailOpen && (
         <WorkItemsPageHeader
           projectName={headerTitle}
-          breadcrumbSegments={breadcrumbSegments}
+          breadcrumbSegments={interactiveBreadcrumbSegments}
+          identityIcon={projectIdentityIcon}
           onOpenProjects={onOpenProjects}
           activeTab={state.activeTab}
           leadingControls={projectSurfaceControls}
-          onTabChange={handleHeaderTabChange}
           statusFilter={isWorkItemsSurface ? state.statusFilter : undefined}
           onStatusFilterChange={
             isWorkItemsSurface
@@ -624,6 +710,9 @@ const WorkItemsPage: React.FC<WorkItemsPageProps> = ({
           projectName={displayProject.name}
           projectDescription={resolvedProjectDescription}
           projectProperties={displayProject}
+          hideProjectPropertiesRow={
+            projectSyncAdapterId === STORY_SYNC_ADAPTER.GITHUB
+          }
           repoPath={repoPath}
           availableMembers={projectData.availableMembers}
           availableTeams={projectData.availableTeams}
@@ -635,7 +724,7 @@ const WorkItemsPage: React.FC<WorkItemsPageProps> = ({
           overviewStats={data.overviewStats}
           checkedWorkItemIds={selectedIds}
           onCheckedChange={handleCheckedChange}
-          onSelectWorkItem={handlers.handleSelect}
+          onSelectWorkItem={handleOpenWorkItem}
           onUpdateWorkItem={handlers.handleUpdate}
           onDeleteWorkItem={handleDeleteWorkItem}
           onRestoreWorkItem={handlers.handleRestore}
@@ -646,11 +735,11 @@ const WorkItemsPage: React.FC<WorkItemsPageProps> = ({
           onProjectDescriptionChange={handleProjectDescriptionChange}
           onProjectPropertiesChange={handleLocalProjectUpdate}
           onKanbanTaskMove={handlers.handleKanbanTaskMove}
-          onKanbanTaskClick={handlers.handleKanbanTaskClick}
+          onKanbanTaskClick={(task) => handleOpenWorkItem(task.id)}
           onAddKanbanTask={handlers.handleAddTask}
-          onGanttTaskClick={handlers.handleGanttTaskClick}
+          onGanttTaskClick={(task) => handleOpenWorkItem(task.id)}
           onGanttTaskUpdate={handlers.handleGanttTaskUpdate}
-          onCalendarEventClick={handlers.handleCalendarEventClick}
+          onCalendarEventClick={(event) => handleOpenWorkItem(event.id)}
           kanbanGroupBy={kanbanGroupBy}
           pinnedKanbanColumnIds={pinnedKanbanColumnIds}
           kanbanTasks={data.kanbanTasks}

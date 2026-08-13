@@ -47,7 +47,6 @@ import { EditorIntegrations } from "./EditorLayout/components/EditorIntegrations
 import FileSearchPanel from "./EditorLayout/overlays/FileSearchPanel";
 import EditorBottomPanel from "./Panels/EditorBottomPanel";
 import EditorContent from "./Panels/EditorMainPane";
-import { preloadSourceControlTabContent } from "./Panels/EditorMainPane/content";
 import { EditorPrimarySidebar } from "./Panels/EditorPrimarySidebar";
 import { useCodeEditorLocalState } from "./useCodeEditorLocalState";
 import { useSourceControlSetup } from "./useSourceControlSetup";
@@ -149,11 +148,6 @@ export const CodeEditor: React.FC<CodeEditorProps> = memo(
     });
 
     useEffect(() => {
-      const preloadTimer = window.setTimeout(preloadSourceControlTabContent, 0);
-      return () => window.clearTimeout(preloadTimer);
-    }, []);
-
-    useEffect(() => {
       if (!tabs.some((tab) => String(tab.type) === "launchpad-dashboard"))
         return;
       setLayout((previousLayout) => {
@@ -211,6 +205,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = memo(
     const {
       sourceControlFilterMode,
       sourceControlFilterCounts,
+      sourceControlActiveRepoRoot,
       sourceControlHeaderFilter,
       sourceControlHeaderScopePicker,
       tabSidebarExtraContext,
@@ -265,6 +260,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = memo(
 
     const activeTabHasNoSidebar =
       activeTab?.type === "agent-config" ||
+      activeTab?.type === "chat-session" ||
       activeTab?.type === "github-issue-detail" ||
       activeTab?.type === "github-pr-detail" ||
       activeTab?.type === "search-sessions";
@@ -454,6 +450,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = memo(
             sourceControlHeaderLeadingSlot={editorSourceControlScopePicker}
             sourceControlHeaderTrailingSlot={editorSourceControlHeaderSlot}
             sourceControlFilterMode={editorSourceControlFilterMode}
+            sourceControlActiveRepoRoot={sourceControlActiveRepoRoot}
             showSourceControlModePill={editorShowSourceControlModePill}
           />
         </div>
@@ -484,6 +481,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = memo(
         editorSourceControlScopePicker,
         editorSourceControlHeaderSlot,
         editorSourceControlFilterMode,
+        sourceControlActiveRepoRoot,
         editorShowSourceControlModePill,
       ]
     );
@@ -535,7 +533,9 @@ export const CodeEditor: React.FC<CodeEditorProps> = memo(
     // Single mount while visible — CSS grid swaps axis without unmounting EditorBottomPanel.
     const [editorRightPanelWidth, setEditorRightPanelWidth] = useState(400);
     const shouldHideSecondaryPanel =
-      activeTab?.type === "terminal" || activeTab?.type === "source-control";
+      activeTab?.type === "terminal" ||
+      activeTab?.type === "source-control" ||
+      activeTab?.type === "chat-session";
     const secondaryPanelConfig = useMemo(() => {
       if (shouldHideSecondaryPanel) return undefined;
 

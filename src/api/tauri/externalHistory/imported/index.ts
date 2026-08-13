@@ -9,15 +9,27 @@ import {
   claudeCodeHistoryStat,
 } from "../sources/claudeCode";
 import { clineHistoryChunks } from "../sources/cline";
-import { codexAppChunks } from "../sources/codexApp";
+import { codexAppChunks, codexAppInitialWindow } from "../sources/codexApp";
+import { copilotHistoryChunks } from "../sources/copilot";
 import { cursorCliHistoryChunks } from "../sources/cursorCli";
+import { kimiHistoryChunks } from "../sources/kimi";
+import { mimoCodeHistoryChunks } from "../sources/mimoCode";
+import { ompHistoryChunks } from "../sources/omp";
 import { opencodeHistoryChunks } from "../sources/opencode";
+import { piHistoryChunks } from "../sources/pi";
 import { qoderHistoryChunks } from "../sources/qoder";
+import { qoderCliHistoryChunks } from "../sources/qoderCli";
+import { qwenCodeHistoryChunks } from "../sources/qwenCode";
 import { traeHistoryChunks } from "../sources/trae";
 import { warpHistoryChunks } from "../sources/warp";
 import { windsurfHistoryChunks } from "../sources/windsurf";
 import { workBuddyHistoryChunks } from "../sources/workbuddy";
 import { zcodeHistoryChunks } from "../sources/zcode";
+import {
+  type ImportedHistoryCloudTurnWindow,
+  importedHistoryCloudTurnIds,
+  importedHistoryCloudTurnWindows,
+} from "./cloudReplay";
 import {
   IMPORTED_HISTORY_SOURCE_DESCRIPTORS,
   type ImportedHistoryListCategory,
@@ -25,6 +37,7 @@ import {
   type ImportedHistorySourceId,
 } from "./descriptors";
 import { importedHistoryStat } from "./stat";
+import { importedHistoryInitialWindow } from "./window";
 
 export type {
   ImportedHistoryListCategory,
@@ -32,6 +45,13 @@ export type {
   ImportedHistorySourceId,
 };
 export { IMPORTED_HISTORY_SOURCE_DESCRIPTORS };
+export type { ImportedHistoryCloudTurnWindow };
+export {
+  importedHistoryInitialWindow,
+  importedHistoryTurnWindows,
+  type ImportedHistoryInitialWindow,
+  type ImportedHistoryTurnWindow,
+} from "./window";
 
 export type { ImportedTranscriptStat };
 
@@ -42,6 +62,17 @@ export interface ImportedHistorySource extends ImportedHistorySourceDescriptor {
   /** Complete source transcript used for cloud replay/fork publication. */
   loadFullTranscriptChunks(sessionId: string): Promise<ActivityChunk[]>;
   /**
+   * Bounded turn-addressable read used by Cloud after an authoritative full
+   * anchor exists. Unsupported providers omit both methods and retain the
+   * complete-transcript fallback.
+   */
+  loadCloudTurnIds?(sessionId: string): Promise<string[]>;
+  loadCloudTurnWindows?(
+    sessionId: string,
+    turnIds: string[],
+    startSequence: number
+  ): Promise<ImportedHistoryCloudTurnWindow[]>;
+  /**
    * Optional freshness probe (one backend `stat`). When present, the replay
    * auto-refresh compares it against the previous tick and skips the full
    * read/parse/merge pipeline while the transcript is unchanged. Sources
@@ -51,6 +82,18 @@ export interface ImportedHistorySource extends ImportedHistorySourceDescriptor {
 }
 
 const CURSOR_IDE_INITIAL_RECENT_BUBBLE_LIMIT = 100;
+const IMPORTED_HISTORY_INITIAL_RECENT_TURN_COUNT = 1;
+
+async function loadGenericPreviewChunks(
+  sessionId: string
+): Promise<ActivityChunk[]> {
+  return (
+    await importedHistoryInitialWindow({
+      sessionId,
+      recentTurnCount: IMPORTED_HISTORY_INITIAL_RECENT_TURN_COUNT,
+    })
+  ).chunks;
+}
 
 function descriptorFor(
   sourceId: ImportedHistorySourceId
@@ -78,83 +121,143 @@ export const IMPORTED_HISTORY_SOURCES: readonly ImportedHistorySource[] = [
       ).chunks;
     },
     loadFullTranscriptChunks: cursorIdeChunks,
+    loadCloudTurnIds: importedHistoryCloudTurnIds,
+    loadCloudTurnWindows: (sessionId, turnIds, startSequence) =>
+      importedHistoryCloudTurnWindows({ sessionId, turnIds, startSequence }),
   },
   {
     ...descriptorFor("cursor_cli"),
     dispatchCategory: "external_history",
     statTranscript: (sessionId) => importedHistoryStat("cursor_cli", sessionId),
-    loadPreviewChunks: cursorCliHistoryChunks,
+    loadPreviewChunks: loadGenericPreviewChunks,
     loadFullTranscriptChunks: cursorCliHistoryChunks,
   },
   {
     ...descriptorFor("codex_app"),
     dispatchCategory: "external_history",
     statTranscript: (sessionId) => importedHistoryStat("codex_app", sessionId),
-    loadPreviewChunks: codexAppChunks,
+    async loadPreviewChunks(sessionId) {
+      return (await codexAppInitialWindow(sessionId)).chunks;
+    },
     loadFullTranscriptChunks: codexAppChunks,
+    loadCloudTurnIds: importedHistoryCloudTurnIds,
+    loadCloudTurnWindows: (sessionId, turnIds, startSequence) =>
+      importedHistoryCloudTurnWindows({ sessionId, turnIds, startSequence }),
   },
   {
     ...descriptorFor("claude_code"),
     dispatchCategory: "external_history",
-    loadPreviewChunks: claudeCodeHistoryChunks,
+    loadPreviewChunks: loadGenericPreviewChunks,
     loadFullTranscriptChunks: claudeCodeHistoryChunks,
     statTranscript: claudeCodeHistoryStat,
+    loadCloudTurnIds: importedHistoryCloudTurnIds,
+    loadCloudTurnWindows: (sessionId, turnIds, startSequence) =>
+      importedHistoryCloudTurnWindows({ sessionId, turnIds, startSequence }),
   },
   {
     ...descriptorFor("opencode"),
     dispatchCategory: "external_history",
     statTranscript: (sessionId) => importedHistoryStat("opencode", sessionId),
-    loadPreviewChunks: opencodeHistoryChunks,
+    loadPreviewChunks: loadGenericPreviewChunks,
     loadFullTranscriptChunks: opencodeHistoryChunks,
   },
   {
     ...descriptorFor("windsurf"),
     dispatchCategory: "external_history",
     statTranscript: (sessionId) => importedHistoryStat("windsurf", sessionId),
-    loadPreviewChunks: windsurfHistoryChunks,
+    loadPreviewChunks: loadGenericPreviewChunks,
     loadFullTranscriptChunks: windsurfHistoryChunks,
   },
   {
     ...descriptorFor("workbuddy"),
     dispatchCategory: "external_history",
     statTranscript: (sessionId) => importedHistoryStat("workbuddy", sessionId),
-    loadPreviewChunks: workBuddyHistoryChunks,
+    loadPreviewChunks: loadGenericPreviewChunks,
     loadFullTranscriptChunks: workBuddyHistoryChunks,
   },
   {
     ...descriptorFor("trae"),
     dispatchCategory: "external_history",
     statTranscript: (sessionId) => importedHistoryStat("trae", sessionId),
-    loadPreviewChunks: traeHistoryChunks,
+    loadPreviewChunks: loadGenericPreviewChunks,
     loadFullTranscriptChunks: traeHistoryChunks,
   },
   {
     ...descriptorFor("cline"),
     dispatchCategory: "external_history",
     statTranscript: (sessionId) => importedHistoryStat("cline", sessionId),
-    loadPreviewChunks: clineHistoryChunks,
+    loadPreviewChunks: loadGenericPreviewChunks,
     loadFullTranscriptChunks: clineHistoryChunks,
   },
   {
     ...descriptorFor("warp"),
     dispatchCategory: "external_history",
     statTranscript: (sessionId) => importedHistoryStat("warp", sessionId),
-    loadPreviewChunks: warpHistoryChunks,
+    loadPreviewChunks: loadGenericPreviewChunks,
     loadFullTranscriptChunks: warpHistoryChunks,
   },
   {
     ...descriptorFor("zcode"),
     dispatchCategory: "external_history",
     statTranscript: (sessionId) => importedHistoryStat("zcode", sessionId),
-    loadPreviewChunks: zcodeHistoryChunks,
+    loadPreviewChunks: loadGenericPreviewChunks,
     loadFullTranscriptChunks: zcodeHistoryChunks,
   },
   {
     ...descriptorFor("qoder"),
     dispatchCategory: "external_history",
     statTranscript: (sessionId) => importedHistoryStat("qoder", sessionId),
-    loadPreviewChunks: qoderHistoryChunks,
+    loadPreviewChunks: loadGenericPreviewChunks,
     loadFullTranscriptChunks: qoderHistoryChunks,
+  },
+  {
+    ...descriptorFor("mimo_code"),
+    dispatchCategory: "external_history",
+    statTranscript: (sessionId) => importedHistoryStat("mimo_code", sessionId),
+    loadPreviewChunks: loadGenericPreviewChunks,
+    loadFullTranscriptChunks: mimoCodeHistoryChunks,
+  },
+  {
+    ...descriptorFor("omp"),
+    dispatchCategory: "external_history",
+    statTranscript: (sessionId) => importedHistoryStat("omp", sessionId),
+    loadPreviewChunks: loadGenericPreviewChunks,
+    loadFullTranscriptChunks: ompHistoryChunks,
+  },
+  {
+    ...descriptorFor("pi"),
+    dispatchCategory: "external_history",
+    statTranscript: (sessionId) => importedHistoryStat("pi", sessionId),
+    loadPreviewChunks: loadGenericPreviewChunks,
+    loadFullTranscriptChunks: piHistoryChunks,
+  },
+  {
+    ...descriptorFor("qoder_cli"),
+    dispatchCategory: "external_history",
+    statTranscript: (sessionId) => importedHistoryStat("qoder_cli", sessionId),
+    loadPreviewChunks: loadGenericPreviewChunks,
+    loadFullTranscriptChunks: qoderCliHistoryChunks,
+  },
+  {
+    ...descriptorFor("qwen_code"),
+    dispatchCategory: "external_history",
+    statTranscript: (sessionId) => importedHistoryStat("qwen_code", sessionId),
+    loadPreviewChunks: loadGenericPreviewChunks,
+    loadFullTranscriptChunks: qwenCodeHistoryChunks,
+  },
+  {
+    ...descriptorFor("copilot"),
+    dispatchCategory: "external_history",
+    statTranscript: (sessionId) => importedHistoryStat("copilot", sessionId),
+    loadPreviewChunks: loadGenericPreviewChunks,
+    loadFullTranscriptChunks: copilotHistoryChunks,
+  },
+  {
+    ...descriptorFor("kimi"),
+    dispatchCategory: "external_history",
+    statTranscript: (sessionId) => importedHistoryStat("kimi", sessionId),
+    loadPreviewChunks: loadGenericPreviewChunks,
+    loadFullTranscriptChunks: kimiHistoryChunks,
   },
 ];
 
@@ -165,6 +268,19 @@ export function getImportedHistorySourceBySessionId(
   return IMPORTED_HISTORY_SOURCES.find((source) =>
     sessionId.startsWith(source.prefix)
   );
+}
+
+/**
+ * The native-CLI continuation capability of the source owning `sessionId`,
+ * or `undefined` when the source is a pure read-only replay (no CLI can
+ * reopen its sessions). Sync and prefix-driven so render gates (composer,
+ * continue button) don't need the backend plan call; the backend stays
+ * authoritative per session.
+ */
+export function getImportedHistoryCliResume(
+  sessionId: string | null | undefined
+) {
+  return getImportedHistorySourceBySessionId(sessionId)?.cliResume;
 }
 
 export function getImportedHistorySourceByListCategory(

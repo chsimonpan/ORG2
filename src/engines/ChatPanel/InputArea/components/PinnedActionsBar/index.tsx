@@ -23,6 +23,10 @@ import { useTranslation } from "react-i18next";
 
 import Button from "@src/components/Button";
 import type { ComposerInputRef } from "@src/components/ComposerInput";
+import {
+  PILL_CONTROL_IDLE_SURFACE_CLASS,
+  pillControlStateClass,
+} from "@src/components/CompoundPill/config";
 import { FileTreeHoverPreview } from "@src/components/FileTreePreview/exports";
 import UserActionButton from "@src/engines/ChatPanel/InputArea/components/UserActionButton";
 import { useCanvasForTurn } from "@src/engines/ChatPanel/blocks/CanvasInlineCard/useCanvasForTurn";
@@ -73,7 +77,7 @@ const ActionPill: React.FC<ActionPillProps> = memo(
         shape="round"
         title={action.name}
         onClick={(event) => onClick(action, event)}
-        className="max-w-180 shrink-0 select-none"
+        className={`max-w-180 shrink-0 select-none ${PILL_CONTROL_IDLE_SURFACE_CLASS}`}
       >
         {action.name}
       </Button>
@@ -110,7 +114,7 @@ export interface PinnedActionsBarProps {
   workspacePaths?: string[];
   leadingContent?: React.ReactNode;
   trailingContent?: React.ReactNode;
-  manageButtonPlacement?: "after-actions" | "after-leading";
+  manageButtonPlacement?: "after-actions" | "after-leading" | "before-actions";
   managePanelAlign?: "left" | "right";
 }
 
@@ -321,9 +325,7 @@ const PinnedActionsBar: React.FC<PinnedActionsBarProps> = memo(
         title={t("input.pinnedActions.manage")}
         aria-label={t("input.pinnedActions.manage")}
         onClick={handleOpenPanel}
-        className={
-          panelOpen ? "shrink-0 !bg-fill-1 !text-primary-6" : "shrink-0"
-        }
+        className={`shrink-0 ${pillControlStateClass(panelOpen)}`}
       />
     );
 
@@ -352,7 +354,19 @@ const PinnedActionsBar: React.FC<PinnedActionsBarProps> = memo(
 
     return (
       <div className="relative flex min-w-0 flex-1 items-center gap-1">
-        {manageButtonPlacement === "after-leading" ? (
+        {manageButtonPlacement === "before-actions" ? (
+          <>
+            <div className="flex shrink-0 items-center gap-1">
+              {leadingContent}
+              {trailingContent}
+            </div>
+            <div aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border-2" />
+            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto py-0.5 scrollbar-hide">
+              {manageButton}
+              {actionPills}
+            </div>
+          </>
+        ) : manageButtonPlacement === "after-leading" ? (
           <>
             <div className="flex shrink-0 items-center gap-1">
               {leadingContent}
@@ -362,6 +376,7 @@ const PinnedActionsBar: React.FC<PinnedActionsBarProps> = memo(
               <div aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border-2" />
             )}
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto py-0.5 scrollbar-hide">
+              {trailingContent}
               {actionPills}
             </div>
           </>

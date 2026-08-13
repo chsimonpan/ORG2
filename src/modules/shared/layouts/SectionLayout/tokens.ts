@@ -6,6 +6,8 @@
  */
 import type { CSSProperties } from "react";
 
+import { HEADER_ICON_SIZE, TYPOGRAPHY } from "@src/config/workstation/tokens";
+
 // ============================================
 // Sizing Constants
 // ============================================
@@ -56,23 +58,30 @@ export const SECTION_SUBHEADING_CLASSES =
 /** Wrapper gap between a section heading and its content containers */
 export const SECTION_GAP_CLASSES = "flex flex-col gap-3";
 
+/**
+ * Intro heading used at the top of a structured content surface.
+ * Composes the app typography and icon-size tokens so feature modules do not
+ * rebuild the title/description hierarchy locally.
+ */
+export const SECTION_INTRO_TOKENS = {
+  container: SECTION_GAP_CLASSES,
+  header: "flex items-start gap-3",
+  icon: "mt-1 shrink-0 text-text-3",
+  iconSize: HEADER_ICON_SIZE.md,
+  title: `m-0 leading-5 tracking-tight text-text-1 ${TYPOGRAPHY.contentTitle}`,
+  description: `m-0 mt-1 max-w-2xl leading-5 text-text-3 ${TYPOGRAPHY.contentSubtitle}`,
+  body: SECTION_GAP_CLASSES,
+} as const;
+
 // ============================================
 // Container Tokens
 // ============================================
 
 /** Base classes for the section container (rounded, container-query root, inset row separators) */
 export const SECTION_CONTAINER_BASE_CLASSES =
-  "w-full rounded-xl @container [&>.section-layout-row:not(:last-child)]:after:absolute [&>.section-layout-row:not(:last-child)]:after:bottom-0 [&>.section-layout-row:not(:last-child)]:after:inset-x-0 [&>.section-layout-row:not(:last-child)]:after:h-px [&>.section-layout-row:not(:last-child)]:after:bg-border-2 [&>.section-layout-row:not(:last-child)]:after:content-['']";
+  "w-full rounded-xl @container [&>.section-layout-row:not(:last-child)]:after:absolute [&>.section-layout-row:not(:last-child)]:after:bottom-0 [&>.section-layout-row:not(:last-child)]:after:inset-x-0 [&>.section-layout-row:not(:last-child)]:after:h-px [&>.section-layout-row:not(:last-child)]:after:bg-border-1 [&>.section-layout-row:not(:last-child)]:after:content-['']";
 
-export const SECTION_CONTAINER_COLOR_CLASSES = {
-  default: "bg-surface-container",
-  chatPanelInfo: "bg-chat-panel-info-container",
-} as const;
-
-export type SectionContainerColor =
-  keyof typeof SECTION_CONTAINER_COLOR_CLASSES;
-
-export const SECTION_CONTAINER_CLASSES = `${SECTION_CONTAINER_BASE_CLASSES} ${SECTION_CONTAINER_COLOR_CLASSES.default} border border-border-1`;
+export const SECTION_CONTAINER_CLASSES = `${SECTION_CONTAINER_BASE_CLASSES} border border-border-1 bg-primary-container`;
 
 /** Padding variants for the section container */
 export const SECTION_PADDING = {

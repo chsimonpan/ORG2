@@ -52,9 +52,11 @@ pub struct ProcessingContext {
 /// classes. New custom modes pick a stance; new stances require code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum PresenceStance {
     /// User at the keyboard — ask freely, confirm destructive actions,
     /// blocking interactions wait indefinitely.
+    #[default]
     Interactive,
     /// User stepped away — work first, batch questions, hold
     /// irreversible actions until they're back.
@@ -62,12 +64,6 @@ pub enum PresenceStance {
     /// Goal mode — never ask, auto-resolve blockers, keep working until
     /// the goal is met.
     Autonomous,
-}
-
-impl Default for PresenceStance {
-    fn default() -> Self {
-        PresenceStance::Interactive
-    }
 }
 
 impl PresenceStance {
@@ -313,6 +309,10 @@ pub struct SystemPromptConfig {
     pub channel: Option<String>,
     pub chat_id: Option<String>,
     pub agent_mode: Option<AgentExecMode>,
+    /// Product mode (`orgtrack/v1` §5.2) of the session. Gates the PM
+    /// guidance sections: only `project` sessions are told to mutate the
+    /// work system through `org2-pm`.
+    pub product_mode: Option<String>,
     pub ide_context: Option<IdeContext>,
     /// User presence snapshot (online / invisible / away). Plumbed out
     /// of [`IdeContext::user_presence`] at prompt-build time so the

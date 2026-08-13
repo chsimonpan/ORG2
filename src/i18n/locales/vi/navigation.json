@@ -46,7 +46,8 @@
     "projectManager": "Project Manager",
     "diff": "Diff",
     "colleagues": "Đồng nghiệp",
-    "terminals": "Terminal"
+    "terminals": "Terminal",
+    "environment": "Môi trường"
   },
   "trajectoryPanel": {
     "title": "Quỹ đạo",
@@ -60,15 +61,9 @@
     "startSession": "Bắt đầu phiên",
     "sessions": "Các Session",
     "selectProject": "Chọn Project",
-    "startPage": "Trang bắt đầu",
     "inbox": "Hộp thư đến",
     "login": "Đăng nhập",
     "setup": "Thiết lập",
-    "devJourney": "Dev Journey",
-    "devRecord": "Hồ sơ phát triển",
-    "gitDashboard": "Bảng điều khiển Git",
-    "devActivity": "Hoạt động Dev",
-    "usageHistory": "Lịch sử sử dụng",
     "tokenMarket": "Thị trường Token",
     "taskMarket": "Thị trường nhiệm vụ",
     "channels": "Kênh",
@@ -84,20 +79,8 @@
     "ideaArea": "Khu vực ý tưởng",
     "changelog": "Changelog"
   },
-  "appGrid": {
-    "customizeGrid": "Tùy chỉnh lưới",
-    "horizontalGap": "Khoảng cách ngang",
-    "verticalGap": "Khoảng cách dọc",
-    "resetToDefault": "Đặt lại mặc định"
-  },
-  "greetings": {
-    "morning": "Chào buổi sáng",
-    "afternoon": "Chào buổi chiều",
-    "evening": "Chào buổi tối"
-  },
   "sidebar": {
     "tabs": {
-      "build": "Trang chủ",
       "workstation": "Workstation",
       "manage": "Quản lý",
       "core": "Lõi",
@@ -133,9 +116,7 @@
     "actions": {
       "addNew": "Thêm mới",
       "collapseAll": "Thu gọn tất cả",
-      "markAllRead": "Đánh dấu tất cả đã đọc",
-      "openHome": "Mở Home",
-      "openWorkstation": "Mở Workstation"
+      "markAllRead": "Đánh dấu tất cả đã đọc"
     },
     "search": {
       "folders": "Tìm kiếm Workspace...",
@@ -158,7 +139,8 @@
       "workstation": "Workstation",
       "viewRam": "Xem RAM",
       "tutorials": "Hướng dẫn",
-      "openSettings": "Mở cài đặt"
+      "openSettings": "Mở cài đặt",
+      "setupChecklist": "Thiết lập nhanh"
     },
     "empty": {
       "noItems": "Không có mục nào",
@@ -181,6 +163,37 @@
       "duration1h": "1 giờ",
       "duration2h": "2 giờ",
       "durationTomorrow": "Ngày mai"
+    },
+    "guide": {
+      "trigger": "Mở hướng dẫn",
+      "title": "Bắt đầu với ORGII",
+      "startSession": "Bắt đầu phiên",
+      "quickSetup": "Ngôn ngữ và giao diện",
+      "close": "Đóng hướng dẫn",
+      "progressLabel": "Đã hoàn thành {{completed}}/{{total}} bước thiết lập",
+      "localWorkspace": "Không gian làm việc cục bộ",
+      "connectOrganization": "Kết nối hoặc tạo tổ chức",
+      "createOrganizationHint": "Nhập tên tổ chức rồi chọn Tạo. Hướng dẫn sẽ chuyển sang bước tiếp theo sau khi tổ chức đám mây được tạo.",
+      "inviteTeammate": "Mời một thành viên nhóm",
+      "inviteTeammateHint": "Tạo liên kết mời tại đây rồi gửi cho thành viên nhóm của bạn.",
+      "invitePermissionHint": "Bạn có thể xem danh sách thành viên tại đây. Quản trị viên hoặc chủ sở hữu tổ chức phải tạo lời mời.",
+      "devPanelTitle": "Trạng thái thử nghiệm onboarding",
+      "devPanelHint": "Bản xem trước tạm thời cho luồng mời. Dữ liệu tổ chức ở backend không bị thay đổi.",
+      "devScenarioLive": "Dữ liệu thật",
+      "devScenarioNoOrganization": "Không có tổ chức",
+      "devScenarioMember": "Thành viên · không có quyền mời",
+      "devScenarioAdmin": "Quản trị viên · có quyền mời",
+      "devScenarioOwner": "Chủ sở hữu · có quyền mời",
+      "devScenarioRequiresOrganization": "Xem trước vai trò cần ít nhất một tổ chức đám mây thật.",
+      "devSimulationActive": "Đã bật mô phỏng phát triển",
+      "devSimulationReadOnly": "Bản xem trước trang thành viên này chỉ đọc. Các thao tác quản lý tổ chức đã bị tắt.",
+      "viewTeamActivity": "Xem mức sử dụng của nhóm",
+      "viewTeamActivityHint": "Runtime đã mở ở mục Thành viên. Chọn một thành viên để xem mức sử dụng Codex, Claude và Cursor; nếu chưa có dữ liệu, hãy bật đồng bộ Runtime của nhóm trước.",
+      "exploreProduct": "Khám phá các trang chính",
+      "nextStep": "Bước tiếp theo"
+    },
+    "developerTestPanel": {
+      "title": "Bảng kiểm thử phát triển"
     }
   },
   "myRole": {
@@ -357,22 +370,13 @@
       "projects": "Dự án"
     }
   },
-  "changelog": {
-    "title": "Changelog",
-    "subtitle": "Cập nhật sản phẩm",
-    "commitCount": "{{count}} commit",
-    "commitCount_one": "{{count}} commit",
-    "details": "Chi tiết",
-    "frontend": "Frontend",
-    "backend": "Backend"
-  },
   "collaboration": {
     "switchOrg": "Chuyển ORG",
     "addOrg": "Thêm ORG",
     "createOrg": "Tạo",
     "joinOrg": "Tham gia",
     "orgSource": "Nguồn Org",
-    "localOrg": "Local",
+    "localOrg": "Cục bộ",
     "orgName": "Tên ORG",
     "orgNamePlaceholder": "Team Alpha",
     "inviteCode": "Liên kết hoặc mã mời",
@@ -397,7 +401,11 @@
       "forkSetupNoWorkspace": "Continue without a workspace",
       "forkSetupAccount": "Account",
       "forkSetupModel": "Model",
-      "forkSetupContinue": "Fork & continue"
+      "forkSetupContinue": "Fork & continue",
+      "forkSnapshotIncomplete": "The cloud snapshot is incomplete. Ask the owner to finish syncing, then retry.",
+      "forkAgentUnavailable": "Choose a local agent before forking.",
+      "forkBackendRegistrationFailed": "The session history was copied, but the runnable fork could not be registered. Retry.",
+      "forkReplayUnavailable": "Full replay is not available for this session. Ask the owner to share the replay, then retry."
     },
     "repoPicker": {
       "loading": "Loading repos…",
@@ -418,7 +426,22 @@
       "sendFailed": "Đã fork nhưng gửi tin nhắn thất bại — nội dung đã được khôi phục vào ô nhập",
       "forkedChipTooltip": "Fork từ {{name}}",
       "sourceChipTooltip": "Shared by {{name}}",
-      "continuePlaceholder": "Message to fork and continue in ORGII…"
+      "continuePlaceholder": "Message to fork and continue in ORGII…",
+      "snapshotError": "The cloud snapshot is incomplete. Ask the owner to finish syncing, then retry.",
+      "agentError": "Choose a local agent before forking.",
+      "backendError": "The session history was copied, but the runnable fork could not be registered. Retry.",
+      "parentOpenUnavailable": "The source session could not be opened from this fork.",
+      "replayError": "Full replay is not available for this session. Ask the owner to share the replay, then retry.",
+      "openParentButton": "Mở phiên gốc từ {{name}}"
+    },
+    "continueCli": {
+      "headerButton": "Tiếp tục trong {{agent}}",
+      "headerTooltip": "Mở lại phiên này bằng {{agent}} trong một thẻ terminal ({{command}})",
+      "notInstalled": "{{agent}} chưa được cài đặt trên máy này",
+      "missingWorkspace": "Thư mục gốc của phiên không còn tồn tại — {{agent}} chỉ có thể tiếp tục phiên từ thư mục đó",
+      "sourceMissing": "Dữ liệu gốc của phiên không còn trên ổ đĩa",
+      "launchFailed": "Không thể mở terminal {{agent}}",
+      "composerPlaceholder": "Nhập tin nhắn để tiếp tục trong phiên ORGII mới — hoặc tiếp tục trong {{agent}} bằng nút ở tiêu đề…"
     }
   },
   "cloud": {
@@ -465,7 +488,61 @@
       "retentionUpgrade": "Phiên này nằm ngoài cửa sổ phát lại của gói — nâng cấp để xem",
       "importError": "Không nhập được phiên",
       "manageBilling": "Manage billing",
-      "manageBillingNote": "Cancel or change your plan in the billing portal"
+      "manageBillingNote": "Cancel or change your plan in the billing portal",
+      "aboutMeTitle": "Giới thiệu về tôi",
+      "sync": {
+        "tabTitle": "Đồng bộ",
+        "connectionTitle": "Kết nối",
+        "endpointLabel": "Điểm cuối backend",
+        "endpointOfficial": "ORG2 Cloud được quản lý",
+        "endpointCustom": "Triển khai tùy chỉnh",
+        "endpointUnknown": "Không rõ",
+        "signedInLabel": "Đã đăng nhập với",
+        "signedOut": "Đã đăng xuất",
+        "signedOutHint": "Đăng nhập ORG2 Cloud để xem chi tiết tài khoản và tính năng",
+        "tokenExpiresLabel": "Token truy cập hết hạn",
+        "tokenExpired": "Đã hết hạn — hãy đăng nhập lại",
+        "schemaLabel": "Schema backend",
+        "schemaChecking": "Đang kiểm tra…",
+        "schemaMatched": "Khớp (v{{version}})",
+        "schemaMismatch": "Không khớp — backend v{{backend}}, ứng dụng cần v{{expected}}",
+        "schemaUnknown": "Không đọc được phiên bản schema của backend",
+        "capabilitiesLabel": "Tính năng backend",
+        "capabilitiesChecking": "Đang kiểm tra…",
+        "capabilitiesUnavailable": "Không khả dụng",
+        "capabilityEnabled": "bật",
+        "capabilityDisabled": "tắt",
+        "capability": {
+          "broadcastSignals": "Tín hiệu thời gian thực",
+          "storageSegments": "Phân đoạn lưu trữ phát lại",
+          "homeEndpoints": "Điểm cuối theo khu vực",
+          "teamInboxMentions": "Nhắc đến trong hộp thư nhóm",
+          "memberRuntime": "Chia sẻ runtime của nhóm"
+        },
+        "lastSyncTitle": "Lần đồng bộ gần nhất",
+        "lastSyncLabel": "Lần đồng bộ thành công gần nhất",
+        "lastSyncNever": "Chưa từng đồng bộ",
+        "lastAttemptLabel": "Lần thử gần nhất",
+        "manualLabel": "Chạy một lượt đồng bộ ngay",
+        "manualAction": "Đồng bộ ngay",
+        "manualRunning": "Đang đồng bộ…",
+        "manualSuccess": "Đồng bộ hoàn tất",
+        "manualError": "Đồng bộ thất bại: {{message}}",
+        "coverageTitle": "Mức bao phủ phiên",
+        "coverageSummary": "Đã đồng bộ {{synced}}/{{syncable}} ({{percent}}%)",
+        "coveragePercentLabel": "Mức bao phủ",
+        "coverageEmpty": "Chưa có phiên nào trong phạm vi kho lưu trữ của tổ chức này",
+        "logsTitle": "Nhật ký đồng bộ",
+        "logsHelp": "Các sự kiện đồng bộ gần đây được ghi trên thiết bị này. Bị xóa khi khởi động lại và không bao giờ được tải lên",
+        "logsEmpty": "Chưa ghi nhận sự kiện đồng bộ nào",
+        "logsClear": "Xóa",
+        "logsCopy": "Sao chép",
+        "logsCopied": "Đã sao chép",
+        "logsOrg": "tổ chức {{orgId}}",
+        "levelInfo": "Thông tin",
+        "levelWarn": "Cảnh báo",
+        "levelError": "Lỗi"
+      }
     },
     "sidebar": {
       "teamSessions": "Phiên của nhóm",
@@ -481,7 +558,12 @@
       "viewerOverflow": "và {{count}} người khác đang xem",
       "memberViewing": "đang xem: {{title}}",
       "viewerOverflow_one": "and 1 more viewer",
-      "viewerOverflow_other": "and {{count}} more viewers"
+      "viewerOverflow_other": "and {{count}} more viewers",
+      "mySessions": "Phiên của tôi",
+      "copyId": "Sao chép ID",
+      "loadingSession": "Đang tải phiên…",
+      "downloadProgress": "Đang tải xuống… {{percent}}%",
+      "downloadProgressEta": "Đang tải xuống… {{percent}}% · còn ~{{eta}}"
     },
     "sync": {
       "quotaExceededToast": "Đồng bộ ORG2 Cloud tạm dừng: tổ chức này đã vượt hạn mức của gói",
@@ -532,7 +614,9 @@
         "stateExhausted": "Đã dùng hết",
         "linkOneTimeNote": "Hãy sao chép ngay — liên kết này chỉ hiển thị một lần trên thiết bị này.",
         "copyLink": "Sao chép liên kết",
-        "copied": "Đã sao chép"
+        "copied": "Đã sao chép",
+        "createTitle": "Lời mời mới",
+        "historyTitle": "Lời mời trước đây"
       },
       "members": {
         "roleChangeTitle": "Đổi vai trò",
@@ -544,7 +628,8 @@
         "youTag": "Bạn",
         "ownerTag": "Chủ sở hữu",
         "floorOff": "Không có mức tối thiểu",
-        "floorTooltip": "Mức chia sẻ tối thiểu cho thành viên này. Áp dụng mức nghiêm ngặt hơn giữa mức này và mức sàn của toàn tổ chức."
+        "floorTooltip": "Mức chia sẻ tối thiểu cho thành viên này. Áp dụng mức nghiêm ngặt hơn giữa mức này và mức sàn của toàn tổ chức.",
+        "floorOrgMinimum": "Mức tối thiểu của tổ chức ({{mode}})"
       },
       "leave": {
         "action": "Rời tổ chức",
@@ -585,7 +670,7 @@
         "joinedFallbackToast": "Đã tham gia tổ chức đám mây"
       },
       "create": {
-        "sourceCloud": "ORG2 Cloud (được quản lý)",
+        "sourceCloud": "Đám mây",
         "signInFirst": "Đăng nhập ORG2 Cloud để tạo hoặc tham gia tổ chức được quản lý.",
         "openSettings": "Mở cài đặt đăng nhập",
         "createdToast": "Đã tạo tổ chức đám mây"
@@ -602,7 +687,9 @@
         "inviteInvalid": "Mã mời không hợp lệ.",
         "inviteRevoked": "Lời mời đã bị thu hồi.",
         "inviteExpired": "Lời mời đã hết hạn.",
-        "inviteExhausted": "Lời mời đã hết số lần dùng."
+        "inviteExhausted": "Lời mời đã hết số lần dùng.",
+        "alreadyMember": "Bạn đã là thành viên của tổ chức này.",
+        "network": "Không thể kết nối dịch vụ đám mây. Hãy kiểm tra mạng và thử lại."
       }
     },
     "defaultAccess": {
@@ -620,7 +707,8 @@
       "visibilityOrg": "Mọi người trong tổ chức",
       "visibilityRestricted": "Chỉ mình tôi",
       "taggedNote": "Phiên này đã được chuyển vào tổ chức, nên khi còn gắn thẻ nó luôn chia sẻ ít nhất siêu dữ liệu.",
-      "floorNote": "Quản trị viên tổ chức yêu cầu chia sẻ ít nhất {{mode}}."
+      "floorNote": "Quản trị viên tổ chức yêu cầu chia sẻ ít nhất {{mode}}.",
+      "orgMinimumOption": "Mức tối thiểu của tổ chức ({{mode}})"
     },
     "share": {
       "menuItem": "Chia sẻ đám mây…",
@@ -651,7 +739,14 @@
       "importPasteClipboard": "Dán từ bộ nhớ tạm",
       "importSubmit": "Nhập",
       "importInvalidInput": "Đây có vẻ không phải là liên kết chia sẻ hoặc mã token hợp lệ.",
-      "selectAll": "Tất cả ({{count}})"
+      "selectAll": "Tất cả ({{count}})",
+      "incomingEndpointMismatch": "Nội dung chia sẻ thuộc một đám mây tùy chỉnh khác. Hãy cấu hình endpoint đó trước khi nhập.",
+      "incomingConnectionError": "Không thể kết nối dịch vụ đám mây. Hãy kiểm tra mạng và thử lại.",
+      "incomingIncompatibleError": "Đám mây trả về phản hồi chia sẻ không tương thích. Hãy cập nhật ORGII hoặc kiểm tra bản triển khai.",
+      "incomingServerError": "Dịch vụ đám mây không thể xử lý nội dung chia sẻ này. Hãy thử lại.",
+      "incomingAlreadyOnDevice": "Phiên này đã có trên thiết bị. Hãy mở bản gốc thay vì nhập một bản trùng lặp.",
+      "incomingOpenExisting": "Mở phiên",
+      "incomingRetry": "Thử lại"
     },
     "agentRunner": {
       "title": "Trình chạy tác vụ Agent",
@@ -677,7 +772,8 @@
         "openBadge_one": "{{count}} tác vụ agent đang chờ xử lý",
         "openBadge": "{{count}} tác vụ agent đang chờ xử lý",
         "activeBadge_one": "{{count}} agent đang làm việc trong phiên này",
-        "activeBadge": "{{count}} agent đang làm việc trong phiên này"
+        "activeBadge": "{{count}} agent đang làm việc trong phiên này",
+        "mentionSuggestion": "Giao bình luận này cho agent"
       },
       "toggleLabel": "Bình luận",
       "notesButton": "Ghi chú phiên",
@@ -715,7 +811,9 @@
       "addressConfirm_other": "Xử lý {{count}} bình luận",
       "agentAuthor": "Agent @{{name}}",
       "addressSessionScope": "Session notes",
-      "addressRoundScope": "Round comments"
+      "addressRoundScope": "Round comments",
+      "mentionMembers": "Nhắc đến",
+      "searchMembers": "Tìm thành viên"
     },
     "sharingFloor": {
       "label": "Mức chia sẻ tối thiểu",
@@ -725,6 +823,165 @@
     },
     "billing": {
       "openFailed": "Couldn't open billing. Please try again."
+    },
+    "signedInAs": "Đã đăng nhập: {{name}}",
+    "sessionExpired": "Phiên ORG2 Cloud đã hết hạn. Hãy đăng nhập lại để tiếp tục.",
+    "sessionRef": {
+      "chipLabel": "Phiên của nhóm",
+      "notMember": "Bạn không phải là thành viên của tổ chức sở hữu phiên này.",
+      "signInRequired": "Đăng nhập ORG2 Cloud để mở phiên này.",
+      "sessionNotFound": "Phiên đó không thuộc tổ chức này.",
+      "notPublished": "Chia sẻ phiên này với một tổ chức trước khi sao chép tham chiếu.",
+      "chooseOrg": "Phiên này thuộc nhiều tổ chức. Chuyển sang tổ chức bạn muốn tham chiếu, rồi sao chép lại.",
+      "opening": "Đang mở phiên nhóm…"
+    },
+    "renameDisplayName": "Sửa tên hiển thị",
+    "renameSaved": "Đã cập nhật tên hiển thị",
+    "renameFailed": "Không cập nhật được tên hiển thị",
+    "download": {
+      "title": "Đang tải phiên nhóm…",
+      "events": "{{loaded}} / {{total}} sự kiện",
+      "eta": "Còn khoảng {{eta}}",
+      "finalizing": "Đang hoàn tất…",
+      "complete": "Tải xuống hoàn tất",
+      "estimate": "Phiên này có {{count}} sự kiện cần tải xuống (khoảng {{eta}})",
+      "start": "Tải xuống",
+      "pause": "Tạm dừng",
+      "paused": "Đã tạm dừng",
+      "resume": "Tiếp tục"
+    },
+    "channels": {
+      "title": "Kênh",
+      "createAction": "Tạo kênh",
+      "createFirst": "Tạo một kênh",
+      "manageMembers": "Quản lý thành viên",
+      "archiveAction": "Lưu trữ kênh",
+      "unarchive": "Bỏ lưu trữ",
+      "unarchiveFailed": "Không thể bỏ lưu trữ kênh",
+      "deleteAction": "Xóa kênh",
+      "leave": "Rời kênh",
+      "archivedGroup": "Đã lưu trữ",
+      "loadError": "Không thể tải danh sách kênh",
+      "settings": {
+        "action": "Cài đặt kênh",
+        "title": "Cài đặt của #{{name}}",
+        "submit": "Lưu",
+        "managerRequired": "Chỉ người quản lý kênh mới có thể chỉnh sửa kênh này",
+        "error": "Không thể cập nhật kênh. Vui lòng thử lại."
+      },
+      "local": {
+        "quotaExceeded": "Bạn đã đạt giới hạn số kênh trên thiết bị này",
+        "archiveBody": "Khi lưu trữ, kênh sẽ bị ẩn khỏi thanh bên. Lịch sử vẫn được giữ lại và có thể bỏ lưu trữ sau",
+        "deleteWarning": "Thao tác này sẽ xóa vĩnh viễn kênh khỏi thiết bị này và không thể hoàn tác"
+      },
+      "cancel": "Hủy",
+      "create": {
+        "title": "Tạo kênh",
+        "nameLabel": "Tên",
+        "namePlaceholder": "vd: ra-soat-ma-nguon",
+        "topicLabel": "Chủ đề",
+        "topicOptional": "(không bắt buộc)",
+        "topicPlaceholder": "Kênh này nói về điều gì?",
+        "visibilityLabel": "Chế độ hiển thị",
+        "publicTitle": "Công khai",
+        "publicDesc": "Mọi người trong tổ chức đều có thể xem và tham gia cuộc trò chuyện",
+        "privateTitle": "Riêng tư",
+        "privateDesc": "Chỉ những người được mời mới xem được kênh này",
+        "membersLabel": "Thêm thành viên",
+        "membersHint": "Bạn sẽ tự động trở thành người quản lý kênh",
+        "membersLoading": "Đang tải thành viên…",
+        "membersEmpty": "Tổ chức chưa có thành viên nào khác",
+        "postPolicyLabel": "Ai có thể đăng bài",
+        "postPolicyEveryone": "Mọi người",
+        "postPolicyManagers": "Chỉ người quản lý kênh",
+        "submit": "Tạo",
+        "nameTaken": "Tên này đã được sử dụng",
+        "quotaExceeded": "Tổ chức đã đạt giới hạn số kênh",
+        "error": "Không thể tạo kênh. Vui lòng thử lại."
+      },
+      "archive": {
+        "title": "Lưu trữ #{{name}}?",
+        "body": "Khi lưu trữ, kênh sẽ bị ẩn khỏi thanh bên của mọi người. Lịch sử vẫn được giữ lại và có thể bỏ lưu trữ sau",
+        "confirm": "Lưu trữ",
+        "managerRequired": "Chỉ người quản lý kênh mới có thể lưu trữ kênh này",
+        "error": "Không thể lưu trữ kênh. Vui lòng thử lại."
+      },
+      "delete": {
+        "title": "Xóa #{{name}}?",
+        "warning": "Thao tác này sẽ xóa vĩnh viễn kênh đối với tất cả mọi người và không thể hoàn tác",
+        "acknowledge": "Có, xóa vĩnh viễn kênh này",
+        "confirm": "Xóa",
+        "adminRequired": "Chỉ quản trị viên tổ chức mới có thể xóa kênh",
+        "error": "Không thể xóa kênh. Vui lòng thử lại."
+      },
+      "members": {
+        "title": "Thành viên của #{{name}}",
+        "loading": "Đang tải thành viên…",
+        "empty": "Kênh này chưa có thành viên",
+        "loadError": "Không thể tải danh sách thành viên. Vui lòng thử lại.",
+        "managerBadge": "Quản lý",
+        "you": "Bạn",
+        "addLabel": "Thêm thành viên",
+        "addEmpty": "Tất cả mọi người trong tổ chức đã ở trong kênh này",
+        "addSubmit": "Thêm",
+        "actions": "Thao tác với thành viên",
+        "remove": "Xóa khỏi kênh",
+        "makeManager": "Đặt làm quản lý kênh",
+        "removeManager": "Gỡ vai trò quản lý kênh",
+        "leave": "Rời kênh",
+        "lastManager": "Hãy chỉ định một quản lý khác trước",
+        "error": "Đã xảy ra lỗi. Vui lòng thử lại."
+      },
+      "feed": {
+        "composerPlaceholder": "Nhắn tin tới #{{name}}",
+        "save": "Lưu",
+        "edit": "Sửa tin nhắn",
+        "delete": "Xóa tin nhắn",
+        "edited": "(đã sửa)",
+        "deletedMessage": "tin nhắn đã bị xóa",
+        "today": "Hôm nay",
+        "yesterday": "Hôm qua",
+        "you": "Bạn",
+        "memberCount": "{{memberCount}} thành viên",
+        "emptyTitle": "Đây là khởi đầu của #{{name}}",
+        "emptySubtitle": "Gửi tin nhắn đầu tiên để bắt đầu cuộc trò chuyện",
+        "missingTitle": "Kênh không còn khả dụng",
+        "missingSubtitle": "Kênh này đã bị xóa khỏi thiết bị này",
+        "cloudPendingTitle": "Chưa có tin nhắn nào",
+        "cloudPendingSubtitle": "Lịch sử kênh trên đám mây sẽ có ở bản nâng cấp backend tiếp theo",
+        "cloudComposerDisabled": "Kênh trên đám mây chưa hỗ trợ nhắn tin — bản phát hành này chỉ gồm tạo kênh và quản lý thành viên. Việc gửi tin nhắn sẽ có ở bản nâng cấp backend tiếp theo",
+        "errorEmpty": "Hãy nhập tin nhắn trước",
+        "errorTooLong": "Tin nhắn quá dài (tối đa 4000 ký tự)",
+        "errorQuota": "Kênh này đã đạt giới hạn tin nhắn trên thiết bị này",
+        "errorGeneric": "Không gửi được tin nhắn. Vui lòng thử lại.",
+        "dropSessionHint": "Thả để thêm phiên này làm tham chiếu",
+        "messageBodyLabel": "Tin nhắn kênh",
+        "sessionCardMissing": "Không khả dụng trên thiết bị này",
+        "sessionCardOpen": "Mở phiên {{name}}",
+        "workItemCardMissing": "Không khả dụng trên thiết bị này",
+        "workItemCardLoading": "Đang tải…",
+        "workItemCardOpen": "Mở mục công việc {{name}}",
+        "githubCardOpen": "Mở {{name}} trên GitHub",
+        "githubIssue": "Issue",
+        "githubPullRequest": "Pull request",
+        "archivedComposerDisabled": "Kênh này đã được lưu trữ. Bỏ lưu trữ để đăng bài.",
+        "errorPostForbidden": "Chỉ người quản lý kênh mới có thể đăng vào kênh này",
+        "errorArchived": "Kênh này đã lưu trữ nên không thể đăng tin nhắn",
+        "errorChannelFull": "Kênh này đã đạt giới hạn tin nhắn nên không thể đăng thêm",
+        "errorChannelMissing": "Kênh này không còn khả dụng",
+        "errorMessageMissing": "Tin nhắn này không còn khả dụng",
+        "loadError": "Không thể tải tin nhắn",
+        "loadingMessages": "Đang tải tin nhắn…",
+        "loadOlder": "Tải tin nhắn cũ hơn",
+        "unknownAuthor": "Thành viên nhóm"
+      }
+    },
+    "backgroundUpload": {
+      "label": "Tải lên trong nền",
+      "help": "Tải lên các phiên thành viên đủ điều kiện trong nền theo mức chia sẻ tối thiểu của tổ chức và cài đặt từng phiên, ngay cả khi tổ chức này không hoạt động.",
+      "on": "Bật",
+      "off": "Tắt",
+      "memberNote": "Do quản trị viên bật — các phiên đủ điều kiện được tải lên trong nền mà không cần mở tổ chức này."
     }
   }
 }

@@ -33,6 +33,10 @@ import { Placeholder } from "@src/modules/shared/layouts/blocks/Placeholder";
 import type { KanbanColumnConfig, KanbanTask } from "../../types";
 import TaskCard from "../TaskCard";
 import "./index.scss";
+import {
+  INITIAL_TASK_RENDER_COUNT,
+  getNextTaskRenderCount,
+} from "./taskRenderWindow";
 
 // Drop indicator state type
 interface DropIndicatorState {
@@ -41,13 +45,11 @@ interface DropIndicatorState {
 }
 
 /**
- * Columns at or below this length render every card in normal document flow
- * (the pre-virtualization path). This keeps the common case pixel-identical —
- * including dnd-kit's live reorder animation — and only pays the virtualization
- * cost (and its trade-offs) when a column is long enough to actually matter for
- * DOM size / memory.
+ * Keep the first page in normal document flow so dnd-kit's reorder animation
+ * remains pixel-identical for the common case. Once another page is revealed,
+ * TanStack Virtual windows the revealed range.
  */
-const STATIC_TASK_RENDER_LIMIT = 40;
+const STATIC_TASK_RENDER_LIMIT = INITIAL_TASK_RENDER_COUNT;
 
 /**
  * Seed height for an unmeasured card. Cards are measured on mount (heights vary
@@ -65,6 +67,7 @@ export interface KanbanColumnProps {
   column: KanbanColumnConfig;
   tasks: KanbanTask[];
   onTaskClick?: (task: KanbanTask) => void;
+  onTaskContextMenu?: (task: KanbanTask, event: React.MouseEvent) => void;
   onAddTask?: (status: string) => void;
   isDragging?: boolean;
   showAddButton?: boolean;
@@ -84,6 +87,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({
   column,
   tasks,
   onTaskClick,
+  onTaskContextMenu,
   onAddTask,
   isDragging,
   showAddButton = true,
@@ -116,6 +120,10 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({
     id: column.id,
   });
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const loadedAtScrollHeightRef = useRef<number | null>(null);
+  const [renderedTaskCount, setRenderedTaskCount] = useState(
+    INITIAL_TASK_RENDER_COUNT
+  );
   const [scrollEdges, setScrollEdges] = useState<ScrollEdgeState>({
     atTop: true,
     atBottom: true,
@@ -156,9 +164,39 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({
     [filteredTasks]
   );
 
+  const renderedTasks = useMemo(
+    () => filteredTasks.slice(0, renderedTaskCount),
+    [filteredTasks, renderedTaskCount]
+  );
+  const hasMoreTasks = renderedTasks.length < filteredTasks.length;
+
+  useEffect(() => {
+    loadedAtScrollHeightRef.current = null;
+  }, [tasks]);
+
+  const handleBodyScroll = useCallback(() => {
+    updateScrollEdges();
+
+    const body = bodyRef.current;
+    if (!body || !hasMoreTasks) return;
+
+    const maxScrollTop = Math.max(0, body.scrollHeight - body.clientHeight);
+    const reachedBottom = body.scrollTop >= maxScrollTop - 1;
+    if (!reachedBottom) return;
+
+    // A momentum-scroll can dispatch several events before React commits the
+    // next page. Keying the reveal to the current content height guarantees
+    // one batch per distinct bottom reach instead of skipping 25 -> 75.
+    if (loadedAtScrollHeightRef.current === body.scrollHeight) return;
+    loadedAtScrollHeightRef.current = body.scrollHeight;
+    setRenderedTaskCount((currentCount) =>
+      getNextTaskRenderCount(currentCount, filteredTasks.length)
+    );
+  }, [filteredTasks.length, hasMoreTasks, updateScrollEdges]);
+
   useEffect(() => {
     updateScrollEdges();
-  }, [filteredTasks.length, showAddButton, updateScrollEdges]);
+  }, [renderedTasks.length, showAddButton, updateScrollEdges]);
 
   // Check if we should show indicator at end of column (when beforeTaskId is null)
   const showEndIndicator =
@@ -238,7 +276,7 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({
           "kanban-column__body--at-top": scrollEdges.atTop,
           "kanban-column__body--at-bottom": scrollEdges.atBottom,
         })}
-        onScroll={updateScrollEdges}
+        onScroll={handleBodyScroll}
       >
         <SortableContext
           items={taskIds}
@@ -251,9 +289,10 @@ const KanbanColumn: React.FC<KanbanColumnProps> = ({
             </div>
           ) : (
             <ColumnTaskList
-              tasks={filteredTasks}
+              tasks={renderedTasks}
               scrollElementRef={bodyRef}
               onTaskClick={onTaskClick}
+              onTaskContextMenu={onTaskContextMenu}
               dropIndicator={dropIndicator}
               columnColor={column.color}
               allowTaskDrag={allowTaskDrag}
@@ -305,6 +344,7 @@ interface ColumnTaskListProps {
   /** The scrollable column body — used as the virtualizer's scroll element. */
   scrollElementRef: React.MutableRefObject<HTMLDivElement | null>;
   onTaskClick?: (task: KanbanTask) => void;
+  onTaskContextMenu?: (task: KanbanTask, event: React.MouseEvent) => void;
   dropIndicator?: DropIndicatorState | null;
   columnColor: string;
   allowTaskDrag: boolean;
@@ -326,6 +366,7 @@ const ColumnTaskList: React.FC<ColumnTaskListProps> = ({
   tasks,
   scrollElementRef,
   onTaskClick,
+  onTaskContextMenu,
   dropIndicator,
   columnColor,
   allowTaskDrag,
@@ -339,10 +380,13 @@ const ColumnTaskList: React.FC<ColumnTaskListProps> = ({
       <SortableTaskCard
         key={task.id}
         task={task}
-        onTaskClick={onTaskClick}
+        onTaskClick={task.canOpen === false ? undefined : onTaskClick}
+        onTaskContextMenu={
+          task.canOpen === false ? undefined : onTaskContextMenu
+        }
         showIndicatorBefore={dropIndicator?.beforeTaskId === task.id}
         indicatorColor={columnColor}
-        allowDrag={allowTaskDrag}
+        allowDrag={allowTaskDrag && task.canMove !== false}
         scaleDragTransform={scaleDragTransform}
         useDragOverlay={useDragOverlay}
         isSelected={selectedTaskId != null && task.id === selectedTaskId}
@@ -354,6 +398,7 @@ const ColumnTaskList: React.FC<ColumnTaskListProps> = ({
       columnColor,
       dropIndicator?.beforeTaskId,
       onTaskClick,
+      onTaskContextMenu,
       scaleDragTransform,
       selectedTaskId,
       useDragOverlay,
@@ -472,6 +517,7 @@ const VirtualTaskList: React.FC<VirtualTaskListProps> = ({
 interface SortableTaskCardProps {
   task: KanbanTask;
   onTaskClick?: (task: KanbanTask) => void;
+  onTaskContextMenu?: (task: KanbanTask, event: React.MouseEvent) => void;
   showIndicatorBefore?: boolean;
   indicatorColor?: string;
   allowDrag?: boolean;
@@ -489,6 +535,7 @@ interface SortableTaskCardProps {
 const SortableTaskCard: React.FC<SortableTaskCardProps> = ({
   task,
   onTaskClick,
+  onTaskContextMenu,
   showIndicatorBefore,
   indicatorColor = "var(--color-primary-6)",
   allowDrag = true,
@@ -543,6 +590,7 @@ const SortableTaskCard: React.FC<SortableTaskCardProps> = ({
         <TaskCard
           task={task}
           onClick={onTaskClick}
+          onContextMenu={onTaskContextMenu}
           isDragging={isDragging}
           isSelected={isSelected}
         />

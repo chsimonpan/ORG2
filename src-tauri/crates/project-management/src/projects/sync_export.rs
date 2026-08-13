@@ -204,6 +204,7 @@ mod tests {
             },
             description: "Project body".to_string(),
             slug: "demo".to_string(),
+            sync_adapter_id: None,
         };
         let work_item = WorkItemData {
             frontmatter: WorkItemFrontmatter {
@@ -218,9 +219,11 @@ mod tests {
                 labels: Vec::new(),
                 milestone: None,
                 parent: None,
+                stage: None,
                 start_date: None,
                 target_date: None,
                 created_by: None,
+                origin_session: None,
                 created_at: "2026-06-15T00:00:00Z".to_string(),
                 updated_at: "2026-06-15T01:00:00Z".to_string(),
                 deleted_at: None,
@@ -230,6 +233,7 @@ mod tests {
                 history: Vec::new(),
                 delegations: Vec::new(),
                 linked_sessions: Vec::new(),
+                handoff: None,
                 proof_of_work: None,
                 orchestrator_config: None,
                 orchestrator_state: None,

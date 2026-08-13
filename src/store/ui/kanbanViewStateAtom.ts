@@ -12,7 +12,7 @@
  *   - `kanbanSelectedTaskIdAtom` and `kanbanDetailPanelVisibleAtom` are
  *     transient session state. Module-level Jotai atoms are enough to
  *     survive remounts during navigation while still resetting on reload,
- *     matching the rationale documented on `viewModeAtom`.
+ *     so route transitions do not discard the user's board preferences.
  *
  * Selection is stored as the task **id**, not the `KanbanTask` object:
  * the task list is rebuilt every render from live session data, so
@@ -23,6 +23,7 @@ import { atom } from "jotai";
 import { atomWithStorage } from "jotai/utils";
 
 import {
+  DEFAULT_KANBAN_TIME_FILTER,
   KANBAN_AGENT_TYPE_FILTER,
   KANBAN_SIDEBAR_FILTER,
   type KanbanAgentTypeFilter,
@@ -230,7 +231,7 @@ kanbanSidebarFilterAtom.debugLabel = "kanban/sidebarFilter";
 /** Persisted user preference — the active time-window pill. */
 export const kanbanTimeFilterAtom = atomWithStorage<KanbanTimeFilter>(
   TIME_FILTER_STORAGE_KEY,
-  "12h",
+  DEFAULT_KANBAN_TIME_FILTER,
   timeFilterStorage
 );
 kanbanTimeFilterAtom.debugLabel = "kanban/timeFilter";
@@ -262,6 +263,24 @@ kanbanSelectedTaskIdAtom.debugLabel = "kanban/selectedTaskId";
 /** Whether the floating session-preview panel is visible. */
 export const kanbanDetailPanelVisibleAtom = atom<boolean>(false);
 kanbanDetailPanelVisibleAtom.debugLabel = "kanban/detailPanelVisible";
+
+/**
+ * Team-session card currently previewed on the board, paired with the local
+ * session id its replay import materializes. The cloud card carries no
+ * `session_id` of its own, and the imported copy only joins the board once
+ * the transcript lands — this is what lets the preview render the session in
+ * between. Transient, like the selection atoms above.
+ */
+export interface KanbanCloudReplayTarget {
+  /** Cloud task id (`cloud-remote:<row id>`) that was clicked. */
+  taskId: string;
+  /** Local session id the replay import writes into. */
+  sessionId: string;
+}
+export const kanbanCloudReplayTargetAtom = atom<KanbanCloudReplayTarget | null>(
+  null
+);
+kanbanCloudReplayTargetAtom.debugLabel = "kanban/cloudReplayTarget";
 
 /** Transient filename/path query; intentionally resets on app reload. */
 export const kanbanFileSearchQueryAtom = atom<string>("");

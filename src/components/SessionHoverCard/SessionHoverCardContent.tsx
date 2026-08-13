@@ -6,7 +6,6 @@ import {
   Clock,
   Diff,
   Fingerprint,
-  Folder,
   GitBranch,
   GitCommitVertical,
   Grip,
@@ -22,18 +21,18 @@ import {
   getOrgtrackSessionSummary,
 } from "@src/api/tauri/lineage";
 import { isHostedKey } from "@src/api/tauri/session";
-import { CLI_AGENT, type CliAgentType } from "@src/api/types/keys";
-import { formatAgentType } from "@src/assets/providers";
 import ModelIcon from "@src/components/ModelIcon";
 import { resolveAgentIcon } from "@src/config/agentIcons";
 import TaskImpactLine from "@src/features/KanbanBoard/components/TaskImpactLine";
 import type { KanbanTask } from "@src/features/KanbanBoard/types";
+import { useRepoSelection } from "@src/hooks/git/useRepoSelection";
 import { createLogger } from "@src/hooks/logger";
 import { useResolvedModelLabel } from "@src/hooks/models";
 import { useValidatedLastPair } from "@src/hooks/models/useValidatedLastPair";
 import { workspaceGitStatusMapAtom } from "@src/store/git/gitStatusAtom";
 import type { LastModelSelection } from "@src/store/session/creatorDefaultModelAtom";
 import { sessionByIdAtom } from "@src/store/session/sessionAtom/atoms";
+import { activeWorkspaceRootPathAtom } from "@src/store/workspace/derived";
 import { copyText } from "@src/util/data/clipboard";
 import {
   formatReplayDateLabel,
@@ -41,11 +40,15 @@ import {
 } from "@src/util/data/formatters/date";
 import { formatBranchLabel } from "@src/util/git/branchLabel";
 import { basename } from "@src/util/path";
+import { getFileManagerRevealLabelKey } from "@src/util/platform/fileManagerLabels";
 import {
-  getDispatchCategory,
   isCliSession,
-  resolveSessionIconId,
+  isHumanSession,
 } from "@src/util/session/sessionDispatch";
+import {
+  type SessionDisplayMetadata,
+  resolveSessionDisplayMetadata,
+} from "@src/util/session/sessionDisplayMetadata";
 import { formatDuration } from "@src/util/time/formatDuration";
 
 import { HoverCardPanel, HoverCardRow } from "./HoverCardBase";
@@ -85,6 +88,12 @@ interface CliAgentStatusPayload {
 
 const PATH_ROW_CLASS_NAME =
   "block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-left text-text-2 underline-offset-2 transition-colors hover:text-accent-9 hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-8";
+/** Inline link used for text that sits beside other text inside a row. */
+const INLINE_LINK_CLASS_NAME =
+  "text-text-2 underline-offset-2 transition-colors hover:text-accent-9 hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-8";
+/** Trailing icon-only affordance that reveals a path in the file manager. */
+const REVEAL_ICON_BUTTON_CLASS_NAME =
+  "flex shrink-0 items-center rounded text-text-4 transition-colors hover:text-accent-9 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-8";
 const COMPACT_PATH_MAX_CHARS = 44;
 
 function formatCompactPath(path: string): string {
@@ -147,35 +156,14 @@ function handleRevealPath(path: string): void {
   });
 }
 
-function getAgentSessionInfo(session: {
-  session_id: string;
-  cliAgentType?: CliAgentType | null;
-  agentDisplayName?: string;
-  agentIconId?: string;
-}): AgentSessionInfo {
-  const category = getDispatchCategory(session.session_id);
-
-  if (session.cliAgentType) {
-    return {
-      icon: <ModelIcon agentType={session.cliAgentType} size={13} />,
-      label: formatAgentType(session.cliAgentType),
-    };
-  }
-
-  if (category === "cursor_ide") {
-    return {
-      icon: <ModelIcon agentType={CLI_AGENT.CURSOR} size={13} />,
-      label: session.agentDisplayName || "Cursor IDE",
-    };
-  }
-
-  const iconId =
-    session.agentIconId || resolveSessionIconId(session.session_id);
-  const AgentIcon = resolveAgentIcon(iconId);
+function getAgentSessionInfo(
+  display: SessionDisplayMetadata
+): AgentSessionInfo {
+  const AgentIcon = resolveAgentIcon(display.agentIconId);
 
   return {
     icon: <AgentIcon size={13} strokeWidth={1.75} />,
-    label: session.agentDisplayName || "Agent",
+    label: display.agentLabel,
     textClassName: "text-text-1",
   };
 }
@@ -184,7 +172,19 @@ export const SessionHoverCardContent: React.FC<SessionHoverCardContentProps> =
   memo(({ sessionId }) => {
     const { t, i18n } = useTranslation(["sessions", "common"]);
     const session = useAtomValue(sessionByIdAtom(sessionId));
+    const humanSession = isHumanSession(sessionId);
+    const sessionDisplay = useMemo(
+      () =>
+        session
+          ? resolveSessionDisplayMetadata({ kind: "local", session })
+          : null,
+      [session]
+    );
     const workspaceGitStatusMap = useAtomValue(workspaceGitStatusMapAtom);
+    const activeWorkspaceRootPath = useAtomValue(activeWorkspaceRootPathAtom);
+    const { currentBranch: activeWorkspaceBranch } = useRepoSelection({
+      autoLoad: false,
+    });
     const creatorDefaultLastModel = useValidatedLastPair();
     const turnOverview: SessionTurnOverview | null =
       useSessionTurnOverview(sessionId);
@@ -306,7 +306,16 @@ export const SessionHoverCardContent: React.FC<SessionHoverCardContentProps> =
     }, [boundCliIdState, sessionId]);
 
     const lastModel: LastModelSelection | null = useMemo(() => {
+      if (humanSession) return null;
       if (!session) return creatorDefaultLastModel;
+      if (session.importedFrom) {
+        return sessionDisplay?.modelName
+          ? {
+              model: sessionDisplay.modelName,
+              cliAgentType: sessionDisplay.cliAgentType,
+            }
+          : null;
+      }
       const keySource = session.keySource ?? creatorDefaultLastModel?.keySource;
       const hosted = isHostedKey(keySource);
       return {
@@ -324,12 +333,12 @@ export const SessionHoverCardContent: React.FC<SessionHoverCardContentProps> =
         selectedAccountId:
           session.accountId ?? creatorDefaultLastModel?.selectedAccountId,
       };
-    }, [session, creatorDefaultLastModel]);
+    }, [creatorDefaultLastModel, humanSession, session, sessionDisplay]);
 
-    const { label: modelLabel, title: modelTitle } = useResolvedModelLabel(
-      lastModel,
-      []
-    );
+    const { label: resolvedModelLabel, title: resolvedModelTitle } =
+      useResolvedModelLabel(lastModel, []);
+    const modelLabel = humanSession ? null : resolvedModelLabel;
+    const modelTitle = humanSession ? null : resolvedModelTitle;
 
     const impactTask = useMemo<KanbanTask | null>(() => {
       if (!session) return null;
@@ -389,6 +398,9 @@ export const SessionHoverCardContent: React.FC<SessionHoverCardContentProps> =
     }, [orgtrackSummary, session]);
 
     if (!session) return null;
+    const resolvedSessionDisplay =
+      sessionDisplay ??
+      resolveSessionDisplayMetadata({ kind: "local", session });
 
     const handleCopyUnderlyingId = (value: string): void => {
       void copyText(value)
@@ -415,22 +427,31 @@ export const SessionHoverCardContent: React.FC<SessionHoverCardContentProps> =
       : undefined;
     const worktreePathLabel = worktreePath ? basename(worktreePath) : "";
     const effectiveBranch = session.branch;
+    const sessionRepoMatchesActive =
+      !!normalizedRepoPath &&
+      !!activeWorkspaceRootPath &&
+      normalizedRepoPath === normalizePath(activeWorkspaceRootPath);
     const branchLabel =
       formatBranchLabel(session.worktreeBranch) ||
       (worktreePath ? worktreePathLabel : "") ||
       formatBranchLabel(effectiveBranch) ||
       formatBranchLabel(session.baseBranch) ||
-      formatBranchLabel(workspaceGitStatus?.current_branch);
+      formatBranchLabel(workspaceGitStatus?.current_branch) ||
+      (sessionRepoMatchesActive
+        ? formatBranchLabel(activeWorkspaceBranch)
+        : "");
     const modelIconName =
       lastModel?.listingModel || lastModel?.model || undefined;
-    const modelIconAgent = lastModel?.listingModelType || undefined;
-    const agentSessionInfo = getAgentSessionInfo(session);
+    const modelIconAgent =
+      lastModel?.listingModelType || resolvedSessionDisplay.cliAgentType;
+    const agentSessionInfo = getAgentSessionInfo(resolvedSessionDisplay);
     // Native-transcript sessions must not claim sessions.db: show the CLI
     // store file when resolved, else a plain "CLI native store" label.
     const isNativeTranscript = transcriptLocation?.native === true;
     const storageRowPath = isNativeTranscript
       ? (transcriptLocation?.path ?? undefined)
       : storagePath;
+    const revealLabel = t(getFileManagerRevealLabelKey());
 
     const dateTimeLabelOptions = {
       todayLabel: t("common:relativeDate.today"),
@@ -488,7 +509,22 @@ export const SessionHoverCardContent: React.FC<SessionHoverCardContentProps> =
         {(repoName || branchLabel) && (
           <HoverCardRow icon={<GitBranch size={13} strokeWidth={1.75} />}>
             <div className="truncate text-text-2">
-              {repoName && <span>{repoName}</span>}
+              {repoName &&
+                (repoPath ? (
+                  // The repo folder is the location row, folded in: the name
+                  // is the link, its tooltip carries the full path.
+                  <button
+                    type="button"
+                    className={INLINE_LINK_CLASS_NAME}
+                    title={`${revealLabel} · ${repoPath}`}
+                    aria-label={`${revealLabel} ${repoPath}`}
+                    onClick={() => handleRevealPath(repoPath)}
+                  >
+                    {repoName}
+                  </button>
+                ) : (
+                  <span>{repoName}</span>
+                ))}
               {repoName && branchLabel && (
                 <span className="mx-1 text-text-4">·</span>
               )}
@@ -496,60 +532,69 @@ export const SessionHoverCardContent: React.FC<SessionHoverCardContentProps> =
             </div>
           </HoverCardRow>
         )}
-        {repoPath && (
-          <HoverCardRow icon={<Folder size={13} strokeWidth={1.75} />}>
-            <button
-              type="button"
-              className={PATH_ROW_CLASS_NAME}
-              title={repoPath}
-              onClick={() => handleRevealPath(repoPath)}
-            >
-              {formatCompactPath(repoPath)}
-            </button>
-          </HoverCardRow>
-        )}
-        {(storageRowPath || isNativeTranscript) && (
-          <HoverCardRow icon={<Save size={13} strokeWidth={1.75} />}>
-            {storageRowPath ? (
-              <button
-                type="button"
-                className={PATH_ROW_CLASS_NAME}
-                title={storageRowPath}
-                onClick={() => handleRevealPath(storageRowPath)}
-              >
-                {formatCompactPath(storageRowPath)}
-              </button>
-            ) : (
-              <span className="truncate text-text-2">
-                {t("history.detail.cliNativeStore")}
-              </span>
-            )}
-          </HoverCardRow>
-        )}
-        {underlyingSessionId && (
-          <HoverCardRow icon={<Fingerprint size={13} strokeWidth={1.75} />}>
-            <button
-              type="button"
-              className={PATH_ROW_CLASS_NAME}
-              title={underlyingSessionId}
-              onClick={() => handleCopyUnderlyingId(underlyingSessionId)}
-            >
-              <span className="text-text-3">
-                {t("history.detail.sessionId")}
-              </span>
-              <span className="mx-1 text-text-4">·</span>
-              <span className="font-mono">
-                {formatCompactSessionId(underlyingSessionId)}
-              </span>
-              {copiedForSessionId === sessionId && (
-                <Check
-                  size={12}
-                  strokeWidth={2}
-                  className="ml-1 inline-block align-[-1px] text-success-6"
-                  aria-hidden="true"
-                />
+        {(underlyingSessionId || storageRowPath || isNativeTranscript) && (
+          <HoverCardRow
+            icon={
+              underlyingSessionId ? (
+                <Fingerprint size={13} strokeWidth={1.75} />
+              ) : (
+                <Save size={13} strokeWidth={1.75} />
+              )
+            }
+          >
+            <div className="flex min-w-0 items-center gap-1">
+              {underlyingSessionId ? (
+                <button
+                  type="button"
+                  className={`${PATH_ROW_CLASS_NAME} min-w-0 flex-1`}
+                  title={underlyingSessionId}
+                  aria-label={`${t("common:actions.copy")} ${t(
+                    "history.detail.sessionId"
+                  )}`}
+                  onClick={() => handleCopyUnderlyingId(underlyingSessionId)}
+                >
+                  <span className="text-text-3">
+                    {t("history.detail.sessionId")}
+                  </span>
+                  <span className="mx-1 text-text-4">·</span>
+                  <span>{formatCompactSessionId(underlyingSessionId)}</span>
+                  {copiedForSessionId === sessionId && (
+                    <Check
+                      size={12}
+                      strokeWidth={2}
+                      className="ml-1 inline-block align-[-1px] text-success-6"
+                      aria-hidden="true"
+                    />
+                  )}
+                </button>
+              ) : storageRowPath ? (
+                <button
+                  type="button"
+                  className={`${PATH_ROW_CLASS_NAME} min-w-0 flex-1`}
+                  title={`${revealLabel} · ${storageRowPath}`}
+                  aria-label={`${revealLabel} ${storageRowPath}`}
+                  onClick={() => handleRevealPath(storageRowPath)}
+                >
+                  {formatCompactPath(storageRowPath)}
+                </button>
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-text-2">
+                  {t("history.detail.cliNativeStore")}
+                </span>
               )}
-            </button>
+              {/* Transcript file for a row already spoken for by the id. */}
+              {underlyingSessionId && storageRowPath && (
+                <button
+                  type="button"
+                  className={REVEAL_ICON_BUTTON_CLASS_NAME}
+                  title={`${revealLabel} · ${storageRowPath}`}
+                  aria-label={`${revealLabel} ${storageRowPath}`}
+                  onClick={() => handleRevealPath(storageRowPath)}
+                >
+                  <Save size={12} strokeWidth={1.75} />
+                </button>
+              )}
+            </div>
           </HoverCardRow>
         )}
         {impactTask && (

@@ -44,8 +44,6 @@ export interface EventHandlerContext {
 
   toolCallDeltaBuffersRef?: MutableRefObject<Map<number, ToolCallDeltaBuffer>>;
 
-  execOutputBufferRef: MutableRefObject<string>;
-
   // Coding session bridge
   trackedCodingSessionsRef?: MutableRefObject<Map<string, string>>;
 
@@ -66,7 +64,12 @@ export interface EventHandlerContext {
     | ((
         status: string,
         errorMessage?: string,
-        meta?: { turnId?: string; turnStatus?: string; intermediate?: boolean }
+        meta?: {
+          turnId?: string;
+          turnIntentId?: string;
+          turnStatus?: string;
+          intermediate?: boolean;
+        }
       ) => void)
     | undefined
   >;
@@ -105,5 +108,4 @@ export interface EventHandlerCallbacksInternal {
 // Constants
 // ============================================================================
 
-export const MAX_EXEC_BUFFER = 500_000;
 export const MAX_REASONING_LENGTH = 50_000;

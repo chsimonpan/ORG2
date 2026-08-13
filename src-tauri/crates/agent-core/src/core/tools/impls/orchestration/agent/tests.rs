@@ -13,6 +13,7 @@ use super::helpers::{
 use super::resolve_agent_id_for_execute;
 use crate::coordination::agent_org_runs::{AgentOrgContextMember, AgentOrgRunContext};
 use crate::definitions::builtin::{EXPLORE_AGENT_ID, GENERAL_AGENT_ID};
+use crate::tools::names as tool_names;
 use crate::tools::traits::ToolError;
 
 fn resolve_session_id(resume: Option<String>, prefix: &str, agent_id: &str) -> String {
@@ -188,19 +189,17 @@ fn test_fresh_registry_management_tools_require_management_capability() {
     use super::policy::agent_supports_builtin_tool;
     use crate::definitions::capabilities::{CapabilitySet, ManagementCapability};
     use crate::definitions::{AgentDefinition, AgentToolSelection};
-    use crate::tools::names as tool_names;
-
     let agent_without_management = AgentDefinition {
         id: "custom:no-management".to_string(),
         tools: AgentToolSelection {
-            system_restrict_to_tools: Some(vec![tool_names::MANAGE_PROJECT.to_string()]),
+            system_restrict_to_tools: Some(vec![tool_names::MANAGE_AGENT_DEF.to_string()]),
             ..Default::default()
         },
         ..Default::default()
     };
     assert!(!agent_supports_builtin_tool(
         &agent_without_management,
-        tool_names::MANAGE_PROJECT
+        tool_names::MANAGE_AGENT_DEF
     ));
 
     let agent_with_management = AgentDefinition {
@@ -210,23 +209,24 @@ fn test_fresh_registry_management_tools_require_management_capability() {
             ..Default::default()
         }),
         tools: AgentToolSelection {
-            system_restrict_to_tools: Some(vec![tool_names::MANAGE_PROJECT.to_string()]),
+            system_restrict_to_tools: Some(vec![tool_names::MANAGE_AGENT_DEF.to_string()]),
             ..Default::default()
         },
         ..Default::default()
     };
     assert!(agent_supports_builtin_tool(
         &agent_with_management,
-        tool_names::MANAGE_PROJECT
+        tool_names::MANAGE_AGENT_DEF
     ));
 }
 
-// ── Parent exec-mode overlay on worker policies ─────────────────────
+// ── Parent mode overlay on worker policies ──────────────────────────
 //
 // The worker policy is built from the parent's BASE policy (captured at
-// init, no per-turn exec-mode layer). `overlay_parent_exec_mode` must
-// re-apply the parent's CURRENT mode so a Plan-mode parent cannot
-// escape its read-only guarantee through `builtin:general`.
+// init, no per-turn mode layers). `overlay_parent_modes` must re-apply
+// the parent's CURRENT exec mode so a Plan-mode parent cannot escape
+// its read-only guarantee through `builtin:general`. Product mode is
+// enforced by `org2-pm` at the application boundary, not by tool policy.
 
 #[test]
 fn plan_mode_parent_overlay_makes_worker_policy_read_only() {
@@ -234,7 +234,7 @@ fn plan_mode_parent_overlay_makes_worker_policy_read_only() {
     use crate::session::AgentExecMode;
     use crate::tools::policy::ResolvedToolPolicy;
 
-    let overlaid = AgentTool::overlay_parent_exec_mode(
+    let overlaid = AgentTool::overlay_parent_modes(
         ResolvedToolPolicy::permissive(),
         Some(AgentExecMode::Plan),
     );
@@ -260,7 +260,7 @@ fn build_or_absent_parent_mode_leaves_worker_policy_untouched() {
     use crate::session::AgentExecMode;
     use crate::tools::policy::ResolvedToolPolicy;
 
-    let build = AgentTool::overlay_parent_exec_mode(
+    let build = AgentTool::overlay_parent_modes(
         ResolvedToolPolicy::permissive(),
         Some(AgentExecMode::Build),
     );
@@ -269,7 +269,7 @@ fn build_or_absent_parent_mode_leaves_worker_policy_untouched() {
         "Build-mode parent keeps write tools for workers"
     );
 
-    let absent = AgentTool::overlay_parent_exec_mode(ResolvedToolPolicy::permissive(), None);
+    let absent = AgentTool::overlay_parent_modes(ResolvedToolPolicy::permissive(), None);
     assert!(
         absent.is_allowed("edit_file"),
         "no parent mode => no overlay"
@@ -482,6 +482,7 @@ fn ctx_with_members(coordinator_id: &str, member_ids: &[&str]) -> AgentOrgRunCon
             })
             .collect(),
         hierarchy_mode: Default::default(),
+        plan_approval_policy: crate::definitions::orgs::PlanApprovalPolicy::Coordinator,
         root_session_id: Some("root-test".to_string()),
     }
 }

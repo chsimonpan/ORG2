@@ -13,7 +13,7 @@
  * react-markdown + react-syntax-highlighter into the initial bundle.
  */
 import { useAtomValue } from "jotai";
-import { ArrowUpRight, Check, Copy } from "lucide-react";
+import { Check, Copy, SquareArrowOutUpRight } from "lucide-react";
 import React, { memo, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -25,14 +25,20 @@ import { getLanguageFromPath } from "@src/config/languageMap";
 import CanvasInlineCard from "@src/engines/ChatPanel/blocks/CanvasInlineCard";
 import ChatCodeBlock from "@src/engines/ChatPanel/blocks/CodeBlock";
 import { codeMirrorPrismTheme } from "@src/features/CodeMirror/themes/prism";
+import { CloudSessionReferenceChip } from "@src/features/Org2Cloud/CloudSessionReferenceChip";
+import { parseCloudSessionReference } from "@src/features/Org2Cloud/cloudSessionReference";
 import { useCopyCheck } from "@src/hooks/ui";
 import { themesAtom } from "@src/store";
 import { activeWorkspaceRootAtom } from "@src/store/workspace";
 import { copyText } from "@src/util/data/clipboard";
 import { openFileInWorkStation } from "@src/util/ui/openFileInWorkStation";
 
+import LinkHoverCard from "./LinkHoverCard";
+import MarkdownLocalImage, { openLocalMarkdownRef } from "./MarkdownLocalImage";
 import MermaidBlock from "./MermaidBlock";
 import "./index.scss";
+import { classifyMarkdownImageSrc } from "./markdownImageSrc";
+import { markdownUrlTransform } from "./markdownUrlTransform";
 import {
   detectCodeType,
   normalizeCopyableMarkdownDocumentFence,
@@ -41,6 +47,7 @@ import {
   preprocessTextContent,
   renderChildren,
 } from "./markdownUtils";
+import { remarkCloudSessionReferences } from "./remarkCloudSessionReferences";
 
 const SyntaxHighlighter =
   SyntaxHighlighterPrism as unknown as React.ComponentType<
@@ -252,7 +259,7 @@ const CodeBlock = memo<CodeBlockProps>(
               className="code-block-open-button inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md border-0 bg-fill-2 p-0 text-text-3 transition-colors hover:bg-fill-3 hover:text-text-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-6/30"
               onClick={handleOpenFile}
             >
-              <ArrowUpRight size={14} strokeWidth={1.75} />
+              <SquareArrowOutUpRight size={14} strokeWidth={1.75} />
             </button>
           )}
           <button
@@ -333,10 +340,14 @@ function resolveCurrentRepoFilePath(
 // Markdown render primitives
 // ============================================
 
+type MarkdownRemarkPlugins = React.ComponentProps<
+  typeof ReactMarkdown
+>["remarkPlugins"];
+
 interface MarkdownRendererProps {
   content: string;
   components: Components;
-  plugins: (typeof remarkGfm)[];
+  plugins: MarkdownRemarkPlugins;
 }
 
 const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
@@ -347,6 +358,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   <ReactMarkdown
     className="chat-markdown-body"
     remarkPlugins={plugins}
+    urlTransform={markdownUrlTransform}
     components={components}
   >
     {content}
@@ -399,6 +411,18 @@ const MarkdownComponent: React.FC<MarkdownProps> = ({
     (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
       event.preventDefault();
       event.stopPropagation();
+      // Local filesystem hrefs (agents link generated artifacts by path)
+      // open in the WorkStation / editor — the browser app cannot load a
+      // filesystem path. Workspace-relative hrefs are deliberately not
+      // resolved here: only unambiguous local refs are rerouted.
+      const localSource = classifyMarkdownImageSrc(href);
+      if (localSource.kind === "local") {
+        void openLocalMarkdownRef(
+          localSource.path,
+          localSource.homeRelative === true
+        );
+        return;
+      }
       openUrlInBrowserApp(href);
     },
     []
@@ -586,40 +610,37 @@ const MarkdownComponent: React.FC<MarkdownProps> = ({
               </code>
             );
           }
-
-          if (codeType === "identifier") {
-            return (
-              <code
-                {...props}
-                className="clickable-code identifier"
-                title={`Search for ${text}`}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  // For identifiers, we can search for them
-                  openFileInEditor(text, false);
-                }}
-              >
-                {children}
-              </code>
-            );
-          }
         }
 
         // Regular inline code
         return <code {...props}>{children}</code>;
       },
+      img({ src, alt }) {
+        return (
+          <MarkdownLocalImage
+            src={typeof src === "string" ? src : undefined}
+            alt={typeof alt === "string" ? alt : undefined}
+            workspaceRootPath={activeWorkspaceRootPath}
+          />
+        );
+      },
       a({ children, href, ...props }) {
         const url = href ?? "";
+        const sessionReference = parseCloudSessionReference(url);
+        if (sessionReference) {
+          return <CloudSessionReferenceChip reference={sessionReference} />;
+        }
         return (
-          <a
-            {...props}
-            href={url}
-            title={undefined}
-            onClick={(event) => handleLinkClick(event, url)}
-          >
-            {children}
-          </a>
+          <LinkHoverCard url={url}>
+            <a
+              {...props}
+              href={url}
+              title={undefined}
+              onClick={(event) => handleLinkClick(event, url)}
+            >
+              {children}
+            </a>
+          </LinkHoverCard>
         );
       },
       ul({ children, ...props }) {
@@ -655,7 +676,7 @@ const MarkdownComponent: React.FC<MarkdownProps> = ({
   ]);
 
   // Memoize plugins array to prevent recreation
-  const plugins = useMemo(() => [remarkGfm], []);
+  const plugins = useMemo(() => [remarkGfm, remarkCloudSessionReferences], []);
 
   // Preprocess text content to auto-detect and format code.
   // Skip the expensive regex pass when the caller guarantees the content is

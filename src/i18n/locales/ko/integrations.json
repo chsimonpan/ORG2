@@ -1739,7 +1739,9 @@
           "rename": "이름 변경",
           "search": "검색"
         }
-      }
+      },
+      "liveStatusToggle": "실시간 에이전트 상태",
+      "liveStatusToggleDesc": "실행 중인 CLI 에이전트의 작업 또는 대기 상태를 표시합니다. 꺼도 출처 기록은 유지됩니다."
     },
     "codexConfig": {
       "sectionTitle": "설정",

@@ -15,6 +15,7 @@ import AiderIcon from "@src/assets/modelIcons/aider.svg";
 import AiHubMixIcon from "@src/assets/modelIcons/aihubmix.svg";
 import AmpIcon from "@src/assets/modelIcons/amp.svg";
 import AntigravityIcon from "@src/assets/modelIcons/antigravity.svg";
+import AtlasCloudIcon from "@src/assets/modelIcons/atlascloud.svg";
 import AugmentIcon from "@src/assets/modelIcons/augment.svg";
 import AutoHandIcon from "@src/assets/modelIcons/autohand.svg";
 import AWSIcon from "@src/assets/modelIcons/aws.svg";
@@ -58,7 +59,7 @@ import OpenAIIcon from "@src/assets/modelIcons/openai.svg";
 import OpenClawIcon from "@src/assets/modelIcons/openclaw.svg";
 import OpenCodeIcon from "@src/assets/modelIcons/opencode.svg";
 import OpenRouterIcon from "@src/assets/modelIcons/openrouter.svg";
-import OrgiiIcon from "@src/assets/modelIcons/orgii.svg";
+import OrgiiIcon from "@src/assets/modelIcons/org2-session.svg";
 import PerplexityIcon from "@src/assets/modelIcons/perplexity.svg";
 import PiIcon from "@src/assets/modelIcons/pi.svg";
 import QoderIcon from "@src/assets/modelIcons/qoder.svg";
@@ -90,6 +91,7 @@ import ZhipuIcon from "@src/assets/modelIcons/zhipu.svg";
  */
 export type IconProvider =
   | "openai"
+  | "atlascloud"
   | "codex"
   | "aws"
   | "azure"
@@ -183,6 +185,7 @@ export const ICON_MAP: Record<
   kiro: KiroIcon,
   // OpenAI-related
   openai: OpenAIIcon,
+  atlascloud: AtlasCloudIcon,
   codex: OpenAIIcon,
   // Anthropic
   claude: ClaudeIcon,
@@ -256,6 +259,7 @@ export const ICON_MAP: Record<
 /** Active icon providers available for user selection (excludes unknown + inactive agents) */
 export const SELECTABLE_ICON_PROVIDERS: IconProvider[] = [
   "openai",
+  "atlascloud",
   "claude",
   "claude_code",
   "gemini",
@@ -362,9 +366,12 @@ const MODEL_TYPE_TO_ICON: Record<ModelType, IconProvider> = {
   autohand: "autohand",
   omp: "omp",
   pi: "pi",
+  qoder_cli: "qoder",
+  trae_cli: "trae",
   // API key providers
   anthropic_api: "claude",
   openai_api: "openai",
+  atlascloud_api: "atlascloud",
   deepseek_api: "deepseek",
   gemini_api: "gemini",
   groq_api: "groq",
@@ -379,7 +386,6 @@ const MODEL_TYPE_TO_ICON: Record<ModelType, IconProvider> = {
   cherryin_api: "cherryin",
   bedrock_api: "aws",
   custom_api: "custom",
-  embedding_api: "custom",
   moonshot_api: "kimi",
   openrouter_api: "openrouter",
   zenmux_api: "zenmux",

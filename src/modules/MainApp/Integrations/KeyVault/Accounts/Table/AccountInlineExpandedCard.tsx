@@ -7,10 +7,7 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { rpc } from "@src/api/tauri/rpc";
-import { CLI_AGENT } from "@src/api/types/keys";
 import InlineAlert from "@src/components/InlineAlert";
-import Select from "@src/components/Select";
 import type { KeyVaultAccount } from "@src/hooks/keyVault";
 import { AccountInlineDetails } from "@src/modules/shared/keyVault/AccountInlineDetails";
 
@@ -46,33 +43,6 @@ function getAccountModelToggleKey(accountId: string, model: string): string {
   return `${accountId}|${model}`;
 }
 
-const ACCOUNT_AUTH_METHOD = {
-  OAUTH: "oauth",
-} as const;
-
-function supportsQuotaRefresh(account: KeyVaultAccount): boolean {
-  switch (account.modelType) {
-    case CLI_AGENT.CURSOR:
-      return account.hasSessionToken;
-    case CLI_AGENT.COPILOT:
-      return account.hasApiKey;
-    case CLI_AGENT.CLAUDE_CODE:
-    case CLI_AGENT.CODEX:
-      return (
-        account.authMethod === ACCOUNT_AUTH_METHOD.OAUTH &&
-        account.hasSessionToken
-      );
-    case CLI_AGENT.OPENCODE:
-      return account.hasKey;
-    // Zhipu (GLM Coding Plan) exposes a quota API; pay-as-you-go keys still
-    // resolve to a "Pay-as-you-go" QuotaInfo (no bar) rather than an error.
-    case "zhipu_api":
-      return account.hasApiKey;
-    default:
-      return false;
-  }
-}
-
 interface AccountInlineExpandedCardProps {
   account: KeyVaultAccount;
   activeTab: AccountInlineTab;
@@ -94,11 +64,6 @@ interface AccountInlineExpandedCardProps {
     accountId: string,
     baseModel: string,
     model: string
-  ) => void;
-  onUpdateAccountModelSlug?: (
-    accountId: string,
-    model: string,
-    slug: string
   ) => void;
   onRefresh?: () => Promise<void>;
   onRevalidateAccount?: (accountId: string) => Promise<void>;
@@ -125,7 +90,6 @@ const AccountInlineExpandedCard: React.FC<AccountInlineExpandedCardProps> = ({
   onToggleModel,
   onUpdateAccountEnabledModels,
   onUpdateAccountDefaultVariant,
-  onUpdateAccountModelSlug,
   onRefresh,
   onRevalidateAccount,
   refreshing = false,
@@ -202,7 +166,7 @@ const AccountInlineExpandedCard: React.FC<AccountInlineExpandedCardProps> = ({
     await onRefresh();
   }, [onRefresh]);
 
-  const showQuotaRefresh = onRefresh && supportsQuotaRefresh(account);
+  const showQuotaRefresh = Boolean(onRefresh && account.canRefreshQuota);
   const showModelRefresh = Boolean(onRevalidateAccount);
 
   const handleEditFormSave = useCallback(
@@ -235,26 +199,6 @@ const AccountInlineExpandedCard: React.FC<AccountInlineExpandedCardProps> = ({
     }
     return set;
   }, [account.enabledModels, account.id, availableModels, optimisticToggles]);
-
-  // Side-query dropdown options must mirror the model toggle list below in
-  // real time (enabledSet already folds in optimistic toggles). Falls back
-  // to all available models when nothing is enabled — matching backend
-  // resolve_side_query_model semantics.
-  const sideQueryAllowedModels = useMemo(() => {
-    const enabledOrdered = availableModels.filter((model) =>
-      enabledSet.has(model)
-    );
-    return enabledOrdered.length > 0 ? enabledOrdered : availableModels;
-  }, [availableModels, enabledSet]);
-
-  const sideQueryModelInvalid = useMemo(
-    () =>
-      Boolean(
-        account.sideQueryModel &&
-          !sideQueryAllowedModels.includes(account.sideQueryModel)
-      ),
-    [account.sideQueryModel, sideQueryAllowedModels]
-  );
 
   const handleSetModelEnabled = useCallback(
     (model: string, nextEnabled: boolean) => {
@@ -364,22 +308,6 @@ const AccountInlineExpandedCard: React.FC<AccountInlineExpandedCardProps> = ({
     });
   }, [account.enabledModels, account.id, availableModels]);
 
-  const handleSideQueryModelChange = useCallback(
-    (value: string | number | (string | number)[]) => {
-      if (typeof value !== "string") return;
-      void rpc.validation
-        .saveKey({
-          request: {
-            id: account.id,
-            agent_type: account.modelType,
-            side_query_model: value,
-          },
-        })
-        .then(() => onRefresh?.());
-    },
-    [account.id, account.modelType, onRefresh]
-  );
-
   const tabContent = useMemo(() => {
     switch (effectiveActiveTab) {
       case ACCOUNT_INLINE_TAB.STATUS:
@@ -414,41 +342,6 @@ const AccountInlineExpandedCard: React.FC<AccountInlineExpandedCardProps> = ({
                 {refreshModelsError}
               </InlineAlert>
             ) : null}
-            <div className="mb-3">
-              <label className="mb-1 block text-xs font-medium text-text-2">
-                {t("keyVault.sideQueryModel.label")}
-              </label>
-              <Select
-                value={account.sideQueryModel}
-                options={[
-                  ...sideQueryAllowedModels.map((model) => ({
-                    value: model,
-                    label: model,
-                  })),
-                  ...(sideQueryModelInvalid && account.sideQueryModel
-                    ? [
-                        {
-                          value: account.sideQueryModel,
-                          label: `⚠ ${account.sideQueryModel}`,
-                        },
-                      ]
-                    : []),
-                ]}
-                placeholder={t("keyVault.sideQueryModel.placeholder")}
-                onChange={handleSideQueryModelChange}
-                showSearch
-              />
-              {sideQueryModelInvalid ? (
-                <p className="mt-1 text-xs text-danger-6">
-                  {t("keyVault.sideQueryModel.notEnabledWarning", {
-                    model: account.sideQueryModel,
-                  })}
-                </p>
-              ) : null}
-              <p className="mt-1 text-xs text-text-3">
-                {t("keyVault.sideQueryModel.description")}
-              </p>
-            </div>
             <AccountModelsInlineSplit
               account={account}
               enabledSet={enabledSet}
@@ -463,7 +356,6 @@ const AccountInlineExpandedCard: React.FC<AccountInlineExpandedCardProps> = ({
                   : () => {}
               }
               onUpdateAccountDefaultVariant={onUpdateAccountDefaultVariant}
-              onUpdateAccountModelSlug={onUpdateAccountModelSlug}
             />
           </>
         );
@@ -477,7 +369,6 @@ const AccountInlineExpandedCard: React.FC<AccountInlineExpandedCardProps> = ({
     effectiveActiveTab,
     enabledSet,
     handleSetModelEnabled,
-    handleSideQueryModelChange,
     handleUpdateEnabledModels,
     isAccountEnabled,
     onRefresh,

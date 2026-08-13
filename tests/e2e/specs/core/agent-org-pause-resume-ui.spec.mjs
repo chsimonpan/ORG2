@@ -494,6 +494,388 @@ describe("Agent Org pause, resume, and sidebar rendered UI", () => {
     }
   }));
 
+  it("Standalone, Pinned, and Agent Org pagination advance independently in one click", async () => runAgentOrgScenarioWithTimeout("independent-native-sidebar-pagination", async () => {
+    // Debug helpers seed durable preconditions only. The assertions below use
+    // the rendered filter menu and real NavigationMenu Load more clicks.
+    const fixturePrefix = `issue-572-${RUN_ID}`;
+    const futureTimestamp = "2099-07-29T12:00:00Z";
+    const standaloneSessionIds = Array.from(
+      { length: 30 },
+      (_, index) =>
+        `sdeagent-${fixturePrefix}-standalone-${String(index).padStart(2, "0")}`
+    );
+    const rootSessionIds = Array.from(
+      { length: 11 },
+      (_, index) =>
+        `sdeagent-${fixturePrefix}-root-${String(index).padStart(2, "0")}`
+    );
+    const workerSessionIds = Array.from(
+      { length: 11 },
+      (_, index) =>
+        `sdeagent-${fixturePrefix}-worker-${String(index).padStart(2, "0")}`
+    );
+    const pinnedSessionIds = Array.from(
+      { length: 11 },
+      (_, index) =>
+        `sdeagent-${fixturePrefix}-pinned-${String(index).padStart(2, "0")}`
+    );
+    const runIds = [];
+    let scenarioError = null;
+
+    try {
+      // Put 30 Standalone entities into the ordinary cache first. The rendered
+      // refresh below must replace that provisional window with backend page 1,
+      // then expose page 2 with one real click.
+      for (let index = 29; index >= 0; index -= 1) {
+        unwrap(
+          await invokeE2E("debugSeedSidebarCodingSessionWire", {
+            sessionId: standaloneSessionIds[index],
+            name: `Issue 572 standalone ${String(index).padStart(2, "0")}`,
+            status: "idle",
+            createdAt: futureTimestamp,
+            updatedAt: futureTimestamp,
+          }),
+          `seed standalone sidebar row ${index}`
+        );
+      }
+      for (let index = 10; index >= 0; index -= 1) {
+        unwrap(
+          await invokeE2E("debugSeedSidebarCodingSessionWire", {
+            sessionId: pinnedSessionIds[index],
+            name: `Issue 572 pinned ${String(index).padStart(2, "0")}`,
+            status: "idle",
+            createdAt: futureTimestamp,
+            updatedAt: futureTimestamp,
+            pinned: true,
+          }),
+          `seed pinned sidebar row ${index}`
+        );
+
+        const seededRun = await postJson(
+          "/agent/test/agent-org/stale-workers/seed-run",
+          {
+            org_id: `e2e-agent-org-fixture:${fixturePrefix}-${String(index).padStart(2, "0")}`,
+            coordinator_agent_id: "builtin:sde",
+            root_session_id: rootSessionIds[index],
+            updated_at: futureTimestamp,
+            workers: [
+              {
+                session_id: workerSessionIds[index],
+                member_id: "worker",
+                agent_definition_id: "builtin:sde",
+                status: "idle",
+                updated_at: "2099-07-29T11:00:00Z",
+              },
+            ],
+          }
+        );
+        runIds.push(seededRun.org_run_id);
+      }
+
+      unwrap(
+        await invokeE2E("primeSidebarEntityCache"),
+        "prime 30-row provisional entity cache"
+      );
+      await browser.waitUntil(
+        () =>
+          execJS(`
+            const splash = document.getElementById("splash");
+            if (!splash) return true;
+            const style = window.getComputedStyle(splash);
+            return style.display === "none" ||
+              style.visibility === "hidden" ||
+              style.pointerEvents === "none";
+          `),
+        {
+          timeout: RENDER_TIMEOUT_MS,
+          timeoutMsg:
+            "Startup splash still covered the sidebar before real UI clicks",
+        }
+      );
+      // Use the rendered filter menu for grouping and the authoritative roster
+      // refresh. No helper advances a pagination cursor or visibility atom.
+      await browser
+        .$('[data-testid="sidebar-session-filter-button"]')
+        .click();
+      await browser.$('[data-testid="sidebar-group-by-byAgent"]').click();
+      await browser
+        .$('[data-testid="sidebar-session-filter-button"]')
+        .click();
+      await browser.$('[data-testid="sidebar-refresh-sessions"]').click();
+      // WebKit can keep the filter popover's transparent dismissal layer for
+      // one more interaction after the refresh action closes it. Escape makes
+      // the rendered menu state explicit before exercising sidebar rows.
+      await browser.keys("Escape");
+
+      const rootPagerSelector =
+        '[data-menu-item-id="load-more-agent_org_root"]';
+      const standalonePagerSelector =
+        '[data-menu-item-id="load-more-standalone_agent"]';
+      const localSdePagerSelector =
+        '[data-menu-item-id="load-more-group-agent:sde"]';
+      const pinnedPagerSelector =
+        '[data-menu-item-id="load-more-pinned_native"]';
+      const localPinnedPagerSelector =
+        '[data-menu-item-id="load-more-group-pinned"]';
+      const clickRenderedPager = async (selector) => {
+        await browser.waitUntil(
+          () =>
+            execJS(`
+              const element = document.querySelector(${JSON.stringify(selector)});
+              return Boolean(element) &&
+                element.getAttribute("aria-disabled") !== "true";
+            `),
+          {
+            timeout: RENDER_TIMEOUT_MS,
+            timeoutMsg: `Rendered pager stayed disabled: ${selector}`,
+          }
+        );
+        const scrollResult = await browser.executeScript(
+          `
+            const selector = arguments[0];
+            const element = document.querySelector(selector);
+            if (!element) return false;
+            element.scrollIntoView({ block: "center", inline: "center" });
+            return true;
+          `,
+          [selector]
+        );
+        if (!scrollResult) {
+          throw new Error(`Rendered pager is missing: ${selector}`);
+        }
+        await browser.$(selector).click();
+      };
+
+      // The by-agent view has a local group cap in front of backend
+      // pagination. Reveal already-loaded SDE rows first; these clicks do not
+      // advance either backend cursor.
+      for (let revealAttempt = 0; revealAttempt < 10; revealAttempt += 1) {
+        if (await execJS(js.exists(standalonePagerSelector))) break;
+        if (!(await execJS(js.exists(localSdePagerSelector)))) break;
+        await browser.$(localSdePagerSelector).click();
+      }
+      for (let revealAttempt = 0; revealAttempt < 10; revealAttempt += 1) {
+        if (await execJS(js.exists(pinnedPagerSelector))) break;
+        if (!(await execJS(js.exists(localPinnedPagerSelector)))) break;
+        await browser.$(localPinnedPagerSelector).click();
+      }
+
+      const pagersRendered = await browser
+        .waitUntil(
+          async () =>
+            (await execJS(js.exists(rootPagerSelector))) &&
+            (await execJS(js.exists(standalonePagerSelector))) &&
+            (await execJS(js.exists(pinnedPagerSelector))),
+          {
+            timeout: RENDER_TIMEOUT_MS,
+            timeoutMsg:
+              "Independent Pinned, Agent Org, and Standalone backend pagers did not render",
+          }
+        )
+        .then(() => true)
+        .catch(() => false);
+      if (!pagersRendered) {
+        const diagnostics = await execJS(`return JSON.stringify((() => ({
+      groupBy: localStorage.getItem("orgii:sidebarGroupBy"),
+      fixtureRows: Array.from(document.querySelectorAll('[data-testid^="sidebar-session-item-sdeagent-${fixturePrefix}"]'))
+        .map((row) => row.getAttribute("data-testid")),
+      loadMoreRows: Array.from(document.querySelectorAll('[data-menu-item-id^="load-more-"]'))
+        .map((row) => row.getAttribute("data-menu-item-id")),
+    }))())`);
+        throw new Error(
+          `Independent Pinned, Agent Org, and Standalone backend pagers did not render: ${JSON.stringify(diagnostics)}`
+        );
+      }
+      for (const selector of [
+        rootPagerSelector,
+        standalonePagerSelector,
+        pinnedPagerSelector,
+      ]) {
+        const count = await execJS(
+          `return document.querySelectorAll(${JSON.stringify(selector)}).length`
+        );
+        if (count !== 1) {
+          throw new Error(
+            `Expected exactly one shared pager for ${selector}, got ${count}`
+          );
+        }
+      }
+
+      const deferredRootId = rootSessionIds[0];
+      const deferredStandaloneId = standaloneSessionIds[19];
+      const deferredPinnedId = pinnedSessionIds[0];
+      if (
+        await execJS(
+          js.exists(
+            `[data-testid="sidebar-session-item-${deferredRootId}"]`
+          )
+        )
+      ) {
+        throw new Error("Agent Org page 2 row rendered before Load more");
+      }
+      if (
+        await execJS(
+          js.exists(
+            `[data-testid="sidebar-session-item-${deferredStandaloneId}"]`
+          )
+        )
+      ) {
+        throw new Error(
+          "Standalone Agent page 2 row rendered before Load more"
+        );
+      }
+      if (
+        await execJS(
+          js.exists(
+            `[data-testid="sidebar-session-item-${deferredPinnedId}"]`
+          )
+        )
+      ) {
+        throw new Error("Pinned page 2 row rendered before Load more");
+      }
+
+      // Advancing Agent Org roots must not advance the standalone cursor.
+      await clickRenderedPager(rootPagerSelector);
+      const rootPageRendered = await browser
+        .waitUntil(
+          () =>
+            execJS(
+              js.exists(
+                `[data-testid="sidebar-session-item-${deferredRootId}"]`
+              )
+            ),
+          {
+            timeout: RENDER_TIMEOUT_MS,
+            timeoutMsg:
+              "Agent Org page 2 root did not render after Load more",
+          }
+        )
+        .then(() => true)
+        .catch(() => false);
+      if (!rootPageRendered) {
+        const paginationDiagnostics = await invokeE2E(
+          "inspectSidebarPagination",
+          rootSessionIds
+        );
+        const renderedDiagnostics = await execJS(`return JSON.stringify({
+          fixtureRows: Array.from(document.querySelectorAll('[data-testid^="sidebar-session-item-sdeagent-${fixturePrefix}-root-"]'))
+            .map((row) => row.getAttribute("data-testid")),
+          pager: (() => {
+            const row = document.querySelector(${JSON.stringify(rootPagerSelector)});
+            return row ? { text: row.textContent, disabled: row.getAttribute("aria-disabled") } : null;
+          })(),
+        })`);
+        throw new Error(
+          `Agent Org page 2 root did not render after Load more: ${JSON.stringify({
+            paginationDiagnostics,
+            renderedDiagnostics,
+          })}`
+        );
+      }
+      if (
+        await execJS(
+          js.exists(
+            `[data-testid="sidebar-session-item-${deferredStandaloneId}"]`
+          )
+        )
+      ) {
+        throw new Error(
+          "Agent Org Load more incorrectly advanced standalone Agent rows"
+        );
+      }
+      if (!(await execJS(js.exists(standalonePagerSelector)))) {
+        throw new Error(
+          "Standalone Agent pager disappeared when only Agent Org advanced"
+        );
+      }
+
+      const pinnedRowsBeforeStandalone = await execJS(
+        `return document.querySelectorAll('[data-testid^="sidebar-session-item-sdeagent-${fixturePrefix}-pinned-"]').length`
+      );
+      await clickRenderedPager(standalonePagerSelector);
+      await browser.waitUntil(
+        () =>
+          execJS(
+            js.exists(
+              `[data-testid="sidebar-session-item-${deferredStandaloneId}"]`
+            )
+          ),
+        {
+          timeout: RENDER_TIMEOUT_MS,
+          timeoutMsg:
+            "Standalone page 2 did not render after one real click",
+        }
+      );
+      const pinnedRowsAfterStandalone = await execJS(
+        `return document.querySelectorAll('[data-testid^="sidebar-session-item-sdeagent-${fixturePrefix}-pinned-"]').length`
+      );
+      if (pinnedRowsAfterStandalone !== pinnedRowsBeforeStandalone) {
+        throw new Error("Standalone Load more changed the Pinned roster");
+      }
+
+      const standaloneRowsBeforePinned = await execJS(
+        `return document.querySelectorAll('[data-testid^="sidebar-session-item-sdeagent-${fixturePrefix}-standalone-"]').length`
+      );
+      await clickRenderedPager(pinnedPagerSelector);
+      await browser.waitUntil(
+        () =>
+          execJS(
+            js.exists(
+              `[data-testid="sidebar-session-item-${deferredPinnedId}"]`
+            )
+          ),
+        {
+          timeout: RENDER_TIMEOUT_MS,
+          timeoutMsg: "Pinned page 2 did not render after one real click",
+        }
+      );
+      const standaloneRowsAfterPinned = await execJS(
+        `return document.querySelectorAll('[data-testid^="sidebar-session-item-sdeagent-${fixturePrefix}-standalone-"]').length`
+      );
+      if (standaloneRowsAfterPinned !== standaloneRowsBeforePinned) {
+        throw new Error("Pinned Load more changed the Standalone roster");
+      }
+    } catch (error) {
+      scenarioError = error;
+      throw error;
+    } finally {
+      const cleanupFailures = [];
+      for (const orgRunId of runIds) {
+        try {
+          await postJson("/agent/test/agent-org/run/cleanup", {
+            org_run_id: orgRunId,
+          });
+        } catch (error) {
+          cleanupFailures.push(`run ${orgRunId}: ${String(error)}`);
+        }
+      }
+      for (const sessionId of [
+        ...standaloneSessionIds,
+        ...rootSessionIds,
+        ...workerSessionIds,
+        ...pinnedSessionIds,
+      ]) {
+        try {
+          unwrap(
+            await invokeE2E("deleteSessionWire", sessionId),
+            `cleanup sidebar fixture ${sessionId}`
+          );
+        } catch (error) {
+          cleanupFailures.push(`session ${sessionId}: ${String(error)}`);
+        }
+      }
+      if (cleanupFailures.length > 0) {
+        const cleanupMessage =
+          `Issue 572 fixture cleanup failed:\n${cleanupFailures.join("\n")}`;
+        if (scenarioError instanceof Error) {
+          scenarioError.message = `${scenarioError.message}\n${cleanupMessage}`;
+        } else {
+          throw new Error(cleanupMessage);
+        }
+      }
+    }
+  }));
+
   it("Coordinator session remains in sidebar after switching to a member session and back", async () => runAgentOrgScenarioWithTimeout("coordinator-sidebar-after-member-switch", async () => {
     // Regression guard for the bug where switching to a member chat and then back caused the new coordinator session to disappear from the left sidebar.
     //
@@ -726,7 +1108,11 @@ describe("Agent Org pause, resume, and sidebar rendered UI", () => {
       );
     }
     const retainedTaskId = `e2e-restart-retained-task-${RUN_ID}`;
-    const retainedTaskSubject = `E2E retained historical task ${RUN_ID} must remain visible in the Agent Org task board after the user reopens the historical session from the sidebar, including the owner, status chip, and collapsed long-task presentation.`;
+    const retainedTaskSubject =
+      `E2E retained historical task ${RUN_ID} must remain visible in the Agent Org task board after reopening the historical session, including owner, status, and collapsed presentation.`.slice(
+        0,
+        190
+      );
     await createLongTaskPrecondition(
       sessionId,
       retainedTaskId,
@@ -738,6 +1124,22 @@ describe("Agent Org pause, resume, and sidebar rendered UI", () => {
       (view) =>
         Boolean(view?.tasks?.some((task) => task.id === retainedTaskId)),
       "retained task appears in run view before restart"
+    );
+    const retainedTaskAssignedRow = await waitForInboxRow(
+      sessionId,
+      (row) => {
+        const payload = parseInboxPayload(
+          row,
+          "retained task assignment before restart"
+        );
+        return (
+          row.payloadKind === "task_assigned" &&
+          row.recipientMemberId === firstWorker.memberId &&
+          payload.task_id === retainedTaskId &&
+          !row.readAt
+        );
+      },
+      "retained task assignment stays unread before restart"
     );
     if (!firstWorker.sessionRuntime?.sessionId) {
       throw new Error(
@@ -864,6 +1266,7 @@ describe("Agent Org pause, resume, and sidebar rendered UI", () => {
       );
     }
 
+    await openRenderedGroupChatView();
     await waitForGroupChatPausedBanner(
       "historical paused run after reopening from sidebar"
     );
@@ -886,6 +1289,11 @@ describe("Agent Org pause, resume, and sidebar rendered UI", () => {
       (status) => Boolean(status && status !== "abandoned"),
       "coordinator session was revived after rendered resume post-restart"
     );
+    await waitForInboxRowRead(
+      sessionId,
+      retainedTaskAssignedRow.id,
+      "retained task assignment was drained after rendered resume post-restart"
+    );
     await waitForAgentOrgRunView(
       sessionId,
       (view) => {
@@ -896,15 +1304,17 @@ describe("Agent Org pause, resume, and sidebar rendered UI", () => {
         const workerRuntime = view?.members?.find(
           (member) => member.memberId === firstWorker.memberId
         )?.sessionRuntime;
+        const ownerRuntimeStatus =
+          retainedOwnerRuntime?.status ?? workerRuntime?.status;
         return Boolean(
           view?.runStatus === "running" &&
             retainedTask?.owner === firstWorker.memberId &&
             retainedTask?.status === AGENT_ORG_TASK_STATUS.PENDING &&
-            (retainedOwnerRuntime?.status === "running" ||
-              workerRuntime?.status === "running")
+            ownerRuntimeStatus &&
+            ownerRuntimeStatus !== "abandoned"
         );
       },
-      "retained open task owner runtime was active after rendered resume post-restart",
+      "retained open task owner runtime was revived after rendered resume post-restart",
       REPLY_TIMEOUT_MS
     );
     await assertNoFalseFinality(

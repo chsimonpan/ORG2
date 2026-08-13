@@ -8,31 +8,80 @@
  *
  * In-memory only, NOT persisted — refetched on each sign-in / app start via
  * `useOrg2CloudOrgs()` (mounted once in the router root next to
- * `useDeepLinkHandler`). Cleared to `[]` on sign-out. Offline / fetch
- * failure degrades to `[]` (no crash, no stale cache).
+ * `useDeepLinkHandler`). Focus/visibility edges plus one visible-only,
+ * five-minute safety timeout converge policy changes from inactive orgs.
+ * Cleared to `[]` on sign-out. Offline / fetch failure degrades to `[]` (no
+ * crash, no stale cache).
  */
-import { atom, createStore, useAtom, useSetAtom, useStore } from "jotai";
-import { useCallback, useEffect, useRef } from "react";
+import { atom, createStore, useAtom, useStore } from "jotai";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
 import { createLogger } from "@src/hooks/logger";
-import { COLLAB_SESSION_ACCESS_MODE } from "@src/store/collaboration/types";
-import type { CollabSessionAccessMode } from "@src/store/collaboration/types";
 
 import { enrichOrg2CloudProfile } from "./completeSignIn";
-import { org2CloudSharingFloorAtom } from "./org2CloudAccessSettings";
-import { commitRefreshedAuth, org2CloudAuthAtom } from "./org2CloudAuthAtom";
+import type { OrgRuntimeTelemetry } from "./memberRuntime/types";
 import {
-  ensureFreshSession,
-  getEntitlementState,
-  listMyOrgs,
-} from "./org2CloudClient";
+  clearRejectedAuth,
+  commitRefreshedAuth,
+  org2CloudAuthAtom,
+  org2CloudAuthIdentityKey,
+} from "./org2CloudAuthAtom";
+import { ensureFreshSession, listMyOrgs } from "./org2CloudClient";
+import type { CloudEntitlementState } from "./org2CloudClient";
+import {
+  refreshOrgEntitlement,
+  seedOrgEntitlement,
+} from "./org2CloudEntitlementCoordinator";
+import { startOrg2CloudRosterConvergence } from "./org2CloudRosterConvergence";
 
 const log = createLogger("Org2CloudOrgs");
+
+/** Seed roster-resolved entitlements; per-org RPC only for unresolved orgs. */
+function hydrateOrgEntitlements(
+  store: ReturnType<typeof createStore>,
+  orgs: readonly Org2CloudOrg[],
+  getAccessToken: () => Promise<string | null>
+): void {
+  const unresolved: Org2CloudOrg[] = [];
+  for (const org of orgs) {
+    if (org.entitlement) {
+      seedOrgEntitlement(store, org.orgId, org.entitlement);
+    } else {
+      unresolved.push(org);
+    }
+  }
+  if (unresolved.length === 0) return;
+  void Promise.all(
+    unresolved.map((org) =>
+      refreshOrgEntitlement(store, org.orgId, getAccessToken)
+    )
+  );
+}
 
 export interface Org2CloudOrg {
   orgId: string;
   name: string;
   role: string;
+  /** Batched entitlement from a 0004 roster listing; absent ⇒ per-org RPC. */
+  entitlement?: CloudEntitlementState;
+  /** 0007 directory hook; absent ⇒ the org lives on the active endpoint. */
+  homeEndpoint?: string;
+  /** 0010 member-runtime telemetry record; absent/null ⇒ feature off (the
+   * push scheduler never runs for this org). Parsed tolerantly in
+   * `listMyOrgs` — a malformed record degrades to absent. */
+  runtimeTelemetry?: OrgRuntimeTelemetry | null;
+  /**
+   * 0013 legacy wire name for the org-level background-upload policy;
+   * absent ⇒ off. Keep the field name until the server contract migrates.
+   */
+  offlineSyncEnabled?: boolean;
+}
+
+/** Product-level meaning of the legacy 0013 roster field. */
+export function isOrgBackgroundUploadEnabled(
+  org: Pick<Org2CloudOrg, "offlineSyncEnabled">
+): boolean {
+  return org.offlineSyncEnabled === true;
 }
 
 export interface RefetchOrg2CloudOrgsOptions {
@@ -81,6 +130,12 @@ type JotaiStore = ReturnType<typeof createStore>;
  * queue also gives two overlapping UI mutations a deterministic order.
  */
 const org2CloudOrgsConvergenceTail = new WeakMap<JotaiStore, Promise<void>>();
+/** Plain Realtime/status refreshes share one request per app store. Mutation
+ * convergence remains serialized separately because it carries a postcondition. */
+const org2CloudOrgsRefetchInFlight = new WeakMap<
+  JotaiStore,
+  Promise<Org2CloudOrg[]>
+>();
 
 export function isOrg2CloudOrgsConverging(store: JotaiStore): boolean {
   return org2CloudOrgsConvergenceTail.has(store);
@@ -137,11 +192,30 @@ export function commitOrg2CloudOrgsRequest(
  * `org_memberships` subscription (useOrg2CloudRealtime). Consumers that
  * display the member list (CloudOrgPanelView) put their org's counter in a
  * fetch-effect dependency so a teammate joining/leaving/changing role
- * refreshes the list live — without this the members section only updated
- * on panel re-open.
+ * refreshes the list live. Channel-unavailable recovery is driven by focus /
+ * visibility events rather than a periodic roster poll.
  */
 export const org2CloudRosterVersionAtom = atom<Record<string, number>>({});
 org2CloudRosterVersionAtom.debugLabel = "org2CloudRosterVersionAtom";
+
+/**
+ * Per-org member-runtime CHANGE COUNTER, bumped when a teammate's telemetry
+ * upsert broadcasts the `member_runtime` signal kind. Team Runtime surfaces
+ * put their org's counter in a fetch-effect dependency so the roster
+ * refreshes live instead of waiting for a remount or visible edge.
+ */
+export const org2CloudMemberRuntimeVersionAtom = atom<Record<string, number>>(
+  {}
+);
+org2CloudMemberRuntimeVersionAtom.debugLabel =
+  "org2CloudMemberRuntimeVersionAtom";
+
+/** Active orgs whose member-roster Postgres Changes channel is subscribed. */
+export const org2CloudRosterRealtimeConnectedAtom = atom<
+  Record<string, boolean>
+>({});
+org2CloudRosterRealtimeConnectedAtom.debugLabel =
+  "org2CloudRosterRealtimeConnectedAtom";
 
 /** Cloud org id currently selected in the sidebar workspace scope selector (null = a local scope). */
 export const sidebarActiveCloudOrgIdAtom = atom<string | null>(null);
@@ -174,26 +248,32 @@ export function parseCloudOrgSelectorValue(value: string): string | null {
 
 /**
  * Populate `org2CloudOrgsAtom` whenever a cloud user is signed in; clear it
- * on sign-out. Keyed on `userId` (not the whole auth object) so the
- * token-refresh write inside the effect does not retrigger the fetch.
+ * on sign-out. Keyed on endpoint + `userId` (not the whole auth object) so a
+ * token-refresh write does not retrigger the fetch while an endpoint/account
+ * switch can never retain the previous deployment's roster.
  */
 export function useOrg2CloudOrgs(): void {
   const [auth, setAuth] = useAtom(org2CloudAuthAtom);
   const store = useStore();
-  const setFloorByOrg = useSetAtom(org2CloudSharingFloorAtom);
+  const refetchOrgs = useRefetchOrg2CloudOrgs();
   const authRef = useRef(auth);
   useEffect(() => {
     authRef.current = auth;
   }, [auth]);
-  const userId = auth?.userId ?? null;
+  const authIdentityKey = auth ? org2CloudAuthIdentityKey(auth) : null;
+
+  useLayoutEffect(() => {
+    // Identity changes are a hard visibility boundary. Clear the prior
+    // deployment/account roster before paint; otherwise the selector and
+    // Realtime manager can briefly treat old org ids as belonging to the new
+    // account while the first token refresh/list request is pending.
+    beginOrg2CloudOrgsRequest(store);
+    store.set(org2CloudOrgsAtom, []);
+    store.set(org2CloudOrgsLoadedAtom, false);
+  }, [authIdentityKey, store]);
 
   useEffect(() => {
-    if (!userId) {
-      beginOrg2CloudOrgsRequest(store);
-      store.set(org2CloudOrgsAtom, []);
-      store.set(org2CloudOrgsLoadedAtom, false);
-      return;
-    }
+    if (!authIdentityKey) return;
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     // Bounded auto-retry with backoff. A TRANSIENT token-refresh /
@@ -202,8 +282,8 @@ export function useOrg2CloudOrgs(): void {
     // selector AND the sidebar "Team sessions" section (they fall back to
     // plain local-alias entries, no cloud badge), and stay gone until the
     // NEXT sign-in / app start. Retrying lets a blip self-heal on its own.
-    // A persistent failure (e.g. an expired refresh token) still ends
-    // degraded after the last attempt — re-sign-in is the real remedy there.
+    // An explicitly rejected refresh credential signs out immediately;
+    // transient transport/server failures remain degraded and retry here.
     const RETRY_DELAYS_MS = [2000, 5000, 10000, 20000];
     const runAttempt = async (attempt: number): Promise<void> => {
       const current = authRef.current;
@@ -215,13 +295,33 @@ export function useOrg2CloudOrgs(): void {
           void runAttempt(attempt + 1);
         }, RETRY_DELAYS_MS[attempt]);
       };
-      const fresh = await ensureFreshSession(current);
+      let refreshRejected = false;
+      const fresh = await ensureFreshSession(current, {
+        onRefreshRejected: () => {
+          refreshRejected = true;
+          // Stable-identity compare-and-set: never sign out a newer OAuth
+          // callback or a concurrently refreshed token chain because an
+          // older request finished late. This must NOT compare by object
+          // reference — `org2CloudAuthAtom`'s `atomWithStorage` re-hydrates
+          // a freshly parsed (but content-identical) object from
+          // localStorage on every mount, so a reference captured here can
+          // legitimately diverge from the atom's live value for the exact
+          // same session. See `clearRejectedAuth` for the full explanation.
+          if (clearRejectedAuth(setAuth, current)) {
+            log.rateLimited(
+              "cloud-session-expired",
+              60_000,
+              "cloud session expired; signed out locally"
+            );
+          }
+        },
+      });
       if (cancelled || !isCurrentOrg2CloudOrgsRequest(store, requestEpoch)) {
         return;
       }
       if (!fresh) {
         log.warn("cloud org fetch skipped: token refresh failed");
-        retry();
+        if (!refreshRejected) retry();
         return;
       }
       commitRefreshedAuth(setAuth, current, fresh);
@@ -250,40 +350,29 @@ export function useOrg2CloudOrgs(): void {
       // Best-effort: hydrate the admin sharing-FLOOR mirror (0002) for each
       // org so the per-session sync dialog — opened straight from the session
       // context menu, without ever visiting the org panel — can gate its
-      // options against the floor. Non-blocking; per-org failures (null) just
+      // options against the floor. A 0004 backend already resolved each
+      // org's entitlement inside the roster round-trip — seed those straight
+      // into the coordinator; only orgs the listing could not resolve fall
+      // back to the per-org RPC. Non-blocking; per-org failures (null) just
       // leave that org's persisted mirror untouched (server still enforces).
-      void (async () => {
-        const entries = await Promise.all(
-          orgs.map(async (o) => {
-            const ent = await getEntitlementState(fresh.accessToken, o.orgId);
-            return ent
-              ? ([
-                  o.orgId,
-                  ent.orgSharingFloor ?? COLLAB_SESSION_ACCESS_MODE.OFF,
-                ] as const)
-              : null;
-          })
-        );
-        if (cancelled || !isCurrentOrg2CloudOrgsRequest(store, requestEpoch)) {
-          return;
-        }
-        const known = entries.filter(
-          (e): e is readonly [string, CollabSessionAccessMode] => e !== null
-        );
-        if (known.length === 0) return;
-        setFloorByOrg((prev) => {
-          const next = { ...prev };
-          for (const [orgId, floor] of known) next[orgId] = floor;
-          return next;
-        });
-      })();
+      hydrateOrgEntitlements(store, orgs, async () => fresh.accessToken);
     };
     void runAttempt(0);
     return () => {
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [userId, setAuth, setFloorByOrg, store]);
+  }, [authIdentityKey, setAuth, store]);
+
+  useEffect(() => {
+    if (!authIdentityKey) return undefined;
+    return startOrg2CloudRosterConvergence({
+      refresh: refetchOrgs,
+      onError: (error) => {
+        log.warn("cloud org convergence refresh failed", error);
+      },
+    });
+  }, [authIdentityKey, refetchOrgs]);
 }
 
 /**
@@ -299,7 +388,6 @@ export function useRefetchOrg2CloudOrgs(): (
 ) => Promise<Org2CloudOrg[]> {
   const [auth, setAuth] = useAtom(org2CloudAuthAtom);
   const store = useStore();
-  const setFloorByOrg = useSetAtom(org2CloudSharingFloorAtom);
   const authRef = useRef(auth);
   useEffect(() => {
     authRef.current = auth;
@@ -337,33 +425,13 @@ export function useRefetchOrg2CloudOrgs(): (
             } else if (commitOrg2CloudOrgsRequest(store, requestEpoch, orgs)) {
               latest = orgs;
               // Entitlement hydration is enrichment, not part of roster
-              // convergence. Do it in the background so a connection rebuild
-              // cannot make a successful mutation await unrelated floor RPCs.
-              void (async () => {
-                const floorEntries = await Promise.all(
-                  orgs.map(async (org) => {
-                    const entitlement = await getEntitlementState(
-                      fresh.accessToken,
-                      org.orgId
-                    );
-                    return entitlement
-                      ? ([
-                          org.orgId,
-                          entitlement.orgSharingFloor ??
-                            COLLAB_SESSION_ACCESS_MODE.OFF,
-                        ] as const)
-                      : null;
-                  })
-                );
-                if (!isCurrentOrg2CloudOrgsRequest(store, requestEpoch)) return;
-                setFloorByOrg((previous) => {
-                  const next = { ...previous };
-                  for (const entry of floorEntries) {
-                    if (entry) next[entry[0]] = entry[1];
-                  }
-                  return next;
-                });
-              })();
+              // convergence. Batched 0004 payloads seed the coordinator
+              // directly; only unresolved orgs read through the per-org RPC.
+              hydrateOrgEntitlements(
+                store,
+                orgs,
+                async () => fresh.accessToken
+              );
             } else {
               latest = store.get(org2CloudOrgsAtom);
             }
@@ -378,12 +446,23 @@ export function useRefetchOrg2CloudOrgs(): (
         // Mutation convergence owns the next authoritative generation. A
         // Realtime signal arriving inside that tiny window is already covered
         // by the mutation's postcondition and must not starve it.
-        return isOrg2CloudOrgsConverging(store)
-          ? store.get(org2CloudOrgsAtom)
-          : run();
+        if (isOrg2CloudOrgsConverging(store)) {
+          return store.get(org2CloudOrgsAtom);
+        }
+        const active = org2CloudOrgsRefetchInFlight.get(store);
+        if (active) return active;
+        const request = run();
+        org2CloudOrgsRefetchInFlight.set(store, request);
+        try {
+          return await request;
+        } finally {
+          if (org2CloudOrgsRefetchInFlight.get(store) === request) {
+            org2CloudOrgsRefetchInFlight.delete(store);
+          }
+        }
       }
       return queueOrg2CloudOrgsConvergence(store, run);
     },
-    [setAuth, setFloorByOrg, store]
+    [setAuth, store]
   );
 }

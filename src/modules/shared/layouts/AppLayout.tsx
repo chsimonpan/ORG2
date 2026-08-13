@@ -26,7 +26,6 @@ import {
   CHAT_WIDTH_CSS_VAR,
   clampChatWidth,
 } from "@src/engines/ChatPanel/config";
-import { useViewportWidth } from "@src/engines/ChatPanel/hooks/useViewportWidth";
 import type { SessionLaunchSuccessInfo } from "@src/engines/SessionCore/hooks/session/useSessionCreator/useSessionLaunch/types";
 import { pendingSessionProposal } from "@src/engines/SessionCore/hooks/useAgentADEActions";
 import SessionSyncProvider from "@src/engines/SessionCore/sync/SessionSyncProvider";
@@ -43,7 +42,6 @@ import {
   getWorkbenchLayoutStyle,
 } from "@src/modules/shared/layouts/viewContainerTokens";
 import { GENERAL_LAYOUT_TOUR_TARGETS } from "@src/scaffold/Tutorials/generalLayoutTourConfig";
-import { activeChatPanelTabAtom } from "@src/store/chatPanel/chatPanelTabsAtom";
 import { resolvedBackgroundConfigAtom } from "@src/store/ui/backgroundConfigAtom";
 import {
   type ChatPanelMode,
@@ -55,7 +53,6 @@ import type { ChatPanelPosition } from "@src/store/ui/workStationLayout/chatPosi
 import { activeWorkspaceRootPathAtom } from "@src/store/workspace";
 import { isWindows } from "@src/util/platform/tauri";
 
-import { FocusedChatWorkstationRail } from "./FocusedChatWorkstationRail";
 import { GlobalModals } from "./GlobalModals";
 import { MainContentArea } from "./MainContentArea";
 
@@ -125,6 +122,8 @@ function WorkbenchActionSystemScope({
 // ============================================
 
 export interface AppLayoutProps {
+  /** Current window viewport width shared with the embedded Chat Panel. */
+  viewportWidth: number | undefined;
   /** Sidebar component to render (null = no sidebar) */
   sidebar?: React.ReactNode;
 
@@ -164,6 +163,7 @@ export interface AppLayoutProps {
 // ============================================
 
 const AppLayoutComponent: React.FC<AppLayoutProps> = ({
+  viewportWidth,
   sidebar,
   floatingSidebar,
   showChatPanel = false,
@@ -174,10 +174,8 @@ const AppLayoutComponent: React.FC<AppLayoutProps> = ({
   children,
 }) => {
   const rawChatWidth = useAtomValue(chatWidthAtom);
-  const activeChatPanelTab = useAtomValue(activeChatPanelTabAtom);
   const isChatPanelDragging = useAtomValue(chatPanelDraggingAtom);
   const backgroundConfig = useAtomValue(resolvedBackgroundConfigAtom);
-  const viewportWidth = useViewportWidth();
   const chatSlotRef = useRef<HTMLDivElement>(null);
   // Settings-in-slot must always have a usable width even if the user
   // previously dragged the chat to zero. Fall back to the configured
@@ -216,11 +214,6 @@ const AppLayoutComponent: React.FC<AppLayoutProps> = ({
     visibleWidth: chatWidthStyleValue,
   });
   const workbenchStyle = getWorkbenchLayoutStyle(chatPanelMaximized);
-  const showFocusedChatWorkstationRail =
-    chatPanelMaximized &&
-    chatPanelMode === "session" &&
-    activeChatPanelTab?.type !== "work-management";
-
   const handlePaneTransitionEnd = useCallback(
     (event: React.TransitionEvent<HTMLDivElement>) => {
       if (event.currentTarget !== event.target) return;
@@ -266,6 +259,7 @@ const AppLayoutComponent: React.FC<AppLayoutProps> = ({
       </React.Suspense>
     ) : (
       <ChatPanel
+        viewportWidth={viewportWidth}
         embedded
         active={showChatPanel}
         useExternalWidth={chatPanelMaximized}
@@ -328,7 +322,6 @@ const AppLayoutComponent: React.FC<AppLayoutProps> = ({
                 </WorkbenchActionSystemScope>
               </div>
               {!isChatOnLeft && chatSlot}
-              {showFocusedChatWorkstationRail && <FocusedChatWorkstationRail />}
             </div>
           </div>
         </SessionSyncProvider>
@@ -349,8 +342,16 @@ const AppLayoutComponent: React.FC<AppLayoutProps> = ({
           <HoverSidebar.Container>{floatingSidebar}</HoverSidebar.Container>
         )}
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <MainContentArea className="relative min-h-0 flex-1">
+        <div
+          className={`flex min-h-0 min-w-0 flex-1 flex-col ${
+            windowsHost ? "windows-main-page-underlay" : ""
+          }`}
+        >
+          <MainContentArea
+            className={`relative min-h-0 flex-1 ${
+              windowsHost ? "windows-main-page-surface" : ""
+            }`}
+          >
             {contentArea}
           </MainContentArea>
 

@@ -56,12 +56,7 @@ export const agentSession = {
     .build(),
   deleteSession: defineProcedure("agent_delete_session")
     .input(schemas.agentSession.SessionIdInput)
-    .build(),
-  unlinkSessionFromWorkItem: defineProcedure(
-    "agent_unlink_session_from_work_item"
-  )
-    .input(schemas.agentSession.SessionIdInput)
-    .output(z.boolean())
+    .output(schemas.agentSession.DeleteSessionReceiptSchema)
     .build(),
   clearMessages: defineProcedure("agent_clear_messages")
     .input(schemas.agentSession.SessionIdInput)
@@ -86,9 +81,9 @@ export const agentSession = {
     .input(schemas.agentSession.LinkSessionToWorkItemInput)
     .output(schemas.agentSession.SessionMetaSchema)
     .build(),
-  linkSessionToProject: defineProcedure("agent_link_session_to_project")
-    .input(schemas.agentSession.LinkSessionToProjectInput)
-    .output(schemas.agentSession.SessionMetaSchema)
+  trackSessionAsProject: defineProcedure("agent_track_session_as_project")
+    .input(schemas.agentSession.SessionIdInput)
+    .output(schemas.agentSession.TrackSessionAsProjectResult)
     .build(),
   respondQuestion: defineProcedure("agent_question_response")
     .input(schemas.agentSession.QuestionResponseInput)
@@ -156,9 +151,6 @@ export const agentSession = {
   getTodos: defineProcedure("agent_get_todos")
     .input(schemas.agentSession.SessionIdInput)
     .output(z.array(schemas.agentSession.TodoItemSchema))
-    .build(),
-  listModes: defineProcedure("agent_list_modes")
-    .output(z.array(schemas.agentSession.AgentExecModeConfigSchema))
     .build(),
   resolveReview: defineProcedure("agent_resolve_review")
     .input(schemas.agentSession.SessionIdInput)

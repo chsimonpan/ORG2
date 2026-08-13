@@ -1,0 +1,4 @@
+interface:
+  display_name: "ORG2 Performance Guard"
+  short_description: "Guard ORG2 performance and lifecycle coverage"
+  default_prompt: "Use $org2-performance-guard to audit this ORG2 change across performance, provider lifecycle, and true-machine coverage."

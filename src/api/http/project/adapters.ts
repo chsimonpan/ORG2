@@ -179,6 +179,7 @@ export function projectDataToUI(
     name: meta.name,
     description: projectData.description || meta.name,
     slug: projectData.slug,
+    syncAdapterId: projectData.sync_adapter_id,
     orgId: meta.org_id,
     workItemPrefix: meta.work_item_prefix,
     workItemPrefixCustom: meta.work_item_prefix_custom,
@@ -254,6 +255,7 @@ export function workItemDataToUI(
 
   return {
     session_id: frontmatter.id,
+    shortId: frontmatter.short_id,
     user_id: frontmatter.created_by ?? "",
     name: frontmatter.title,
     target_date: frontmatter.target_date ?? null,
@@ -271,6 +273,7 @@ export function workItemDataToUI(
     assignee,
     assigneeType: frontmatter.assignee_type,
     createdBy,
+    originSession: frontmatter.origin_session,
     labels,
     project: frontmatter.project
       ? { id: frontmatter.project, name: projectName }
@@ -283,6 +286,7 @@ export function workItemDataToUI(
     subIssueCount: 0,
     todos: resolvedTodos,
     comments,
+    handoff: frontmatter.handoff,
     orchestratorConfig: frontmatter.orchestrator_config,
     orchestratorState: frontmatter.orchestrator_state,
     proofOfWork: frontmatter.proof_of_work,
@@ -330,10 +334,12 @@ export function standaloneWorkItemDataToEnriched(
     updatedAt: frontmatter.updated_at,
     deletedAt: frontmatter.deleted_at,
     createdBy: frontmatter.created_by,
+    originSession: frontmatter.origin_session,
     createdByPerson: resolveMemberId(frontmatter.created_by, emptyMemberMap),
     todos: frontmatter.todos ?? [],
     comments: frontmatter.comments ?? [],
     history: frontmatter.history ?? [],
+    handoff: frontmatter.handoff,
     linkedSessions: frontmatter.linked_sessions ?? [],
     proofOfWork: frontmatter.proof_of_work,
     orchestratorConfig: frontmatter.orchestrator_config,
@@ -395,11 +401,14 @@ export function uiWorkItemToFrontmatter(
     start_date: workItem.startDate,
     target_date: targetDate,
     created_by: createdBy,
+    origin_session:
+      workItem.originSession ?? existingFrontmatter?.origin_session,
     created_at: createdAt,
     updated_at: now,
     starred,
     todos: resolvedTodos,
     comments: resolvedComments,
+    handoff: existingFrontmatter?.handoff,
     orchestrator_config:
       workItem.orchestratorConfig ?? existingFrontmatter?.orchestrator_config,
     // Backend-managed fields preserved verbatim — the orchestrator
@@ -446,6 +455,7 @@ export function buildMemberMap(
 export function enrichedWorkItemToUI(item: EnrichedWorkItem): UIWorkItem {
   return {
     session_id: item.id,
+    shortId: item.shortId,
     user_id: item.createdBy ?? "",
     name: item.title,
     target_date: item.targetDate ?? null,
@@ -464,6 +474,7 @@ export function enrichedWorkItemToUI(item: EnrichedWorkItem): UIWorkItem {
     assignee: item.assignee,
     assigneeType: item.assigneeType,
     createdBy: item.createdByPerson,
+    originSession: item.originSession,
     labels: item.labels,
     project: item.project,
     milestone: item.milestone,
@@ -473,6 +484,7 @@ export function enrichedWorkItemToUI(item: EnrichedWorkItem): UIWorkItem {
     todos: item.todos,
     comments: item.comments,
     history: item.history,
+    handoff: item.handoff,
     orchestratorConfig: item.orchestratorConfig,
     orchestratorState: item.orchestratorState,
     proofOfWork: item.proofOfWork,

@@ -624,6 +624,39 @@ impl ContextCompactor {
             }
         }
 
+        // Fork-form first: reuse the main turn's prompt-cache prefix. The
+        // fork summarizes the FULL conversation (prefix includes `recent`);
+        // keeping `recent` verbatim afterwards mirrors claude_code, which
+        // also keeps recent turns alongside the whole-conversation summary.
+        // Any fork failure falls back to the cold side-query path (ref:
+        // claude_code tengu_compact_cache_sharing_fallback).
+        if let Some(fork) = fork_inputs {
+            match summarization::summarize_messages_forked(
+                provider,
+                fork,
+                state,
+                custom_instructions,
+            )
+            .await
+            {
+                Ok(summary_text) => {
+                    return Ok(Self::accept_summary(
+                        state,
+                        history,
+                        split_idx,
+                        recent,
+                        summary_text,
+                    ));
+                }
+                Err(err) => {
+                    warn!(
+                        "[compaction] fork-form summarization failed, falling back to side query: {}",
+                        err
+                    );
+                }
+            }
+        }
+
         let mut messages_to_summarize: Vec<Value> = older.to_vec();
         let mut ptl_retries = 0;
 

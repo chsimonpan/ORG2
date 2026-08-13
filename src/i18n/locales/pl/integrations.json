@@ -1739,7 +1739,9 @@
           "rename": "Zmień nazwę",
           "search": "Szukaj"
         }
-      }
+      },
+      "liveStatusToggle": "Stan agenta na żywo",
+      "liveStatusToggleDesc": "Pokazuje, czy uruchomieni agenci CLI pracują, czy czekają. Wyłączenie nie zatrzymuje rejestrowania pochodzenia."
     },
     "codexConfig": {
       "sectionTitle": "Konfiguracja",

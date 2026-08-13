@@ -1,9 +1,14 @@
 use std::env;
 use std::ffi::OsString;
+#[cfg(unix)]
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+#[cfg(unix)]
+use std::process::Command;
+use std::process::Stdio;
 use std::time::Duration;
+
+const CLI_VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CliBinaryId {
@@ -37,6 +42,8 @@ pub enum CliBinaryId {
     Autohand,
     Omp,
     Pi,
+    QoderCli,
+    TraeCli,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +71,12 @@ pub struct CliBinaryResolution {
     pub diagnostics: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliVersionProbe {
+    pub version: Option<String>,
+    pub error: Option<String>,
+}
+
 impl CliBinaryResolution {
     pub fn installed(&self) -> bool {
         !matches!(self.source, CliBinaryResolutionSource::BareCommandFallback)
@@ -78,6 +91,7 @@ impl CliBinaryResolution {
     }
 }
 
+#[cfg(unix)]
 const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(3);
 
 const CLI_BINARY_METADATA: &[CliBinaryMetadata] = &[
@@ -282,6 +296,20 @@ const CLI_BINARY_METADATA: &[CliBinaryMetadata] = &[
         command: "pi",
         launchable: true,
     },
+    CliBinaryMetadata {
+        id: CliBinaryId::QoderCli,
+        row_id: "qoder-cli",
+        display_name: "Qoder CLI",
+        command: "qodercli",
+        launchable: true,
+    },
+    CliBinaryMetadata {
+        id: CliBinaryId::TraeCli,
+        row_id: "trae-cli",
+        display_name: "Trae Agent",
+        command: "trae-cli",
+        launchable: true,
+    },
 ];
 
 pub fn all_cli_binary_metadata() -> &'static [CliBinaryMetadata] {
@@ -331,12 +359,34 @@ pub fn id_for_registry_name(name: &str) -> Option<CliBinaryId> {
         "autohand" => Some(CliBinaryId::Autohand),
         "omp" => Some(CliBinaryId::Omp),
         "pi" => Some(CliBinaryId::Pi),
+        "qoder_cli" => Some(CliBinaryId::QoderCli),
+        "trae_cli" => Some(CliBinaryId::TraeCli),
         _ => None,
     }
 }
 
 pub fn resolve_cli_binary_for_registry_name(name: &str) -> Option<CliBinaryResolution> {
     id_for_registry_name(name).map(resolve_cli_binary)
+}
+
+/// Resolve a registry CLI for inventory/discovery without launching a login shell.
+///
+/// App startup already augments the process `PATH` from the user's login shell.
+/// Inventory callers can therefore stay bounded to the supplied `PATH` plus
+/// known install locations instead of launching one interactive shell per
+/// missing CLI.
+pub fn resolve_cli_binary_for_inventory(
+    name: &str,
+    path_env: Option<OsString>,
+) -> Option<CliBinaryResolution> {
+    id_for_registry_name(name).map(|id| {
+        let options = ResolveOptions {
+            path_env,
+            search_login_shell: false,
+            ..ResolveOptions::default()
+        };
+        resolve_cli_binary_with_options(id, &options)
+    })
 }
 
 pub fn resolve_cli_binary(id: CliBinaryId) -> CliBinaryResolution {
@@ -347,11 +397,101 @@ pub fn resolve_cli_binary_command(id: CliBinaryId) -> String {
     resolve_cli_binary(id).command
 }
 
+/// Best-effort `<resolved CLI> --version` probe.
+///
+/// Callers own the cache policy. This function resolves no credentials and
+/// returns only a normalized version number or a bounded diagnostic.
+pub async fn probe_cli_binary_version(resolution: &CliBinaryResolution) -> CliVersionProbe {
+    if !resolution.installed() {
+        return CliVersionProbe {
+            version: None,
+            error: Some("CLI executable was not found".to_string()),
+        };
+    }
+
+    let mut command = tokio::process::Command::new(&resolution.command);
+    command
+        .arg("--version")
+        .kill_on_drop(true)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    command.creation_flags(app_platform::CREATE_NO_WINDOW);
+
+    let output = match tokio::time::timeout(CLI_VERSION_PROBE_TIMEOUT, command.output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => {
+            return CliVersionProbe {
+                version: None,
+                error: Some(format!("Version command failed to start: {error}")),
+            };
+        }
+        Err(_) => {
+            return CliVersionProbe {
+                version: None,
+                error: Some("Version command timed out".to_string()),
+            };
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let raw = if stdout.trim().is_empty() {
+        stderr.trim()
+    } else {
+        stdout.trim()
+    };
+
+    if !output.status.success() {
+        let detail: String = raw.chars().take(500).collect();
+        return CliVersionProbe {
+            version: None,
+            error: Some(if detail.is_empty() {
+                format!("Version command exited with {}", output.status)
+            } else {
+                format!("Version command exited with {}: {detail}", output.status)
+            }),
+        };
+    }
+
+    match parse_version_string(raw) {
+        Some(version) => CliVersionProbe {
+            version: Some(version),
+            error: None,
+        },
+        None => CliVersionProbe {
+            version: None,
+            error: Some("Version command output did not contain a version number".to_string()),
+        },
+    }
+}
+
+fn parse_version_string(raw: &str) -> Option<String> {
+    raw.lines().find_map(|line| {
+        line.split_whitespace().find_map(|token| {
+            let cleaned = token
+                .trim_matches(&['"', '\'', '(', ')'] as &[char])
+                .trim_start_matches('v')
+                .trim_end_matches(&[',', ';'] as &[char]);
+            (cleaned
+                .chars()
+                .next()
+                .is_some_and(|character| character.is_ascii_digit())
+                && cleaned.contains('.'))
+            .then(|| cleaned.to_string())
+        })
+    })
+}
+
 #[derive(Debug, Clone)]
 struct ResolveOptions {
     path_env: Option<OsString>,
+    #[cfg(unix)]
     shell: Option<OsString>,
     home_dir: Option<PathBuf>,
+    search_login_shell: bool,
+    #[cfg(unix)]
     login_shell_timeout: Duration,
 }
 
@@ -359,8 +499,11 @@ impl Default for ResolveOptions {
     fn default() -> Self {
         Self {
             path_env: env::var_os("PATH"),
+            #[cfg(unix)]
             shell: env::var_os("SHELL"),
             home_dir: dirs::home_dir(),
+            search_login_shell: true,
+            #[cfg(unix)]
             login_shell_timeout: LOGIN_SHELL_TIMEOUT,
         }
     }
@@ -383,18 +526,25 @@ fn resolve_cli_binary_with_options(
     }
     diagnostics.push(format!("{} not found on process PATH", metadata.command));
 
-    if let Some(path) = resolve_via_login_shell(metadata.command, options) {
-        return CliBinaryResolution {
-            metadata,
-            command: path.to_string_lossy().to_string(),
-            source: CliBinaryResolutionSource::LoginShell,
-            diagnostics,
-        };
+    if options.search_login_shell {
+        if let Some(path) = resolve_via_login_shell(metadata.command, options) {
+            return CliBinaryResolution {
+                metadata,
+                command: path.to_string_lossy().to_string(),
+                source: CliBinaryResolutionSource::LoginShell,
+                diagnostics,
+            };
+        }
+        diagnostics.push(format!(
+            "{} not found via login-shell lookup",
+            metadata.command
+        ));
+    } else {
+        diagnostics.push(format!(
+            "{} login-shell lookup skipped for bounded inventory",
+            metadata.command
+        ));
     }
-    diagnostics.push(format!(
-        "{} not found via login-shell lookup",
-        metadata.command
-    ));
 
     if let Some(path) = known_locations_for(id, options)
         .into_iter()
@@ -510,6 +660,7 @@ fn resolve_via_login_shell(_command: &str, _options: &ResolveOptions) -> Option<
     None
 }
 
+#[cfg(unix)]
 fn parse_command_v_path(line: &str) -> Option<PathBuf> {
     let trimmed = line.trim();
     if trimmed.is_empty() || trimmed.contains('\n') || trimmed.contains('\r') {
@@ -594,13 +745,13 @@ mod tests {
         set_executable(path);
     }
 
-    fn set_executable(path: &Path) {
+    fn set_executable(_path: &Path) {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut permissions = fs::metadata(path).unwrap().permissions();
+            let mut permissions = fs::metadata(_path).unwrap().permissions();
             permissions.set_mode(0o755);
-            fs::set_permissions(path, permissions).unwrap();
+            fs::set_permissions(_path, permissions).unwrap();
         }
     }
 
@@ -621,13 +772,20 @@ mod tests {
     #[test]
     fn process_path_hit_returns_absolute_path() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let binary = temp_dir.path().join("codex");
+        let binary = if cfg!(windows) {
+            temp_dir.path().join("codex.CMD")
+        } else {
+            temp_dir.path().join("codex")
+        };
         make_executable(&binary);
 
         let options = ResolveOptions {
             path_env: Some(OsString::from(temp_dir.path().as_os_str())),
+            #[cfg(unix)]
             shell: Some(OsString::from("/bin/false")),
             home_dir: None,
+            search_login_shell: true,
+            #[cfg(unix)]
             login_shell_timeout: Duration::from_millis(10),
         };
 
@@ -647,8 +805,11 @@ mod tests {
 
         let options = ResolveOptions {
             path_env: Some(OsString::new()),
+            #[cfg(unix)]
             shell: Some(OsString::from("/bin/false")),
             home_dir: Some(temp_dir.path().to_path_buf()),
+            search_login_shell: true,
+            #[cfg(unix)]
             login_shell_timeout: Duration::from_millis(10),
         };
 
@@ -669,6 +830,7 @@ mod tests {
             path_env: Some(OsString::new()),
             shell: Some(shell.into_os_string()),
             home_dir: None,
+            search_login_shell: true,
             login_shell_timeout: Duration::from_millis(500),
         };
 
@@ -679,6 +841,35 @@ mod tests {
             CliBinaryResolutionSource::BareCommandFallback
         );
         assert!(!resolution.installed());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_inventory_skips_login_shell() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let marker = temp_dir.path().join("shell-invoked");
+        let shell = temp_dir.path().join("fake-shell");
+        fs::write(
+            &shell,
+            format!("#!/bin/sh\ntouch '{}'\n", marker.to_string_lossy()),
+        )
+        .unwrap();
+        set_executable(&shell);
+
+        let options = ResolveOptions {
+            path_env: Some(OsString::new()),
+            shell: Some(shell.into_os_string()),
+            home_dir: None,
+            search_login_shell: false,
+            login_shell_timeout: Duration::from_millis(500),
+        };
+
+        let resolution = resolve_cli_binary_with_options(CliBinaryId::Codex, &options);
+        assert_eq!(
+            resolution.source,
+            CliBinaryResolutionSource::BareCommandFallback
+        );
+        assert!(!marker.exists(), "inventory must not launch a login shell");
     }
 
     #[cfg(unix)]
@@ -706,5 +897,24 @@ mod tests {
         let metadata = metadata_for_id(CliBinaryId::Kiro);
         assert_eq!(metadata.command, "kiro-cli");
         assert_eq!(metadata.row_id, "kiro");
+    }
+
+    #[test]
+    fn qoder_and_trae_use_their_published_executable_names() {
+        assert_eq!(metadata_for_id(CliBinaryId::QoderCli).command, "qodercli");
+        assert_eq!(metadata_for_id(CliBinaryId::TraeCli).command, "trae-cli");
+    }
+
+    #[test]
+    fn parses_common_cli_version_outputs() {
+        assert_eq!(
+            parse_version_string("codex-cli 0.143.0\n"),
+            Some("0.143.0".to_string())
+        );
+        assert_eq!(
+            parse_version_string("Claude Code v2.1.78 (stable)"),
+            Some("2.1.78".to_string())
+        );
+        assert_eq!(parse_version_string("development build"), None);
     }
 }

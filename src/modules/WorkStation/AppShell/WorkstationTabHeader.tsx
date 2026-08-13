@@ -21,16 +21,18 @@
 import { useAtomValue } from "jotai";
 import React, { memo } from "react";
 
+import {
+  NoDragRegion,
+  PublishedHeaderSlotsView,
+} from "@src/components/WindowChrome";
 import { activeStatusBarAppAtom } from "@src/store/ui/workStationLayout/statusBarAtoms";
 import { activeWorkstationTabHeaderAtom } from "@src/store/workstation";
 import { activeWorkStationTabAtom } from "@src/store/workstation/tabs";
 import { isWindows } from "@src/util/platform/tauri";
 
 import {
-  NoDragRegion,
   WorkStationSidebarToggleButton,
   WorkstationHeaderSectionSeparator,
-  WorkstationTabHeaderSlotsView,
 } from "../shared";
 import { CodeSidebarHeaderActions } from "./CodeSidebarHeaderActions";
 import { SourceControlHeaderActions } from "./SourceControlHeaderActions";
@@ -40,8 +42,24 @@ const WorkstationTabHeader: React.FC = memo(() => {
   const activeApp = useAtomValue(activeStatusBarAppAtom);
   const activeTab = useAtomValue(activeWorkStationTabAtom);
   const windowsHost = isWindows();
+  const shellLeadingChromeHidden =
+    headerSlots?.shellLeadingChromeHidden ?? false;
   const isSourceControlTab =
     activeApp === "code" && activeTab?.type === "source-control";
+  const publishedHeaderPaddingLeftClassName = isSourceControlTab
+    ? "pl-0"
+    : "pl-2";
+
+  // Launchpad: keep the strip for stable row height but render it empty —
+  // no sidebar toggle, no search/lab actions, nothing to publish.
+  if (activeTab?.type === "start") {
+    return (
+      <div
+        className="flex h-10 shrink-0 items-center border-b border-border-2"
+        data-tauri-drag-region={windowsHost ? undefined : true}
+      />
+    );
+  }
 
   // Launchpad: keep the strip for stable row height but render it empty —
   // no sidebar toggle, no search/lab actions, nothing to publish.
@@ -56,19 +74,28 @@ const WorkstationTabHeader: React.FC = memo(() => {
 
   return (
     <div
-      className="flex h-10 shrink-0 items-center gap-2 border-b border-border-2 pl-1.5 pr-2"
+      className={`flex h-10 shrink-0 items-center gap-2 pr-2 ${
+        shellLeadingChromeHidden ? "pl-0" : "pl-1.5"
+      } ${headerSlots?.joinWithFollowingRow ? "" : "border-b border-border-2"}`}
       data-tauri-drag-region={windowsHost ? undefined : true}
     >
-      <NoDragRegion className="flex shrink-0 items-center gap-px">
-        <WorkStationSidebarToggleButton
-          iconSize={14}
-          disabled={headerSlots?.sidebarToggleDisabled ?? false}
-        />
-        <CodeSidebarHeaderActions />
-        <SourceControlHeaderActions />
-      </NoDragRegion>
-      {!isSourceControlTab && <WorkstationHeaderSectionSeparator />}
-      <WorkstationTabHeaderSlotsView slots={headerSlots} />
+      {!shellLeadingChromeHidden && (
+        <>
+          <NoDragRegion className="flex shrink-0 items-center gap-px">
+            <WorkStationSidebarToggleButton
+              iconSize={14}
+              disabled={headerSlots?.sidebarToggleDisabled ?? false}
+            />
+            <CodeSidebarHeaderActions />
+            <SourceControlHeaderActions />
+          </NoDragRegion>
+          {!isSourceControlTab && <WorkstationHeaderSectionSeparator />}
+        </>
+      )}
+      <PublishedHeaderSlotsView
+        slots={headerSlots}
+        paddingLeftClassName={publishedHeaderPaddingLeftClassName}
+      />
     </div>
   );
 });

@@ -93,6 +93,11 @@ pub type SteeringQueue = Arc<tokio::sync::Mutex<Vec<SteeringInjection>>>;
 /// Configuration for a single agent turn.
 #[derive(Clone)]
 pub struct TurnConfig {
+    /// Durable lifecycle identity for this exact scheduled turn. Empty when
+    /// the caller is not executing through the dialog scheduler.
+    pub turn_intent_id: String,
+    /// Agent Org Inbox rows that this turn will acknowledge on success.
+    pub projected_inbox_ids: Vec<i64>,
     /// Model identifier (provider-specific).
     pub model: String,
     /// KeyVault account id backing this turn. Threaded through so
@@ -203,7 +208,9 @@ pub struct ToolHookIntervention {
 /// Implementors handle streaming deltas, tool call/result events,
 /// and persistence. Each agent type provides its own implementation.
 #[async_trait]
-#[allow(unused_variables)]
+#[allow(unused_variables, clippy::too_many_arguments)]
+// Event implementations share this callback contract across providers; keep
+// its event fields explicit instead of introducing provider-specific wrappers.
 pub trait TurnEventHandler: Send + Sync {
     /// Called for each streaming text delta from the LLM.
     fn on_message_delta(&self, session_id: &str, content: &str);
@@ -443,6 +450,8 @@ mod tests {
     #[test]
     fn turn_config_unlimited_iterations() {
         let config = TurnConfig {
+            turn_intent_id: String::new(),
+            projected_inbox_ids: Vec::new(),
             model: "test".to_string(),
             account_id: None,
             context_window_override: None,
@@ -465,6 +474,8 @@ mod tests {
     #[test]
     fn turn_config_limited_iterations() {
         let config = TurnConfig {
+            turn_intent_id: String::new(),
+            projected_inbox_ids: Vec::new(),
             model: "test".to_string(),
             account_id: None,
             context_window_override: None,

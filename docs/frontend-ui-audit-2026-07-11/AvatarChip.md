@@ -1,8 +1,8 @@
 # Frontend UI Audit — AvatarChip
 
-**File:** `src/components/AvatarChip/index.tsx` (102 LOC)
-**Date:** 2026-07-11
-**Auditor:** orgii session
+**File:** `src/components/AvatarChip/index.tsx` (102 LOC)  
+**Date:** 2026-07-11  
+**Auditor:** orgii session  
 **Skill:** `~/.orgii/skills/frontend-ui-audit/SKILL.md`
 
 ## Context

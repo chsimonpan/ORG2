@@ -1742,7 +1742,9 @@
           "rename": "名前変更",
           "search": "検索"
         }
-      }
+      },
+      "liveStatusToggle": "エージェントのライブ状態",
+      "liveStatusToggleDesc": "実行中の CLI エージェントが作業中か待機中かを表示します。オフでも来歴の記録は続きます。"
     },
     "codexConfig": {
       "sectionTitle": "設定",

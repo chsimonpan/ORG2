@@ -34,53 +34,7 @@ pub fn create_provider(
     create_provider_with_reliability(model, account_id, &ReliabilityConfig::default())
 }
 
-/// Resolve exactly the durable queue route.  Queue provenance is a persisted
-/// contract, so a changed credential protocol is a hard error rather than a
-/// reason to silently select a different wire client.
-/// Resolve the exact account protocol without constructing a provider.
-/// Gateway review enqueue uses this to persist strict runtime provenance.
-pub fn resolve_account_protocol(model: &str, account_id: &str) -> Result<String, ProviderError> {
-    let spec = resolve_spec_for_account(model, Some(account_id))?;
-    let resolved = resolve_credentials(spec, Some(account_id))?;
-    Ok(resolved.protocol.as_str().to_string())
-}
-
-pub fn create_provider_for_protocol(
-    model: &str,
-    account_id: &str,
-    expected_protocol: &str,
-) -> Result<Box<dyn LLMProvider>, ProviderError> {
-    let spec = resolve_spec_for_account(model, Some(account_id))?;
-    let resolved = resolve_credentials(spec, Some(account_id))?;
-    if resolved.protocol.as_str() != expected_protocol {
-        return Err(ProviderError::AuthError(format!(
-            "审核任务锁定协议为 '{}'，账户当前解析为 '{}'。",
-            expected_protocol,
-            resolved.protocol.as_str()
-        )));
-    }
-    let reliability = ReliabilityConfig::default();
-    if !reliability.fallback_models.is_empty() {
-        return Err(ProviderError::Other(
-            "审核任务禁止跨模型 fallback。".to_string(),
-        ));
-    }
-    let primary = build_provider_from_resolved(&resolved, spec, model, None);
-    Ok(Box::new(ReliableProvider::single(
-        format!("{}/{}", spec.name, model),
-        primary,
-        reliability.max_retries,
-        reliability.base_backoff_ms,
-    )))
-}
-
-/// Create a provider wrapped in [`ReliableProvider`] for retry.
-///
-/// Runtime session routing is intentionally strict: the selected account +
-/// model pair is the only route for both foreground turns and compaction side
-/// queries. Cross-model fallback would make route/cost/cache attribution lie.
-/// Low-level tests can still construct `ReliableProvider::with_fallbacks`
-/// directly; production session construction rejects configured fallbacks.
+/// Create a provider wrapped in [`ReliableProvider`] for retry + fallback.
 ///
 /// The primary model is always tried first. If `reliability.fallback_models`
 /// is non-empty, those are tried in order after the primary is exhausted.
@@ -89,7 +43,7 @@ pub fn create_provider_with_reliability(
     account_id: Option<&str>,
     reliability: &ReliabilityConfig,
 ) -> Result<Box<dyn LLMProvider>, ProviderError> {
-    create_provider_with_native_harness(model, account_id, reliability, None, None, None)
+    create_provider_with_native_harness(model, account_id, reliability, None, None)
 }
 
 pub async fn create_provider_with_native_harness_preflight(
@@ -98,7 +52,6 @@ pub async fn create_provider_with_native_harness_preflight(
     reliability: &ReliabilityConfig,
     native_harness_type: Option<NativeHarnessType>,
     workspace: Option<SessionWorkspace>,
-    code_assist_session_id: Option<&str>,
 ) -> Result<Box<dyn LLMProvider>, ProviderError> {
     ensure_account_key_fresh(account_id).await?;
     create_provider_with_native_harness(
@@ -107,7 +60,6 @@ pub async fn create_provider_with_native_harness_preflight(
         reliability,
         native_harness_type,
         workspace,
-        code_assist_session_id,
     )
 }
 
@@ -171,7 +123,6 @@ pub fn create_provider_with_native_harness(
     reliability: &ReliabilityConfig,
     native_harness_type: Option<NativeHarnessType>,
     workspace: Option<SessionWorkspace>,
-    code_assist_session_id: Option<&str>,
 ) -> Result<Box<dyn LLMProvider>, ProviderError> {
     #[cfg(debug_assertions)]
     if super::e2e_fake::is_e2e_fake_provider_model(model) {
@@ -185,20 +136,27 @@ pub fn create_provider_with_native_harness(
     let spec = resolve_spec_for_account(model, account_id)?;
     let resolved = resolve_credentials(spec, account_id)?;
 
-    if !reliability.fallback_models.is_empty() {
-        return Err(ProviderError::Other(format!(
-            "Cross-model fallback is disabled for runtime route consistency; selected route is {}/{}, configured fallback_models={:?}",
-            spec.name, model, reliability.fallback_models
-        )));
-    }
-
-    let primary = build_provider_from_resolved(&resolved, spec, model, code_assist_session_id);
+    let primary = build_provider_from_resolved(&resolved, spec, model);
     let primary_name = format!("{}/{}", spec.name, model);
 
-    // Wrap in ReliableProvider (single resolved route; retry-only, no route fallback).
-    Ok(Box::new(ReliableProvider::single(
-        primary_name,
-        primary,
+    // Build fallback providers (best-effort — skip any that fail credential resolution)
+    let mut providers: Vec<(String, Box<dyn LLMProvider>)> = vec![(primary_name, primary)];
+
+    for fallback_model in &reliability.fallback_models {
+        match create_fallback_provider(fallback_model, account_id) {
+            Ok((name, provider)) => {
+                tracing::info!("[reliable] Registered fallback provider: {}", name);
+                providers.push((name, provider));
+            }
+            Err(err) => {
+                tracing::warn!("[reliable] Skipping fallback '{}': {}", fallback_model, err);
+            }
+        }
+    }
+
+    // Wrap in ReliableProvider (even with a single provider, for retry behavior)
+    Ok(Box::new(ReliableProvider::with_fallbacks(
+        providers,
         reliability.max_retries,
         reliability.base_backoff_ms,
     )))
@@ -269,10 +227,7 @@ fn create_fallback_provider(
     let resolved = resolve_credentials(spec, account_id)?;
 
     let name = format!("{}/{}", spec.name, model);
-    Ok((
-        name,
-        build_provider_from_resolved(&resolved, spec, model, None),
-    ))
+    Ok((name, build_provider_from_resolved(&resolved, spec, model)))
 }
 
 /// Guess the provider spec from a model-name hint.
@@ -326,6 +281,7 @@ fn api_key_model_type_for_spec(spec: &ProviderSpec) -> Option<ModelType> {
     match spec.name {
         provider_id::ANTHROPIC => Some(ModelType::AnthropicApi),
         provider_id::OPENAI => Some(ModelType::OpenaiApi),
+        provider_id::ATLASCLOUD => Some(ModelType::AtlascloudApi),
         provider_id::DEEPSEEK => Some(ModelType::DeepseekApi),
         provider_id::GEMINI => Some(ModelType::GeminiApi),
         provider_id::GROQ => Some(ModelType::GroqApi),
@@ -353,6 +309,7 @@ fn spec_for_model_type(model_type: &ModelType) -> Option<&'static ProviderSpec> 
     let provider_name = match model_type {
         ModelType::AnthropicApi | ModelType::AzureAnthropicApi => provider_id::ANTHROPIC,
         ModelType::Codex | ModelType::OpenaiApi => provider_id::OPENAI,
+        ModelType::AtlascloudApi => provider_id::ATLASCLOUD,
         ModelType::GeminiApi => provider_id::GEMINI,
         ModelType::MoonshotApi => provider_id::MOONSHOT,
         ModelType::DeepseekApi => provider_id::DEEPSEEK,
@@ -400,7 +357,8 @@ fn spec_for_model_type(model_type: &ModelType) -> Option<&'static ProviderSpec> 
         | ModelType::Autohand
         | ModelType::Omp
         | ModelType::Pi
-        | ModelType::EmbeddingApi => return None,
+        | ModelType::QoderCli
+        | ModelType::TraeCli => return None,
     };
     registry::find_by_name(provider_name)
 }
@@ -438,7 +396,6 @@ fn build_provider_from_resolved(
     resolved: &ResolvedProviderKey,
     spec: &'static ProviderSpec,
     model: &str,
-    _code_assist_session_id: Option<&str>,
 ) -> Box<dyn LLMProvider> {
     if resolved.is_codex_oauth {
         tracing::info!(
@@ -964,18 +921,17 @@ fn find_api_key_for_provider(
     )))
 }
 
+type AvailableModelCredential = (
+    &'static ProviderSpec,
+    String,
+    Option<String>,
+    ProviderProtocol,
+);
+
 fn find_credential_by_available_model(
     model: &str,
     creds: &[ModelKey],
-) -> Result<
-    Option<(
-        &'static ProviderSpec,
-        String,
-        Option<String>,
-        ProviderProtocol,
-    )>,
-    ProviderError,
-> {
+) -> Result<Option<AvailableModelCredential>, ProviderError> {
     let model_lower = model.to_lowercase();
     for cred in creds {
         if !cred.enabled {
@@ -1027,6 +983,7 @@ mod tests {
         provider_id::OPENCODE,
         provider_id::ANTHROPIC,
         provider_id::OPENAI,
+        provider_id::ATLASCLOUD,
         provider_id::DEEPSEEK,
         provider_id::GEMINI,
         provider_id::GROQ,
@@ -1054,6 +1011,7 @@ mod tests {
         const KEYMAP_COVERED: &[&str] = &[
             provider_id::ANTHROPIC,
             provider_id::OPENAI,
+            provider_id::ATLASCLOUD,
             provider_id::DEEPSEEK,
             provider_id::GEMINI,
             provider_id::GROQ,
@@ -1229,6 +1187,7 @@ mod tests {
             ModelType::CherryinApi,
             ModelType::BedrockApi,
             ModelType::CustomApi,
+            ModelType::AtlascloudApi,
         ] {
             let spec = spec_for_model_type(&model_type).unwrap_or_else(|| {
                 panic!("{model_type:?} has no ProviderSpec in the agent-core registry")

@@ -1,15 +1,10 @@
 //! Message persistence — insertion, loading, truncation, history building.
 
 use chrono::Utc;
-use rusqlite::{
-    params, OptionalExtension, Result as SqliteResult, Transaction, TransactionBehavior,
-};
+use rusqlite::{params, OptionalExtension, Result as SqliteResult};
 use uuid::Uuid;
 
 use crate::persistence::db_helpers as shared;
-use crate::session::context_import::{
-    CacheLayoutStats, ContextSnapshotMeta, ContextSourceKind, SessionEmbeddingState,
-};
 use database::db::{get_connection, with_sessions_writer};
 
 /// Table-name prefix for the unified-session DB schema.
@@ -23,6 +18,229 @@ use database::db::{get_connection, with_sessions_writer};
 /// family*, the other names a *category enum value*).
 const SESSION_TABLE_PREFIX: &str = "agent";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentOrgInboxTranscriptMaterialization {
+    pub message_id: String,
+    pub intent_id: String,
+    pub content: String,
+}
+
+/// Load the transcript batches already materialized for the supplied unread
+/// Inbox rows in this exact Session. A row stays unread until a successful
+/// provider turn, but its durable receipt prevents it from being appended to
+/// the transcript a second time when a later Inbox row joins the retry batch.
+pub fn load_agent_org_inbox_transcript_materializations(
+    session_id: &str,
+    inbox_ids: &[i64],
+) -> Result<
+    (
+        std::collections::HashSet<i64>,
+        Vec<AgentOrgInboxTranscriptMaterialization>,
+    ),
+    String,
+> {
+    let conn = get_connection().map_err(|err| err.to_string())?;
+    let mut materialized_ids = std::collections::HashSet::new();
+    let mut batches = std::collections::BTreeMap::new();
+    let mut stmt = conn
+        .prepare(
+            "SELECT receipt.session_id,
+                    receipt.transcript_message_id,
+                    receipt.transcript_intent_id,
+                    message.content
+             FROM agent_inbox_materializations receipt
+             LEFT JOIN agent_messages message
+               ON message.id=receipt.transcript_message_id
+              AND message.session_id=receipt.session_id
+             WHERE receipt.inbox_id=?1",
+        )
+        .map_err(|err| err.to_string())?;
+    for inbox_id in inbox_ids {
+        let row: Option<(String, String, String, Option<String>)> = stmt
+            .query_row(params![inbox_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .optional()
+            .map_err(|err| err.to_string())?;
+        let Some((receipt_session_id, message_id, intent_id, content)) = row else {
+            continue;
+        };
+        if receipt_session_id != session_id {
+            return Err(format!(
+                "Agent Org Inbox row {inbox_id} is materialized in another live session {receipt_session_id}; refusing to duplicate delivery into {session_id}"
+            ));
+        }
+        let content = content.ok_or_else(|| {
+            format!(
+                "Agent Org Inbox materialization for row {inbox_id} references missing transcript {message_id}"
+            )
+        })?;
+        materialized_ids.insert(*inbox_id);
+        batches
+            .entry(message_id.clone())
+            .or_insert(AgentOrgInboxTranscriptMaterialization {
+                message_id,
+                intent_id,
+                content,
+            });
+    }
+    Ok((materialized_ids, batches.into_values().collect()))
+}
+
+/// Atomically persist one newly-rendered Inbox transcript and a receipt for
+/// every source row. If another turn materialized any member of this batch
+/// after the read snapshot, fail closed and let the next Wake rebuild the
+/// batch from current receipts; never persist a partially duplicated batch.
+pub fn materialize_agent_org_inbox_transcript(
+    session_id: &str,
+    inbox_ids: &[i64],
+    message_id: &str,
+    intent_id: &str,
+    content: &str,
+) -> Result<(AgentOrgInboxTranscriptMaterialization, bool), String> {
+    if inbox_ids.is_empty() {
+        return Err("cannot materialize an empty Agent Org Inbox batch".to_string());
+    }
+    with_sessions_writer(|| -> Result<_, String> {
+        let mut conn = get_connection().map_err(|err| err.to_string())?;
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|err| err.to_string())?;
+
+        let mut existing_receipts = Vec::new();
+        {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT session_id, transcript_message_id, transcript_intent_id
+                     FROM agent_inbox_materializations WHERE inbox_id=?1",
+                )
+                .map_err(|err| err.to_string())?;
+            for inbox_id in inbox_ids {
+                if let Some(receipt) = stmt
+                    .query_row(params![inbox_id], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    })
+                    .optional()
+                    .map_err(|err| err.to_string())?
+                {
+                    existing_receipts.push((*inbox_id, receipt));
+                }
+            }
+        }
+        if !existing_receipts.is_empty() {
+            return Err(
+                "Agent Org Inbox materialization changed after drain; retry from a fresh unread snapshot"
+                    .to_string(),
+            );
+        }
+
+        let unread_count = {
+            let mut stmt = tx
+                .prepare("SELECT read_at FROM agent_inbox WHERE id=?1")
+                .map_err(|err| err.to_string())?;
+            let mut count = 0usize;
+            for inbox_id in inbox_ids {
+                let read_at: Option<Option<String>> = stmt
+                    .query_row(params![inbox_id], |row| row.get(0))
+                    .optional()
+                    .map_err(|err| err.to_string())?;
+                if matches!(read_at, Some(None)) {
+                    count += 1;
+                }
+            }
+            count
+        };
+        if unread_count != inbox_ids.len() {
+            return Err(
+                "Agent Org Inbox materialization source rows changed after drain; retry"
+                    .to_string(),
+            );
+        }
+
+        let already_exists: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM agent_messages WHERE id=?1)",
+                params![message_id],
+                |row| row.get(0),
+            )
+            .map_err(|err| err.to_string())?;
+        let inserted = if already_exists {
+            let existing: (String, String) = tx
+                .query_row(
+                    "SELECT session_id, content FROM agent_messages WHERE id=?1",
+                    params![message_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(|err| err.to_string())?;
+            if existing.0 != session_id || existing.1 != content {
+                return Err(format!(
+                    "stable Agent Org Inbox transcript id {message_id} conflicts with different persisted content"
+                ));
+            }
+            false
+        } else {
+            let sequence: i64 = tx
+                .query_row(
+                    "SELECT COALESCE(MAX(sequence), -1) + 1 FROM agent_messages WHERE session_id=?1",
+                    params![session_id],
+                    |row| row.get(0),
+                )
+                .map_err(|err| err.to_string())?;
+            let now = Utc::now().to_rfc3339();
+            tx.execute(
+                "INSERT INTO agent_messages
+                 (id, session_id, role, content, tool_name, tool_call_id, tool_input,
+                  tool_output, model, sequence, created_at, images,
+                  compact_from_sequence, compact_tokens_before, compact_tokens_after)
+                 VALUES (?1, ?2, 'user', ?3, NULL, NULL, NULL, NULL, NULL, ?4, ?5,
+                         NULL, NULL, NULL, NULL)",
+                params![message_id, session_id, content, sequence, &now],
+            )
+            .map_err(|err| err.to_string())?;
+            tx.execute(
+                "UPDATE agent_sessions SET updated_at=?2 WHERE session_id=?1",
+                params![session_id, &now],
+            )
+            .map_err(|err| err.to_string())?;
+            true
+        };
+
+        let materialized_at = Utc::now().to_rfc3339();
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO agent_inbox_materializations
+                     (inbox_id, session_id, transcript_message_id, transcript_intent_id, materialized_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                )
+                .map_err(|err| err.to_string())?;
+            for inbox_id in inbox_ids {
+                stmt.execute(params![
+                    inbox_id,
+                    session_id,
+                    message_id,
+                    intent_id,
+                    &materialized_at
+                ])
+                .map_err(|err| err.to_string())?;
+            }
+        }
+        tx.commit().map_err(|err| err.to_string())?;
+        Ok((
+            AgentOrgInboxTranscriptMaterialization {
+                message_id: message_id.to_string(),
+                intent_id: intent_id.to_string(),
+                content: content.to_string(),
+            },
+            inserted,
+        ))
+    })
+}
+
 /// Save a user message.
 pub fn save_user_msg(
     session_id: &str,
@@ -32,97 +250,19 @@ pub fn save_user_msg(
     shared::save_user_msg(SESSION_TABLE_PREFIX, session_id, content, images)
 }
 
-/// Persist one user message and its Journey membership in one SQLite
-/// transaction. A pending task becomes active only after the transcript row
-/// has been inserted successfully. Sessions without a Journey deliberately
-/// keep the established writer and receive no inferred membership.
-pub fn save_user_msg_and_assign_journey(
+/// Persist an at-least-once user input under a stable id. Replays return the
+/// same id without inserting a second transcript row.
+pub fn save_user_msg_with_id(
+    message_id: &str,
     session_id: &str,
     content: &str,
-    images: Option<&[String]>,
-) -> SqliteResult<String> {
-    with_sessions_writer(|| {
-        let mut conn = get_connection()?;
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let message_id = Uuid::new_v4().to_string();
-        let images_json = images.filter(|value| !value.is_empty()).map(|value| {
-            let paths = crate::persistence::images::persist_images(value);
-            if paths.is_empty() {
-                serde_json::to_string(value).expect("image paths serialize")
-            } else {
-                serde_json::to_string(&paths).expect("image paths serialize")
-            }
-        });
-        let sequence: i64 = tx.query_row(
-            "SELECT COALESCE(MAX(sequence), -1) + 1 FROM agent_messages WHERE session_id = ?1",
-            [session_id],
-            |row| row.get(0),
-        )?;
-        tx.execute(
-            "INSERT INTO agent_messages
-             (id, session_id, role, content, sequence, created_at, images)
-             VALUES (?1, ?2, 'user', ?3, ?4, ?5, ?6)",
-            params![
-                &message_id,
-                session_id,
-                content,
-                sequence,
-                Utc::now().to_rfc3339(),
-                images_json
-            ],
-        )?;
-
-        if let Some(mut journey) =
-            crate::core::journey_lifecycle::SqliteJourneyRepository::load(&tx, session_id)
-                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?
-        {
-            let previous_revision = journey.revision;
-            journey
-                .on_user_message_persisted(previous_revision, sequence as u64)
-                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-            if journey.revision != previous_revision {
-                crate::core::journey_lifecycle::SqliteJourneyRepository::compare_and_store_in_transaction(
-                    &tx,
-                    &journey,
-                    previous_revision,
-                )
-                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-            }
-            ensure_active_branch_accepts_messages(&journey)?;
-            tx.execute(
-                "INSERT INTO session_journey_memberships
-                 (session_id, message_id, sequence, branch_id, task_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    session_id,
-                    &message_id,
-                    sequence,
-                    journey.active_branch_id,
-                    journey.active_task_id
-                ],
-            )?;
-        }
-        tx.execute(
-            "UPDATE agent_sessions SET updated_at = ?2 WHERE session_id = ?1",
-            params![session_id, Utc::now().to_rfc3339()],
-        )?;
-        tx.commit()?;
-        Ok(message_id)
-    })
+) -> SqliteResult<(String, bool)> {
+    shared::save_user_msg_with_id(SESSION_TABLE_PREFIX, message_id, session_id, content)
 }
 
 /// Save an assistant message.
 pub fn save_assistant_msg(session_id: &str, content: &str, model: &str) -> SqliteResult<String> {
-    save_message_and_assign_journey(
-        session_id,
-        "assistant",
-        content,
-        None,
-        None,
-        None,
-        None,
-        Some(model),
-    )
+    shared::save_assistant_msg(SESSION_TABLE_PREFIX, session_id, content, model)
 }
 
 /// Save a persisted compact summary boundary.
@@ -142,15 +282,12 @@ pub fn save_tool_call_msg(
     tool_name: &str,
     arguments: &str,
 ) -> SqliteResult<String> {
-    save_message_and_assign_journey(
+    shared::save_tool_call_msg(
+        SESSION_TABLE_PREFIX,
         session_id,
-        "tool_call",
-        &format!("Tool call: {tool_name}"),
-        Some(tool_name),
-        Some(tool_call_id),
-        Some(arguments),
-        None,
-        None,
+        tool_call_id,
+        tool_name,
+        arguments,
     )
 }
 
@@ -161,199 +298,13 @@ pub fn save_tool_result_msg(
     tool_name: &str,
     result: &str,
 ) -> SqliteResult<String> {
-    save_message_and_assign_journey(
+    shared::save_tool_result_msg(
+        SESSION_TABLE_PREFIX,
         session_id,
-        "tool_result",
-        &crate::utils::safe_truncate_chars_to_string(result, 2000),
-        Some(tool_name),
-        Some(tool_call_id),
-        None,
-        Some(result),
-        None,
+        tool_call_id,
+        tool_name,
+        result,
     )
-}
-
-/// Writes non-user transcript rows and their exact Journey membership in one
-/// transaction. The message id and allocated sequence are the only anchors;
-/// timestamps are deliberately not consulted.
-fn save_message_and_assign_journey(
-    session_id: &str,
-    role: &str,
-    content: &str,
-    tool_name: Option<&str>,
-    tool_call_id: Option<&str>,
-    tool_input: Option<&str>,
-    tool_output: Option<&str>,
-    model: Option<&str>,
-) -> SqliteResult<String> {
-    with_sessions_writer(|| {
-        let mut conn = get_connection()?;
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let message_id = Uuid::new_v4().to_string();
-        let sequence = insert_journey_message(
-            &tx,
-            session_id,
-            &message_id,
-            role,
-            content,
-            tool_name,
-            tool_call_id,
-            tool_input,
-            tool_output,
-            model,
-        )?;
-        assign_message_membership(&tx, session_id, &message_id, sequence)?;
-        tx.execute(
-            "UPDATE agent_sessions SET updated_at = ?2 WHERE session_id = ?1",
-            params![session_id, Utc::now().to_rfc3339()],
-        )?;
-        tx.commit()?;
-        Ok(message_id)
-    })
-}
-
-fn insert_journey_message(
-    tx: &Transaction<'_>,
-    session_id: &str,
-    message_id: &str,
-    role: &str,
-    content: &str,
-    tool_name: Option<&str>,
-    tool_call_id: Option<&str>,
-    tool_input: Option<&str>,
-    tool_output: Option<&str>,
-    model: Option<&str>,
-) -> SqliteResult<i64> {
-    let sequence: i64 = tx.query_row(
-        "SELECT COALESCE(MAX(sequence), -1) + 1 FROM agent_messages WHERE session_id = ?1",
-        [session_id],
-        |row| row.get(0),
-    )?;
-    tx.execute(
-        "INSERT INTO agent_messages
-         (id, session_id, role, content, tool_name, tool_call_id, tool_input, tool_output, model, sequence, created_at, images)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL)",
-        params![
-            message_id,
-            session_id,
-            role,
-            content,
-            tool_name,
-            tool_call_id,
-            tool_input,
-            tool_output,
-            model,
-            sequence,
-            Utc::now().to_rfc3339(),
-        ],
-    )?;
-    Ok(sequence)
-}
-
-fn assign_message_membership(
-    tx: &Transaction<'_>,
-    session_id: &str,
-    message_id: &str,
-    sequence: i64,
-) -> SqliteResult<()> {
-    let Some(journey) =
-        crate::core::journey_lifecycle::SqliteJourneyRepository::load(tx, session_id)
-            .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?
-    else {
-        return Ok(());
-    };
-    ensure_active_branch_accepts_messages(&journey)?;
-    tx.execute(
-        "INSERT INTO session_journey_memberships
-         (session_id, message_id, sequence, branch_id, task_id)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![
-            session_id,
-            message_id,
-            sequence,
-            journey.active_branch_id,
-            journey.active_task_id,
-        ],
-    )?;
-    Ok(())
-}
-
-/// A Journey branch accepts transcript rows only while it is the active,
-/// writable branch.  Persisting into a closing/closed branch makes later
-/// evidence validation ambiguous, so fail the caller rather than guessing.
-fn ensure_active_branch_accepts_messages(
-    journey: &crate::core::journey_lifecycle::SessionJourney,
-) -> SqliteResult<()> {
-    use crate::core::journey_lifecycle::ForkState;
-
-    let branch = journey
-        .branches
-        .get(&journey.active_branch_id)
-        .ok_or_else(|| {
-            rusqlite::Error::ToSqlConversionFailure("Journey 活动分叉不存在。".into())
-        })?;
-    if branch.state != ForkState::Active {
-        return Err(rusqlite::Error::ToSqlConversionFailure(
-            format!("Journey 活动分叉不可写入：{:?}。", branch.state).into(),
-        ));
-    }
-    Ok(())
-}
-
-/// Persist the exact branch/task active at a completed turn boundary. This is
-/// intentionally separate from message membership because one turn can own
-/// several assistant/tool rows.
-pub fn save_completed_turn_and_assign_journey(session_id: &str, turn_id: &str) -> SqliteResult<()> {
-    with_sessions_writer(|| {
-        let mut conn = get_connection()?;
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let Some(journey) =
-            crate::core::journey_lifecycle::SqliteJourneyRepository::load(&tx, session_id)
-                .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?
-        else {
-            tx.commit()?;
-            return Ok(());
-        };
-        ensure_active_branch_accepts_messages(&journey)?;
-        let sequence: i64 = tx.query_row(
-            "SELECT COALESCE(MAX(sequence), -1) FROM agent_messages WHERE session_id = ?1",
-            [session_id],
-            |row| row.get(0),
-        )?;
-        let member: Option<(String, Option<String>)> = tx
-            .query_row(
-                "SELECT branch_id, task_id FROM session_journey_memberships
-                 WHERE session_id = ?1 AND sequence = ?2
-                 ORDER BY message_id DESC LIMIT 1",
-                params![session_id, sequence],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        if member.as_ref()
-            != Some(&(
-                journey.active_branch_id.clone(),
-                journey.active_task_id.clone(),
-            ))
-        {
-            return Err(rusqlite::Error::ToSqlConversionFailure(
-                "Journey 完成回合缺少活动分叉的精确消息归属。".into(),
-            ));
-        }
-        tx.execute(
-            "INSERT OR IGNORE INTO session_journey_turn_memberships
-             (session_id, turn_id, completed_sequence, branch_id, task_id)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                session_id,
-                turn_id,
-                sequence,
-                journey.active_branch_id,
-                journey.active_task_id
-            ],
-        )?;
-        tx.commit()?;
-        Ok(())
-    })
 }
 
 /// Load messages for a session.
@@ -428,81 +379,6 @@ pub fn anchor_at_or_after_created_at(
 /// Load LLM-formatted history for a session.
 pub fn load_llm_history(session_id: &str) -> SqliteResult<Vec<serde_json::Value>> {
     shared::load_llm_history(SESSION_TABLE_PREFIX, session_id)
-}
-
-fn append_parent_handoff_capsules(
-    journey: &crate::core::journey_lifecycle::SessionJourney,
-    mut prompt: Vec<serde_json::Value>,
-) -> Vec<serde_json::Value> {
-    prompt.extend(
-        journey
-            .parent_handoff_capsules(&journey.active_branch_id)
-            .into_iter()
-            .map(crate::core::journey_lifecycle::HandoffCapsule::synthetic_prompt_message),
-    );
-    prompt
-}
-
-/// Load provider history through the Journey visibility boundary when this is
-/// a Journey session. Legacy sessions, including ones with no memberships,
-/// retain the existing history semantics exactly.
-pub fn load_llm_history_for_active_journey(
-    session_id: &str,
-) -> SqliteResult<Vec<serde_json::Value>> {
-    let conn = get_connection()?;
-    let Some(journey) =
-        crate::core::journey_lifecycle::SqliteJourneyRepository::load(&conn, session_id)
-            .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?
-    else {
-        return load_llm_history(session_id);
-    };
-    let mut statement = conn.prepare(
-        "SELECT message_id, sequence, branch_id, task_id
-         FROM session_journey_memberships WHERE session_id = ?1",
-    )?;
-    let memberships = statement
-        .query_map([session_id], |row| {
-            Ok(
-                crate::session::journey_context_visibility::JourneyMessageMembership {
-                    message_id: row.get(0)?,
-                    sequence: row.get::<_, i64>(1)? as u64,
-                    branch_id: row.get(2)?,
-                    task_id: row.get(3)?,
-                },
-            )
-        })?
-        .collect::<SqliteResult<Vec<_>>>()?;
-    if memberships.is_empty() {
-        return load_llm_history(session_id);
-    }
-
-    let messages = shared::visible_rows(&shared::load_messages(SESSION_TABLE_PREFIX, session_id)?);
-    let persisted = messages
-        .iter()
-        .filter(|message| message.sequence >= 0)
-        .map(
-            |message| crate::session::journey_context_visibility::PersistedContextMessage {
-                message_id: message.id.clone(),
-                sequence: message.sequence as u64,
-            },
-        )
-        .collect::<Vec<_>>();
-    let visible_ids = crate::session::journey_context_visibility::project_prompt_message_ids(
-        &journey,
-        &journey.active_branch_id,
-        &persisted,
-        &memberships,
-    )
-    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-    let visible = messages
-        .into_iter()
-        .filter(|message| visible_ids.contains(&message.id))
-        .collect::<Vec<_>>();
-    let prompt = shared::reconstruct(&visible);
-    // This is the sole parent prompt assembly boundary. Capsules are appended
-    // after reconstruction so every persisted parent message retains its exact
-    // serialized order and bytes; fork transcript rows never enter `visible`.
-    Ok(append_parent_handoff_capsules(&journey, prompt))
 }
 
 /// Map "keep the last `tail_len` LLM messages visible" onto a durable
@@ -830,6 +706,12 @@ pub fn save_snapshot(session_id: &str, tool_call_id: &str, hash: &str) -> Sqlite
         Ok(())
     })?;
     crate::tools::file_history::enforce_session_cap_after_save(session_id);
+    if crate::bus::frontend_subscriber_count() > 0 {
+        crate::bus::broadcast_event(
+            "agent:snapshot_created",
+            serde_json::json!({ "sessionId": session_id }),
+        );
+    }
     Ok(())
 }
 
@@ -917,405 +799,6 @@ pub fn save_subagent_transcript(
 pub struct PersistedSessionMemoryState {
     pub content: Option<String>,
     pub last_msg_idx: Option<usize>,
-}
-
-// ============================================
-// Session Memory Semantic Index
-// ============================================
-
-#[derive(Debug, Clone)]
-pub struct SessionMemoryIndexRow {
-    pub session_id: String,
-    pub content: String,
-    pub embedding: Vec<f32>,
-    pub embedding_model: Option<String>,
-    pub embedding_source: Option<String>,
-    pub embedding_dimensions: Option<usize>,
-    pub updated_at: String,
-}
-
-pub fn ensure_session_memory_index_schema(conn: &rusqlite::Connection) -> SqliteResult<()> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS session_memory_index (
-            session_id       TEXT PRIMARY KEY,
-            content          TEXT NOT NULL,
-            embedding        BLOB,
-            embedding_model  TEXT,
-            embedding_source TEXT,
-            embedding_dimensions INTEGER,
-            updated_at       TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_session_memory_index_updated
-            ON session_memory_index(updated_at);",
-    )?;
-    for migration in [
-        "ALTER TABLE session_memory_index ADD COLUMN embedding_source TEXT",
-        "ALTER TABLE session_memory_index ADD COLUMN embedding_dimensions INTEGER",
-    ] {
-        let _ = conn.execute(migration, []);
-    }
-    Ok(())
-}
-
-pub fn save_session_memory_index(
-    session_id: &str,
-    content: &str,
-    embedding: &[f32],
-    embedding_model: Option<&str>,
-    embedding_source: Option<&str>,
-) -> SqliteResult<()> {
-    let embedding_bytes: Vec<u8> = embedding.iter().flat_map(|v| v.to_le_bytes()).collect();
-    let embedding_blob: Option<&[u8]> = if embedding_bytes.is_empty() {
-        None
-    } else {
-        Some(&embedding_bytes)
-    };
-    with_sessions_writer(|| -> SqliteResult<()> {
-        let conn = get_connection()?;
-        ensure_session_memory_index_schema(&conn)?;
-        conn.execute(
-            "INSERT INTO session_memory_index
-                (session_id, content, embedding, embedding_model, embedding_source, embedding_dimensions, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(session_id) DO UPDATE SET
-                content = excluded.content,
-                embedding = excluded.embedding,
-                embedding_model = excluded.embedding_model,
-                embedding_source = excluded.embedding_source,
-                embedding_dimensions = excluded.embedding_dimensions,
-                updated_at = excluded.updated_at",
-            rusqlite::params![
-                session_id,
-                content,
-                embedding_blob,
-                embedding_model,
-                embedding_source,
-                embedding.len() as i64,
-                chrono::Utc::now().to_rfc3339(),
-            ],
-        )?;
-        Ok(())
-    })
-}
-
-pub fn load_session_memory_index_rows() -> SqliteResult<Vec<SessionMemoryIndexRow>> {
-    let conn = get_connection()?;
-    ensure_session_memory_index_schema(&conn)?;
-    let mut stmt = conn.prepare(
-        "SELECT session_id, content, embedding, embedding_model, embedding_source, embedding_dimensions, updated_at
-         FROM session_memory_index
-         ORDER BY updated_at DESC",
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let embedding_blob: Option<Vec<u8>> = row.get(2)?;
-        let embedding = embedding_blob
-            .map(|blob| {
-                blob.chunks_exact(4)
-                    .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-                    .collect()
-            })
-            .unwrap_or_default();
-        Ok(SessionMemoryIndexRow {
-            session_id: row.get(0)?,
-            content: row.get(1)?,
-            embedding,
-            embedding_model: row.get(3)?,
-            embedding_source: row.get(4)?,
-            embedding_dimensions: row.get::<_, Option<i64>>(5)?.map(|value| value as usize),
-            updated_at: row.get(6)?,
-        })
-    })?;
-    rows.collect()
-}
-
-pub fn latest_message_sequence(session_id: &str) -> SqliteResult<i64> {
-    let conn = get_connection()?;
-    conn.query_row(
-        "SELECT COALESCE(MAX(sequence), 0) FROM agent_messages WHERE session_id = ?1",
-        params![session_id],
-        |row| row.get(0),
-    )
-}
-
-// ============================================
-// Context Snapshot / Import / Cache Layout Metadata
-// ============================================
-
-fn context_kind_from_str(value: &str) -> ContextSourceKind {
-    match value {
-        "session" => ContextSourceKind::Session,
-        "work_item" => ContextSourceKind::WorkItem,
-        "file" => ContextSourceKind::File,
-        "memory" => ContextSourceKind::Memory,
-        "imported_context" => ContextSourceKind::ImportedContext,
-        "global_preference" => ContextSourceKind::GlobalPreference,
-        _ => ContextSourceKind::ImportedContext,
-    }
-}
-
-pub fn ensure_context_metadata_schema(conn: &rusqlite::Connection) -> SqliteResult<()> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS context_snapshots (
-            snapshot_id        TEXT PRIMARY KEY,
-            target_session_id  TEXT NOT NULL,
-            source_kind        TEXT NOT NULL,
-            source_id          TEXT NOT NULL,
-            namespace          TEXT NOT NULL,
-            title              TEXT,
-            token_estimate     INTEGER NOT NULL DEFAULT 0,
-            pinned             INTEGER NOT NULL DEFAULT 0,
-            snippet            TEXT,
-            created_at         TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_context_snapshots_target
-            ON context_snapshots(target_session_id, created_at);
-        CREATE INDEX IF NOT EXISTS idx_context_snapshots_namespace
-            ON context_snapshots(namespace);
-
-        CREATE TABLE IF NOT EXISTS turn_cache_layout_stats (
-            session_id              TEXT NOT NULL,
-            turn_id                 TEXT NOT NULL,
-            stable_prefix_tokens    INTEGER NOT NULL DEFAULT 0,
-            volatile_context_tokens INTEGER NOT NULL DEFAULT 0,
-            imported_context_count  INTEGER NOT NULL DEFAULT 0,
-            cache_read_tokens       INTEGER NOT NULL DEFAULT 0,
-            cache_write_tokens      INTEGER NOT NULL DEFAULT 0,
-            created_at              TEXT NOT NULL,
-            PRIMARY KEY(session_id, turn_id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_turn_cache_layout_stats_session
-            ON turn_cache_layout_stats(session_id, created_at);
-
-        CREATE TABLE IF NOT EXISTS session_embedding_state (
-            namespace              TEXT PRIMARY KEY,
-            session_id             TEXT NOT NULL,
-            work_item_id           TEXT,
-            last_embedded_sequence INTEGER NOT NULL DEFAULT 0,
-            embedding_model        TEXT,
-            updated_at             TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_session_embedding_state_session
-            ON session_embedding_state(session_id);
-        CREATE INDEX IF NOT EXISTS idx_session_embedding_state_work_item
-            ON session_embedding_state(work_item_id);",
-    )?;
-    if let Err(err) = conn.execute("ALTER TABLE context_snapshots ADD COLUMN snippet TEXT", []) {
-        let msg = err.to_string();
-        if !msg.contains("duplicate column name") {
-            return Err(err);
-        }
-    }
-    Ok(())
-}
-
-pub fn save_context_snapshot(meta: &ContextSnapshotMeta) -> SqliteResult<()> {
-    with_sessions_writer(|| -> SqliteResult<()> {
-        let conn = get_connection()?;
-        ensure_context_metadata_schema(&conn)?;
-        conn.execute(
-            "INSERT INTO context_snapshots
-                (snapshot_id, target_session_id, source_kind, source_id, namespace,
-                 title, token_estimate, pinned, snippet, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-             ON CONFLICT(snapshot_id) DO UPDATE SET
-                target_session_id = excluded.target_session_id,
-                source_kind = excluded.source_kind,
-                source_id = excluded.source_id,
-                namespace = excluded.namespace,
-                title = excluded.title,
-                token_estimate = excluded.token_estimate,
-                pinned = excluded.pinned,
-                snippet = excluded.snippet,
-                created_at = excluded.created_at",
-            params![
-                meta.snapshot_id,
-                meta.target_session_id,
-                meta.source_kind.as_str(),
-                meta.source_id,
-                meta.namespace,
-                meta.title,
-                meta.token_estimate,
-                if meta.pinned { 1 } else { 0 },
-                meta.snippet,
-                meta.created_at,
-            ],
-        )?;
-        Ok(())
-    })
-}
-
-pub fn load_context_snapshots(target_session_id: &str) -> SqliteResult<Vec<ContextSnapshotMeta>> {
-    let conn = get_connection()?;
-    ensure_context_metadata_schema(&conn)?;
-    let mut stmt = conn.prepare(
-        "SELECT snapshot_id, target_session_id, source_kind, source_id, namespace,
-                title, token_estimate, pinned, snippet, created_at
-         FROM context_snapshots
-         WHERE target_session_id = ?1
-         ORDER BY pinned DESC, created_at DESC",
-    )?;
-    let rows = stmt.query_map(params![target_session_id], |row| {
-        let source_kind: String = row.get(2)?;
-        let pinned: i64 = row.get(7)?;
-        Ok(ContextSnapshotMeta {
-            snapshot_id: row.get(0)?,
-            target_session_id: row.get(1)?,
-            source_kind: context_kind_from_str(&source_kind),
-            source_id: row.get(3)?,
-            namespace: row.get(4)?,
-            title: row.get(5)?,
-            token_estimate: row.get(6)?,
-            pinned: pinned != 0,
-            snippet: row.get(8)?,
-            created_at: row.get(9)?,
-        })
-    })?;
-    rows.collect()
-}
-
-pub fn save_turn_cache_layout_stats(
-    session_id: &str,
-    turn_id: &str,
-    stats: &CacheLayoutStats,
-) -> SqliteResult<()> {
-    with_sessions_writer(|| -> SqliteResult<()> {
-        let conn = get_connection()?;
-        ensure_context_metadata_schema(&conn)?;
-        conn.execute(
-            "INSERT INTO turn_cache_layout_stats
-                (session_id, turn_id, stable_prefix_tokens, volatile_context_tokens,
-                 imported_context_count, cache_read_tokens, cache_write_tokens, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-             ON CONFLICT(session_id, turn_id) DO UPDATE SET
-                stable_prefix_tokens = excluded.stable_prefix_tokens,
-                volatile_context_tokens = excluded.volatile_context_tokens,
-                imported_context_count = excluded.imported_context_count,
-                cache_read_tokens = excluded.cache_read_tokens,
-                cache_write_tokens = excluded.cache_write_tokens,
-                created_at = excluded.created_at",
-            params![
-                session_id,
-                turn_id,
-                stats.stable_prefix_tokens,
-                stats.volatile_context_tokens,
-                stats.imported_context_count,
-                stats.cache_read_tokens,
-                stats.cache_write_tokens,
-                Utc::now().to_rfc3339(),
-            ],
-        )?;
-        Ok(())
-    })
-}
-
-pub fn load_turn_cache_layout_stats(
-    session_id: &str,
-    turn_id: &str,
-) -> SqliteResult<Option<CacheLayoutStats>> {
-    let conn = get_connection()?;
-    ensure_context_metadata_schema(&conn)?;
-    let mut stmt = conn.prepare(
-        "SELECT stable_prefix_tokens, volatile_context_tokens, imported_context_count,
-                cache_read_tokens, cache_write_tokens
-         FROM turn_cache_layout_stats
-         WHERE session_id = ?1 AND turn_id = ?2",
-    )?;
-    let mut rows = stmt.query(params![session_id, turn_id])?;
-    if let Some(row) = rows.next()? {
-        Ok(Some(CacheLayoutStats::new(
-            row.get(0)?,
-            row.get(1)?,
-            row.get(2)?,
-            row.get(3)?,
-            row.get(4)?,
-        )))
-    } else {
-        Ok(None)
-    }
-}
-
-pub fn load_latest_turn_cache_layout_stats(
-    session_id: &str,
-) -> SqliteResult<Option<(String, CacheLayoutStats)>> {
-    let conn = get_connection()?;
-    ensure_context_metadata_schema(&conn)?;
-    let mut stmt = conn.prepare(
-        "SELECT turn_id, stable_prefix_tokens, volatile_context_tokens, imported_context_count,
-                cache_read_tokens, cache_write_tokens
-         FROM turn_cache_layout_stats
-         WHERE session_id = ?1
-         ORDER BY created_at DESC
-         LIMIT 1",
-    )?;
-    let mut rows = stmt.query(params![session_id])?;
-    if let Some(row) = rows.next()? {
-        Ok(Some((
-            row.get(0)?,
-            CacheLayoutStats::new(
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-                row.get(5)?,
-            ),
-        )))
-    } else {
-        Ok(None)
-    }
-}
-
-pub fn save_session_embedding_state(state: &SessionEmbeddingState) -> SqliteResult<()> {
-    with_sessions_writer(|| -> SqliteResult<()> {
-        let conn = get_connection()?;
-        ensure_context_metadata_schema(&conn)?;
-        conn.execute(
-            "INSERT INTO session_embedding_state
-                (namespace, session_id, work_item_id, last_embedded_sequence,
-                 embedding_model, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(namespace) DO UPDATE SET
-                session_id = excluded.session_id,
-                work_item_id = excluded.work_item_id,
-                last_embedded_sequence = excluded.last_embedded_sequence,
-                embedding_model = excluded.embedding_model,
-                updated_at = excluded.updated_at",
-            params![
-                state.namespace,
-                state.session_id,
-                state.work_item_id,
-                state.last_embedded_sequence,
-                state.embedding_model,
-                state.updated_at,
-            ],
-        )?;
-        Ok(())
-    })
-}
-
-pub fn load_session_embedding_state(
-    namespace: &str,
-) -> SqliteResult<Option<SessionEmbeddingState>> {
-    let conn = get_connection()?;
-    ensure_context_metadata_schema(&conn)?;
-    let mut stmt = conn.prepare(
-        "SELECT namespace, session_id, work_item_id, last_embedded_sequence,
-                embedding_model, updated_at
-         FROM session_embedding_state
-         WHERE namespace = ?1",
-    )?;
-    let mut rows = stmt.query(params![namespace])?;
-    if let Some(row) = rows.next()? {
-        Ok(Some(SessionEmbeddingState {
-            namespace: row.get(0)?,
-            session_id: row.get(1)?,
-            work_item_id: row.get(2)?,
-            last_embedded_sequence: row.get(3)?,
-            embedding_model: row.get(4)?,
-            updated_at: row.get(5)?,
-        }))
-    } else {
-        Ok(None)
-    }
 }
 
 // ============================================
@@ -1440,58 +923,6 @@ mod tests {
     use database::db::get_connection;
     use test_helpers::test_env;
 
-    #[test]
-    fn context_metadata_roundtrips() {
-        let _sandbox = test_env::sandbox();
-        let snap = ContextSnapshotMeta::new(
-            "target-session",
-            ContextSourceKind::Session,
-            "source-session",
-            Some("Imported source".into()),
-            123,
-            true,
-        );
-        save_context_snapshot(&snap).expect("save context snapshot");
-        let rows = load_context_snapshots("target-session").expect("load snapshots");
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].snapshot_id, snap.snapshot_id);
-        assert_eq!(rows[0].namespace, "session:source-session");
-        assert_eq!(rows[0].token_estimate, 123);
-        assert!(rows[0].pinned);
-    }
-
-    #[test]
-    fn cache_layout_stats_roundtrip() {
-        let _sandbox = test_env::sandbox();
-        let stats = CacheLayoutStats::new(1000, 250, 3, 800, 200);
-        save_turn_cache_layout_stats("session-cache", "turn-1", &stats)
-            .expect("save cache layout stats");
-        let loaded = load_turn_cache_layout_stats("session-cache", "turn-1")
-            .expect("load cache layout stats")
-            .expect("stats exists");
-        assert_eq!(loaded, stats);
-        assert_eq!(loaded.provider_cache_hit_rate(), Some(0.8));
-    }
-
-    #[test]
-    fn session_embedding_state_roundtrips_by_namespace() {
-        let _sandbox = test_env::sandbox();
-        let state = SessionEmbeddingState::for_session(
-            "session-embed",
-            Some("WI-42".into()),
-            77,
-            Some("dashscope-qwen".into()),
-        );
-        save_session_embedding_state(&state).expect("save embedding state");
-        let loaded = load_session_embedding_state(&state.namespace)
-            .expect("load embedding state")
-            .expect("state exists");
-        assert_eq!(loaded.namespace, "session:session-embed");
-        assert_eq!(loaded.session_id, "session-embed");
-        assert_eq!(loaded.work_item_id.as_deref(), Some("WI-42"));
-        assert_eq!(loaded.last_embedded_sequence, 77);
-    }
-
     fn seed_session_for_message_tests(session_id: &str) {
         let conn = get_connection().expect("get_connection in seed_session_for_message_tests");
         crate::persistence::test_schema::ensure_agent_sessions_schema(&conn);
@@ -1522,375 +953,6 @@ mod tests {
             [session_id],
         )
         .expect("seed session row");
-    }
-
-    #[test]
-    fn assistant_tool_and_completed_turn_keep_exact_journey_membership() {
-        let _sandbox = test_env::sandbox();
-        let session_id = "journey-message-membership";
-        seed_session_for_message_tests(session_id);
-        let mut conn = get_connection().expect("get connection");
-        let mut journey = crate::core::journey_lifecycle::SessionJourney::new(session_id, "main");
-        journey
-            .start_task(0, "task".into(), "精确归属".into(), false, Some(0))
-            .expect("start task");
-        crate::core::journey_lifecycle::SqliteJourneyRepository::compare_and_store(
-            &mut conn, &journey, 0,
-        )
-        .expect("store journey");
-        drop(conn);
-
-        let assistant_id = save_assistant_msg(session_id, "回答", "model").expect("assistant");
-        let call_id = save_tool_call_msg(session_id, "call-1", "工具", "{}").expect("tool call");
-        let result_id =
-            save_tool_result_msg(session_id, "call-1", "工具", "结果").expect("tool result");
-        save_completed_turn_and_assign_journey(session_id, "turn-1").expect("turn");
-
-        let conn = get_connection().expect("get connection");
-        let memberships: Vec<(String, String, Option<String>)> = conn
-            .prepare(
-                "SELECT message_id, branch_id, task_id FROM session_journey_memberships
-                 WHERE session_id = ?1 ORDER BY sequence",
-            )
-            .expect("prepare memberships")
-            .query_map([session_id], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })
-            .expect("query memberships")
-            .collect::<rusqlite::Result<_>>()
-            .expect("collect memberships");
-        assert_eq!(
-            memberships,
-            vec![
-                (assistant_id, "main".into(), Some("task".into())),
-                (call_id, "main".into(), Some("task".into())),
-                (result_id, "main".into(), Some("task".into())),
-            ]
-        );
-        let turn: (i64, String, Option<String>) = conn
-            .query_row(
-                "SELECT completed_sequence, branch_id, task_id
-                 FROM session_journey_turn_memberships
-                 WHERE session_id = ?1 AND turn_id = 'turn-1'",
-                [session_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .expect("turn membership");
-        assert_eq!(turn, (2, "main".into(), Some("task".into())));
-    }
-
-    #[test]
-    fn fork_user_message_is_persisted_and_reaches_provider_history_without_parent_continuation() {
-        let _sandbox = test_env::sandbox();
-        let session_id = "journey-fork-user-provider-history";
-        seed_session_for_message_tests(session_id);
-        let mut conn = get_connection().expect("get connection");
-        crate::core::journey_lifecycle::SqliteJourneyRepository::ensure_schema(&conn)
-            .expect("ensure journey schema");
-
-        for (id, role, content, sequence) in [
-            ("parent-prefix", "user", "parent prefix", 0_i64),
-            ("parent-anchor", "assistant", "parent anchor", 1_i64),
-            (
-                "parent-after-anchor",
-                "assistant",
-                "parent after anchor",
-                2_i64,
-            ),
-        ] {
-            conn.execute(
-                "INSERT INTO agent_messages (id, session_id, role, content, sequence, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))",
-                params![id, session_id, role, content, sequence],
-            )
-            .expect("seed message");
-        }
-        let mut journey = crate::core::journey_lifecycle::SessionJourney::new(session_id, "main");
-        journey
-            .start_fork(
-                0,
-                "fork-a".into(),
-                "task-a".into(),
-                "fork task".into(),
-                "parent-anchor".into(),
-                1,
-            )
-            .expect("start fork");
-        crate::core::journey_lifecycle::SqliteJourneyRepository::compare_and_store(
-            &mut conn, &journey, 0,
-        )
-        .expect("store journey");
-        for (id, sequence) in [("parent-prefix", 0_i64), ("parent-anchor", 1_i64)] {
-            conn.execute(
-                "INSERT INTO session_journey_memberships
-                 (session_id, message_id, sequence, branch_id, task_id)
-                 VALUES (?1, ?2, ?3, 'main', NULL)",
-                params![session_id, id, sequence],
-            )
-            .expect("seed parent membership");
-        }
-        conn.execute(
-            "INSERT INTO session_journey_memberships
-             (session_id, message_id, sequence, branch_id, task_id)
-             VALUES (?1, 'parent-after-anchor', 2, 'main', NULL)",
-            [session_id],
-        )
-        .expect("seed hidden parent continuation");
-        drop(conn);
-
-        let fork_user_id = save_user_msg_and_assign_journey(session_id, "fork user request", None)
-            .expect("persist fork user message");
-        let conn = get_connection().expect("get connection");
-        let membership: (String, Option<String>) = conn
-            .query_row(
-                "SELECT branch_id, task_id FROM session_journey_memberships
-                 WHERE session_id = ?1 AND message_id = ?2",
-                params![session_id, fork_user_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .expect("fork user membership");
-        assert_eq!(membership, ("fork-a".into(), Some("task-a".into())));
-        drop(conn);
-
-        let history = load_llm_history_for_active_journey(session_id)
-            .expect("provider history for active fork");
-        let contents = history
-            .iter()
-            .filter_map(|message| message.get("content").and_then(|content| content.as_str()))
-            .collect::<Vec<_>>();
-        assert!(contents.contains(&"parent prefix"));
-        assert!(contents.contains(&"parent anchor"));
-        assert!(contents.contains(&"fork user request"));
-        assert!(
-            !contents.contains(&"parent after anchor"),
-            "fork provider history must exclude parent continuation after its exact anchor"
-        );
-    }
-
-    #[test]
-    fn journey_history_loader_filters_before_provider_reconstruction() {
-        let _sandbox = test_env::sandbox();
-        let session_id = "journey-provider-visibility";
-        seed_session_for_message_tests(session_id);
-        let mut conn = get_connection().expect("get connection");
-        let mut journey = crate::core::journey_lifecycle::SessionJourney::new(session_id, "main");
-        journey
-            .start_fork(
-                0,
-                "fork-a".into(),
-                "task-a".into(),
-                "分叉 A".into(),
-                "anchor".into(),
-                10,
-            )
-            .expect("start fork a");
-        journey.active_branch_id = "main".into();
-        journey.active_task_id = None;
-        journey
-            .start_fork(
-                1,
-                "fork-b".into(),
-                "task-b".into(),
-                "分叉 B".into(),
-                "anchor".into(),
-                10,
-            )
-            .expect("start fork b");
-        journey.active_branch_id = "main".into();
-        journey.active_task_id = None;
-        journey
-            .start_fork(
-                2,
-                "fork-c".into(),
-                "task-c".into(),
-                "分叉 C".into(),
-                "future".into(),
-                11,
-            )
-            .expect("start fork c");
-        journey.active_branch_id = "fork-a".into();
-        journey.active_task_id = Some("task-a".into());
-        journey.revision = 1;
-        crate::core::journey_lifecycle::SqliteJourneyRepository::compare_and_store(
-            &mut conn, &journey, 0,
-        )
-        .expect("store journey");
-
-        for (id, sequence, content, branch) in [
-            ("anchor", 10, "parent anchor", "main"),
-            ("future", 11, "parent future", "main"),
-            ("a", 12, "fork a", "fork-a"),
-            ("b", 12, "fork b", "fork-b"),
-            ("c", 12, "fork c", "fork-c"),
-        ] {
-            conn.execute(
-                "INSERT INTO agent_messages (id, session_id, role, content, sequence, created_at)
-                 VALUES (?1, ?2, 'assistant', ?3, ?4, datetime('now'))",
-                params![id, session_id, content, sequence],
-            )
-            .expect("seed message");
-            conn.execute(
-                "INSERT INTO session_journey_memberships
-                 (session_id, message_id, sequence, branch_id, task_id)
-                 VALUES (?1, ?2, ?3, ?4, NULL)",
-                params![session_id, id, sequence, branch],
-            )
-            .expect("seed membership");
-        }
-        drop(conn);
-
-        let history = load_llm_history_for_active_journey(session_id).expect("project history");
-        let contents = history
-            .iter()
-            .filter_map(|message| message.get("content").and_then(|content| content.as_str()))
-            .collect::<Vec<_>>();
-        assert!(contents.contains(&"parent anchor"));
-        assert!(contents.contains(&"fork a"));
-        assert!(
-            !contents.contains(&"fork b"),
-            "provider prompt must not inherit sibling fork transcript"
-        );
-        assert!(!contents.contains(&"parent future"));
-        assert!(!contents.contains(&"fork c"));
-    }
-
-    #[test]
-    fn parent_handoff_capsule_is_chinese_append_only_and_excludes_fork_rows() {
-        let _sandbox = test_env::sandbox();
-        let session_id = "journey-parent-handoff";
-        seed_session_for_message_tests(session_id);
-        let mut conn = get_connection().expect("get connection");
-        let mut journey = crate::core::journey_lifecycle::SessionJourney::new(session_id, "main");
-        journey
-            .start_fork(
-                0,
-                "fork-a".into(),
-                "task-a".into(),
-                "核对分叉".into(),
-                "anchor".into(),
-                10,
-            )
-            .expect("start fork");
-        crate::core::journey_lifecycle::SqliteJourneyRepository::compare_and_store(
-            &mut conn, &journey, 0,
-        )
-        .expect("store fork");
-        journey
-            .request_fork_close(
-                1,
-                "fork-a",
-                "review-a".into(),
-                crate::core::journey_lifecycle::TaskOutcome::Completed,
-                12,
-            )
-            .expect("close request");
-        crate::core::journey_lifecycle::SqliteJourneyRepository::compare_and_store(
-            &mut conn, &journey, 1,
-        )
-        .expect("store close request");
-        let provenance = crate::core::journey_lifecycle::RuntimeProvenance {
-            model_id: "模型一".into(),
-            account_id: "账户一".into(),
-            protocol: "测试协议".into(),
-        };
-        journey
-            .mark_review_ready(2, "review-a", provenance.clone(), "审核通过".into())
-            .expect("ready review");
-        crate::core::journey_lifecycle::SqliteJourneyRepository::compare_and_store(
-            &mut conn, &journey, 2,
-        )
-        .expect("store ready review");
-        let capsule = crate::core::journey_lifecycle::HandoffCapsule {
-            fork_id: "fork-a".into(),
-            review_id: "review-a".into(),
-            parent_branch_id: "main".into(),
-            parent_anchor_message_id: "anchor".into(),
-            source_start_sequence: 11,
-            source_end_sequence: 12,
-            objective: "核对主干方案".into(),
-            conclusion: "可以继续主干实施".into(),
-            open_questions: vec!["补充一次回归".into()],
-            confirmed_items: vec!["父主干前缀保持".into()],
-            evidence_references: vec!["检查点 anchor".into()],
-            generated_at: Some("元数据，不参与定位".into()),
-            provenance: provenance.clone(),
-        };
-        journey
-            .publish_handoff_capsule(3, "fork-a", capsule)
-            .expect("publish capsule");
-        crate::core::journey_lifecycle::SqliteJourneyRepository::compare_and_store(
-            &mut conn, &journey, 3,
-        )
-        .expect("store capsule");
-        journey
-            .return_to_parent(4, "review-a")
-            .expect("return parent");
-        crate::core::journey_lifecycle::SqliteJourneyRepository::compare_and_store(
-            &mut conn, &journey, 4,
-        )
-        .expect("store parent return");
-        for (id, sequence, content, branch) in [
-            ("anchor", 10, "主干锚点", "main"),
-            ("parent-next", 11, "主干后续", "main"),
-            ("fork-secret", 12, "FORK_SECRET_TRANSCRIPT", "fork-a"),
-        ] {
-            conn.execute(
-                "INSERT INTO agent_messages (id, session_id, role, content, sequence, created_at)
-                 VALUES (?1, ?2, 'assistant', ?3, ?4, datetime('now'))",
-                params![id, session_id, content, sequence],
-            )
-            .expect("seed message");
-            conn.execute(
-                "INSERT INTO session_journey_memberships
-                 (session_id, message_id, sequence, branch_id, task_id)
-                 VALUES (?1, ?2, ?3, ?4, NULL)",
-                params![session_id, id, sequence, branch],
-            )
-            .expect("seed membership");
-        }
-        drop(conn);
-
-        let history = load_llm_history_for_active_journey(session_id).expect("project history");
-        let capsule_message = history.last().expect("capsule item");
-        let capsule_text = capsule_message["content"].as_str().expect("capsule text");
-        assert!(capsule_text.contains("【分叉交接】"));
-        assert!(capsule_text.contains("分叉ID：fork-a"));
-        assert!(capsule_text.contains("审阅ID：review-a"));
-        assert!(capsule_text.contains("源锚点：anchor"));
-        assert!(capsule_text.contains("模型：模型一"));
-        assert!(capsule_text.contains("账户：账户一"));
-        assert!(capsule_text.contains("协议：测试协议"));
-        assert!(capsule_text.contains("可以继续主干实施"));
-        assert!(!history
-            .iter()
-            .any(|message| message.to_string().contains("FORK_SECRET_TRANSCRIPT")));
-
-        let before = vec![
-            serde_json::json!({ "role": "assistant", "content": "主干锚点" }),
-            serde_json::json!({ "role": "assistant", "content": "主干后续" }),
-        ];
-        let before_bytes = before
-            .iter()
-            .map(serde_json::to_vec)
-            .collect::<Result<Vec<_>, _>>()
-            .expect("serialize prefix");
-        let after_bytes = history[..before.len()]
-            .iter()
-            .map(serde_json::to_vec)
-            .collect::<Result<Vec<_>, _>>()
-            .expect("serialize projected prefix");
-        assert_eq!(before_bytes, after_bytes, "父主干 prefix bytes 不可改变");
-        let persisted_rows =
-            shared::load_messages(SESSION_TABLE_PREFIX, session_id).expect("load transcript");
-        assert_eq!(persisted_rows.len(), 3, "capsule 不得写入 transcript");
-        assert_eq!(
-            journey.branches["fork-a"]
-                .handoff_capsule
-                .as_ref()
-                .unwrap()
-                .provenance,
-            provenance
-        );
     }
 
     #[test]

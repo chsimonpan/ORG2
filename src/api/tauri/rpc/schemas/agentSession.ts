@@ -1,8 +1,8 @@
 import { z } from "zod/v4";
 
 import type {
-  AgentExecModeConfig,
   AgentStatusInfo,
+  DeleteSessionReceipt,
   FileResolution,
   HousekeeperContextCompactionState,
   ManualCompactResult,
@@ -21,6 +21,10 @@ const JsonRecordSchema = z.record(z.string(), z.unknown());
 export const SessionIdInput = z.object({
   sessionId: z.string(),
 });
+
+export const DeleteSessionReceiptSchema = z.object({
+  deletedSessionIds: z.array(z.string()),
+}) as z.ZodType<DeleteSessionReceipt, DeleteSessionReceipt>;
 
 /**
  * Input for `agent_session_manual_compact` — optional free-form user
@@ -149,11 +153,6 @@ export const SessionMetaSchema = z
   })
   .catchall(z.unknown()) as unknown as z.ZodType<SessionMeta, SessionMeta>;
 
-export const LinkSessionToProjectInput = z.object({
-  sessionId: z.string(),
-  projectSlug: z.string(),
-});
-
 export const CancelReasonSchema = z.enum([
   "user_stop",
   "force_send",
@@ -195,6 +194,12 @@ export const LinkSessionToWorkItemInput = z.object({
   projectSlug: z.string(),
   workItemId: z.string(),
   agentRole: z.string().optional(),
+});
+
+export const TrackSessionAsProjectResult = z.object({
+  productMode: z.string(),
+  agentExecMode: z.string(),
+  workItemId: z.string().nullable().optional(),
 });
 
 export const QuestionResponseInput = z.object({
@@ -323,12 +328,6 @@ export const TodoItemSchema = z.object({
   status: z.enum(["pending", "in_progress", "completed", "cancelled"]),
 }) as z.ZodType<TodoItem, TodoItem>;
 
-export const AgentExecModeConfigSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  description: z.string(),
-}) as z.ZodType<AgentExecModeConfig, AgentExecModeConfig>;
-
 export const FileResolutionInput = z.object({
   sessionId: z.string(),
   filePath: z.string(),
@@ -347,8 +346,68 @@ export const AgentStatusInfoSchema = z.object({
   sessionIds: z.array(z.string()),
 }) as z.ZodType<AgentStatusInfo, AgentStatusInfo>;
 
+const SessionLaunchParamsSchema = z
+  .object({
+    category: z.enum(["rust_agent", "cli_agent"]),
+    content: z.string(),
+    workspacePath: z.string().optional(),
+    keySource: z.string().optional(),
+    accountId: z.string().optional(),
+    model: z.string().optional(),
+    nativeHarnessType: z.string().optional(),
+    platform: z.string().optional(),
+    branch: z.string().optional(),
+    worktreeBaseRef: z.string().optional(),
+    hostedToken: z.string().optional(),
+    tier: z.string().optional(),
+    name: z.string().optional(),
+    background: z.boolean().optional(),
+    images: z.array(z.string()).optional(),
+    ideContext: z.unknown().optional(),
+    agentDefinitionId: z.string().optional(),
+    agentOrgId: z.string().optional(),
+    agentOrgMemberOverrides: z.record(z.string(), z.unknown()).optional(),
+    applyAgentOrgMemberOverridesForFuture: z.boolean().optional(),
+    isolate: z.boolean().optional(),
+    mode: z.string().optional(),
+    orgId: z.string().optional(),
+    projectId: z.string().optional(),
+    projectName: z.string().optional(),
+    workItemId: z.string().optional(),
+    productMode: z.string().optional(),
+    agentRole: z.string().optional(),
+    worktreePath: z.string().optional(),
+    projectSlug: z.string().optional(),
+    parentSessionId: z.string().optional(),
+    additionalDirectories: z.array(z.string()).optional(),
+  })
+  .strict()
+  .superRefine((params, context) => {
+    if ((params.isolate || params.worktreePath) && !params.workspacePath) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Worktree mode requires workspacePath",
+        path: ["workspacePath"],
+      });
+    }
+    if (params.isolate && params.worktreePath) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "isolate and worktreePath are mutually exclusive",
+        path: ["worktreePath"],
+      });
+    }
+    if (params.worktreeBaseRef && !params.isolate) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "worktreeBaseRef requires isolate=true",
+        path: ["worktreeBaseRef"],
+      });
+    }
+  });
+
 export const SessionLaunchInput = z.object({
-  params: z.record(z.string(), z.unknown()),
+  params: SessionLaunchParamsSchema,
 });
 
 export const SessionLaunchResultSchema = z
@@ -373,7 +432,10 @@ export const SessionLaunchResultSchema = z
     projectSlug: z.string().nullable().optional(),
     workItemId: z.string().nullable().optional(),
     agentRole: z.string().nullable().optional(),
+    productMode: z.string().nullable().optional(),
     worktreePath: z.string().nullable().optional(),
+    worktreeBranch: z.string().nullable().optional(),
+    baseRef: z.string().nullable().optional(),
   })
   .catchall(z.unknown());
 

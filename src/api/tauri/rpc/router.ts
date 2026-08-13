@@ -40,14 +40,14 @@ export const procedures = {
   sessionCore: p.sessionCore,
   learning: p.learning,
   workspaceMemory: p.workspaceMemory,
-  globalPathExemptions: p.globalPathExemptions,
   lineage: p.lineage,
   searchRegex: p.searchRegex,
   searchSymbol: p.searchSymbol,
   tools: p.tools,
   mcp: p.mcp,
   flow: p.flow,
-  quota: p.quota,
+  humanSession: p.humanSession,
+  cli: p.cli,
 } as const;
 
 // ============================================================================

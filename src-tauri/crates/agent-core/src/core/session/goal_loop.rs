@@ -352,7 +352,6 @@ async fn run_judge(input: &GoalLoopTurnEnd, goal_text: &str) -> JudgeVerdict {
         &input.reliability,
         input.native_harness_type,
         Some(input.workspace.clone()),
-        None,
     )
     .await;
 
@@ -437,6 +436,8 @@ async fn enqueue_continuation(
         None,
         false,
         false,
+        None,
+        None,
         None,
         None,
         crate::foundation::session_bridge::TurnIntentBridgeSource::Queue,

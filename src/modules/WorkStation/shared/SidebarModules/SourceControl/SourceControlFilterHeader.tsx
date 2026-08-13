@@ -20,15 +20,9 @@ import Select from "@src/components/Select";
 import { useRefreshSpin } from "@src/hooks/ui";
 import { WorkstationToolbarTooltip } from "@src/modules/WorkStation/shared/WorkstationToolbarTooltip";
 import { HEADER_ICON_SIZE } from "@src/modules/WorkStation/shared/tokens";
+import type { SourceControlFilterMode } from "@src/store/workstation/codeEditor/sourceControlTypes";
 
-export type SourceControlFilterMode =
-  | "uncommitted"
-  | "unstaged"
-  | "staged"
-  | "stashed"
-  | "history"
-  | "pr"
-  | "issues";
+export type { SourceControlFilterMode } from "@src/store/workstation/codeEditor/sourceControlTypes";
 
 export interface SourceControlFilterCounts {
   uncommitted: number;
@@ -180,7 +174,7 @@ const SourceControlFilterHeader: React.FC<SourceControlFilterHeaderProps> =
             onChange={handleSelect}
             options={options}
             size="small"
-            variant="ghost"
+            appearance="ghost"
             radius="lg"
             dropdownWidthMode="auto"
             className="w-auto"

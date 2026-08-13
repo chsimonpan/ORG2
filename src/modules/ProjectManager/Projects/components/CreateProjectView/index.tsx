@@ -8,11 +8,8 @@
  * Handles its own centralized project-store write logic so the layout doesn't need
  * to pass persistence callbacks.
  *
- * Split layout:
- *   - Header: title
- *   - Left: project metadata pills + ProjectContentEditor
- *   - Right: PropertiesPanel
- *   - Footer: Create with Agent stub / Create project
+ * The manual and Agent variants share the same composer structure as Work Item
+ * creation: title header, editor body, pinned property pills, and submit bar.
  */
 import { emit } from "@tauri-apps/api/event";
 import { useAtomValue, useSetAtom } from "jotai";
@@ -25,27 +22,34 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 
-import { type ProjectOrg, projectApi } from "@src/api/http/project";
-import { type WorkspaceRecord, workspaceApi } from "@src/api/tauri/workspace";
-import Button from "@src/components/Button";
-import Input from "@src/components/Input";
+import {
+  type ProjectOrg,
+  projectApi,
+  projectDataToUI,
+} from "@src/api/http/project";
 import Message from "@src/components/Message";
-import Select from "@src/components/Select";
 import type { SelectOption } from "@src/components/Select";
+import { org2CloudOrgsAtom } from "@src/features/Org2Cloud/org2CloudOrgsAtom";
+import { sidebarSelectedOrgIdAtom } from "@src/features/Organizations/sidebarOrgScopeAtom";
+import LaunchButton from "@src/features/SessionCreator/components/LaunchButton";
 import { useKeyboardSave } from "@src/hooks/keyboard";
 import { createLogger } from "@src/hooks/logger";
 import { useUndoStackWithRestore } from "@src/hooks/ui";
-import WorkItemContentStack from "@src/modules/ProjectManager/WorkItems/components/WorkItemContentStack";
 import {
+  CreateComposerHeader,
+  CreateComposerPinnedActions,
+  CreateComposerTitleInput,
   DetailSplitLayout,
   type LinkedRepoOption,
+  ManualCreateComposer,
   PROJECT_PROPERTY_CONCISE_FIELDS,
   ProjectContentEditor,
   type ProjectContentEditorRef,
   type ProjectData,
+  ProjectOrganizationSelect,
   ProjectPropertyFields,
 } from "@src/modules/ProjectManager/shared";
-import { PROJECT_MANAGER_TEXT_PLACEHOLDER_CLASS } from "@src/modules/ProjectManager/shared/placeholderTokens";
+import { CreatorContentLayout } from "@src/modules/shared/layouts/blocks";
 import { reposAtom } from "@src/store/repo";
 import {
   type ProjectDraft,
@@ -55,10 +59,23 @@ import {
   removeProjectDraftAtom,
   setProjectDraftAtom,
 } from "@src/store/workstation/projectManager";
+import type { Project } from "@src/types/core/project";
+
+import {
+  filterSelectableProjectOrgs,
+  resolveDefaultProjectOrgId,
+} from "../../../projectOrgVisibility";
 
 // ============================================
 // Types
 // ============================================
+
+export interface CreatedProjectResult {
+  project: Project;
+  projectSlug: string;
+  orgId: string;
+  orgName?: string;
+}
 
 export interface CreateProjectViewProps {
   /** Tab ID used to key the draft cache */
@@ -74,16 +91,23 @@ export interface CreateProjectViewProps {
   repoName?: string;
   /** Scope label for breadcrumb display. */
   scopeBreadcrumbLabel?: string;
-  /** Native ORGII org that owns the created project. */
-  orgId: string;
+  /** Optional scoped-surface org; otherwise the global sidebar org is used. */
+  orgId?: string;
   /** Mark this tab as having unsaved changes */
   onSetUnsaved: (hasUnsaved: boolean) => void;
   /** Called after project is successfully created */
-  onProjectCreated: (options?: { keepOpen?: boolean }) => void;
-  /** Hide manual description/footer while an agent creator is shown. */
+  onProjectCreated: (result: CreatedProjectResult) => void;
+  /** Show the Agent composer instead of the manual Project composer. */
   aiGenerateMode?: boolean;
-  /** Render the create footer. */
-  showFooter?: boolean;
+  /** Optional content centered in the page above the bottom-docked manual composer. */
+  middleContent?: React.ReactNode;
+  /** Agent/Manual segmented control rendered with the creator setup pills. */
+  creatorModeControl?: React.ReactNode;
+  /** Render Session Creator in Agent mode with Project fields in its composer. */
+  renderAgentComposer?: (
+    headerContent: React.ReactNode,
+    pinnedActionsContent: React.ReactNode
+  ) => React.ReactNode;
   /** Publish page header into the global WorkstationTabHeader. */
   publishHeaderToWorkstation?: boolean;
 }
@@ -103,14 +127,16 @@ const CreateProjectView: React.FC<CreateProjectViewProps> = ({
   onSetUnsaved,
   onProjectCreated,
   aiGenerateMode = false,
-  showFooter = true,
+  middleContent,
+  creatorModeControl,
+  renderAgentComposer,
   publishHeaderToWorkstation = false,
 }) => {
   const { t } = useTranslation("projects");
   const [saving, setSaving] = useState(false);
   const [availableOrgs, setAvailableOrgs] = useState<ProjectOrg[]>([]);
-  const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
-  const [editorResetKey, setEditorResetKey] = useState(0);
+  const cloudOrgs = useAtomValue(org2CloudOrgsAtom);
+  const globalOrgSelectorValue = useAtomValue(sidebarSelectedOrgIdAtom);
 
   // Read draft from atom (survives tab switches)
   const draftsMap = useAtomValue(projectDraftsAtom);
@@ -139,27 +165,11 @@ const CreateProjectView: React.FC<CreateProjectViewProps> = ({
   useEffect(() => {
     if (!initialisedRef.current && !draftsMap.has(tabId)) {
       const initial = createDefaultProjectDraft();
-      initial.orgId = orgId;
       if (repoPath) initial.linkedRepoPaths = [repoPath];
       setDraft({ tabId, draft: initial });
       initialisedRef.current = true;
     }
-  }, [tabId, draftsMap, setDraft, repoPath, orgId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void workspaceApi
-      .listWorkspaces()
-      .then((items) => {
-        if (!cancelled) setWorkspaces(items);
-      })
-      .catch((error) =>
-        logger.warn("Failed to list project workspaces", error)
-      );
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }, [tabId, draftsMap, setDraft, repoPath]);
 
   useEffect(() => {
     let cancelled = false;
@@ -200,13 +210,8 @@ const CreateProjectView: React.FC<CreateProjectViewProps> = ({
     [updateDraft]
   );
 
-  const handleSummaryChange = useCallback(
-    (summary: string) => updateDraft({ summary }),
-    [updateDraft]
-  );
-
   const handleDescriptionChange = useCallback(
-    (html: string, _text: string) => updateDraft({ description: html }),
+    (markdown: string, _text: string) => updateDraft({ description: markdown }),
     [updateDraft]
   );
 
@@ -226,8 +231,6 @@ const CreateProjectView: React.FC<CreateProjectViewProps> = ({
       if (updates.linkedRepos !== undefined)
         mapped.linkedRepoPaths =
           updates.linkedRepos?.map((repo) => repo.id) || [];
-      if (updates.workspaceId !== undefined)
-        mapped.workspaceId = updates.workspaceId;
       if (updates.startDate !== undefined) mapped.startDate = updates.startDate;
       if (updates.targetDate !== undefined)
         mapped.targetDate = updates.targetDate;
@@ -253,7 +256,6 @@ const CreateProjectView: React.FC<CreateProjectViewProps> = ({
     status: draft.status as ProjectData["status"],
     priority: draft.priority as ProjectData["priority"],
     health: draft.health as ProjectData["health"],
-    workspaceId: draft.workspaceId,
     lead: draft.leadId ? { id: draft.leadId, name: "" } : undefined,
     members: draft.memberIds.map((id) => ({ id, name: "" })),
     teams: draft.teamIds.map((id) => ({ id, name: "" })),
@@ -272,10 +274,7 @@ const CreateProjectView: React.FC<CreateProjectViewProps> = ({
     setSaving(true);
     try {
       const name = draft.name.trim();
-      const descriptionText =
-        editorRef.current?.getDescriptionText()?.trim() ?? "";
-      const parts = [draft.summary.trim(), descriptionText].filter(Boolean);
-      const description = parts.join("\n\n");
+      const description = editorRef.current?.getMarkdown()?.trim() ?? "";
 
       const slug = name
         .toLowerCase()
@@ -287,35 +286,41 @@ const CreateProjectView: React.FC<CreateProjectViewProps> = ({
         ? workItemPrefix.slice(0, 3).padEnd(3, "X")
         : "PRJ";
 
-      await projectApi.writeProject(
-        slug,
-        {
-          id: `proj-${slug}`,
-          name,
-          org_id: draft.orgId,
-          workspace_id: draft.workspaceId,
-          status: draft.status || "backlog",
-          priority: draft.priority || "none",
-          health: draft.health || "no_updates",
-          lead: draft.leadId,
-          members: draft.memberIds,
-          labels: draft.labelIds,
-          linked_repos: draft.linkedRepoPaths,
-          start_date: draft.startDate,
-          target_date: draft.targetDate,
-          created_at: now,
-          updated_at: now,
-          next_work_item_id: 1,
-          work_item_prefix: normalizedWorkItemPrefix,
-          work_item_prefix_custom: false,
-        },
-        description,
-        true
-      );
+      const meta = {
+        id: `proj-${slug}`,
+        name,
+        org_id: draft.orgId,
+        status: draft.status || "backlog",
+        priority: draft.priority || "none",
+        health: draft.health || "no_updates",
+        lead: draft.leadId,
+        members: draft.memberIds,
+        labels: draft.labelIds,
+        linked_repos: draft.linkedRepoPaths,
+        start_date: draft.startDate,
+        target_date: draft.targetDate,
+        created_at: now,
+        updated_at: now,
+        next_work_item_id: 1,
+        work_item_prefix: normalizedWorkItemPrefix,
+        work_item_prefix_custom: false,
+      };
+
+      await projectApi.writeProject(slug, meta, description, true);
 
       await emit("orgii-data-changed");
       removeDraft(tabId);
-      onProjectCreated();
+      onProjectCreated({
+        project: projectDataToUI(
+          { meta, description, slug },
+          { labelMap: new Map(), memberMap: new Map() }
+        ),
+        projectSlug: slug,
+        orgId: meta.org_id,
+        orgName:
+          availableOrgs.find((org) => org.id === meta.org_id)?.name ??
+          (meta.org_id === orgId ? scopeBreadcrumbLabel : undefined),
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error("Failed to create project", err);
@@ -323,44 +328,73 @@ const CreateProjectView: React.FC<CreateProjectViewProps> = ({
     } finally {
       setSaving(false);
     }
-  }, [draft, onProjectCreated, removeDraft, saving, tabId]);
+  }, [
+    availableOrgs,
+    draft,
+    onProjectCreated,
+    orgId,
+    removeDraft,
+    saving,
+    scopeBreadcrumbLabel,
+    tabId,
+  ]);
 
-  const handleReset = useCallback(() => {
-    const nextDraft = createDefaultProjectDraft();
-    nextDraft.orgId = orgId;
-    if (repoPath) nextDraft.linkedRepoPaths = [repoPath];
-    setDraft({ tabId, draft: nextDraft });
-    onSetUnsaved(false);
-    setEditorResetKey((value) => value + 1);
-  }, [onSetUnsaved, orgId, repoPath, setDraft, tabId]);
+  useKeyboardSave(
+    handleCreate,
+    !aiGenerateMode && !saving && !!draft.name.trim()
+  );
 
-  useKeyboardSave(handleCreate, !saving && !!draft.name.trim());
+  const selectableOrgs = useMemo(
+    () => filterSelectableProjectOrgs(availableOrgs, cloudOrgs),
+    [availableOrgs, cloudOrgs]
+  );
+
+  const defaultOrgId = useMemo(
+    () =>
+      resolveDefaultProjectOrgId(
+        orgId,
+        globalOrgSelectorValue,
+        availableOrgs,
+        selectableOrgs
+      ),
+    [availableOrgs, globalOrgSelectorValue, orgId, selectableOrgs]
+  );
+
+  useEffect(() => {
+    if (availableOrgs.length === 0) return;
+    const selectedOrgIsValid = selectableOrgs.some(
+      (org) => org.id === draft.orgId
+    );
+    const followsDefault = draft.orgSelectionMode !== "manual";
+    if (
+      selectedOrgIsValid &&
+      (!followsDefault || draft.orgId === defaultOrgId)
+    ) {
+      return;
+    }
+    patchDraft({
+      tabId,
+      patch: { orgId: defaultOrgId, orgSelectionMode: "auto" },
+    });
+  }, [
+    availableOrgs.length,
+    defaultOrgId,
+    draft.orgId,
+    draft.orgSelectionMode,
+    patchDraft,
+    selectableOrgs,
+    tabId,
+  ]);
 
   const orgOptions = useMemo<SelectOption[]>(
     () =>
-      availableOrgs.map((org) => ({
+      selectableOrgs.map((org) => ({
         value: org.id,
         label: org.name,
         triggerLabel: org.name,
         dataTestId: `create-project-org-option-${org.id}`,
       })),
-    [availableOrgs]
-  );
-
-  const workspaceOptions = useMemo<SelectOption[]>(
-    () => [
-      {
-        value: "",
-        label: "Unlinked Workspace",
-        triggerLabel: "Unlinked Workspace",
-      },
-      ...workspaces.map((workspace) => ({
-        value: workspace.workspaceId,
-        label: workspace.name,
-        triggerLabel: workspace.name,
-      })),
-    ],
-    [workspaces]
+    [selectableOrgs]
   );
 
   const selectedOrgLabel =
@@ -371,33 +405,19 @@ const CreateProjectView: React.FC<CreateProjectViewProps> = ({
   const handleOrgChange = useCallback(
     (value: string | number | (string | number)[]) => {
       if (Array.isArray(value)) return;
-      updateDraft({ orgId: String(value) });
+      updateDraft({ orgId: String(value), orgSelectionMode: "manual" });
     },
     [updateDraft]
   );
 
-  const handleWorkspaceChange = useCallback(
-    (value: string | number | (string | number)[]) => {
-      if (Array.isArray(value)) return;
-      updateDraft({ workspaceId: String(value) || undefined });
-    },
-    [updateDraft]
-  );
-
-  const orgBreadcrumbPill = (
-    <Select
+  const orgTrailSelect = (
+    <ProjectOrganizationSelect
       value={draft.orgId}
       options={orgOptions}
       onChange={handleOrgChange}
       placeholder={selectedOrgLabel}
-      size="small"
-      radius="pill"
-      showSearch
-      dropdownWidthMode="min-match"
-      dropdownMinWidth={220}
-      panelZIndex={10000}
+      placement="top"
       dataTestId="create-project-org-select"
-      className="w-auto max-w-[220px] [&_.select-selector]:!h-7 [&_.select-selector]:!rounded-full [&_.select-selector]:!bg-bg-2 [&_.select-selector]:!px-3 [&_.select-selector]:!text-[13px] [&_.select-selector]:!font-medium [&_.select-selector]:!shadow-none [&_.select-suffix]:!hidden"
     />
   );
 
@@ -416,99 +436,81 @@ const CreateProjectView: React.FC<CreateProjectViewProps> = ({
   );
 
   const titleSection = (
-    <Input
-      type="text"
+    <CreateComposerTitleInput
       value={draft.name}
       onChange={handleTitleChange}
       placeholder={t("projects.editor.titlePlaceholder")}
-      autoFocus
-      fieldVariant="ghost"
-      size="small"
-      className="flex-1"
-      inputClassName={PROJECT_MANAGER_TEXT_PLACEHOLDER_CLASS}
-      data-testid="create-project-title-input"
+      dataTestId="create-project-title-input"
+    />
+  );
+
+  const composerHeaderContent = (
+    <CreateComposerHeader dataTestId="create-project-composer-header">
+      {titleSection}
+    </CreateComposerHeader>
+  );
+
+  const projectPinnedActions = (
+    <CreateComposerPinnedActions dataTestId="create-project-pinned-actions">
+      {creatorModeControl}
+      {orgTrailSelect}
+      {propertyPills}
+    </CreateComposerPinnedActions>
+  );
+
+  const projectEditor = (
+    <ProjectContentEditor
+      ref={editorRef}
+      title={draft.name}
+      onTitleChange={handleTitleChange}
+      initialDescription={draft.description || undefined}
+      onDescriptionChange={handleDescriptionChange}
+      titleVisible={false}
+      separatorVisible={false}
+      descriptionClassName="no-bottom-border [&_.ProseMirror]:!pl-1.5"
+      descriptionMaxHeight="100%"
+      repoPath={repoPath}
+      className="flex min-h-0 flex-1 flex-col"
+      dataTestId="create-project-editor"
+      dropdownDirection="up"
     />
   );
 
   return (
     <DetailSplitLayout
       title={t("projects.newProject")}
+      borderlessHeader
       hideHeader
       publishHeaderToWorkstation={publishHeaderToWorkstation}
       leftContent={
-        <div className="mx-auto h-full w-full max-w-[932px] px-4">
-          <WorkItemContentStack
-            className="h-full w-full"
-            titleContent={titleSection}
-            pathContent={
-              <div className="flex min-w-0 items-center gap-2">
-                {orgBreadcrumbPill}
-                <Select
-                  value={draft.workspaceId ?? ""}
-                  options={workspaceOptions}
-                  onChange={handleWorkspaceChange}
-                  placeholder="Unlinked Workspace"
-                  size="small"
-                  radius="pill"
-                  showSearch
-                  dropdownWidthMode="min-match"
-                  dropdownMinWidth={220}
-                  panelZIndex={10000}
-                  className="w-auto max-w-[240px] [&_.select-selector]:!h-7 [&_.select-selector]:!rounded-full [&_.select-selector]:!bg-bg-2 [&_.select-selector]:!px-3 [&_.select-selector]:!text-[13px] [&_.select-selector]:!font-medium [&_.select-suffix]:!hidden"
+        <CreatorContentLayout
+          placement={aiGenerateMode && renderAgentComposer ? "fill" : "bottom"}
+          contentDataTestId="create-project-creator-content"
+          middleContent={middleContent}
+        >
+          {aiGenerateMode && renderAgentComposer ? (
+            renderAgentComposer(composerHeaderContent, projectPinnedActions)
+          ) : (
+            <ManualCreateComposer
+              dataTestId="create-project-manual-composer"
+              editorRef={editorRef}
+              headerContent={composerHeaderContent}
+              editorContent={projectEditor}
+              pinnedActionsContent={projectPinnedActions}
+              submitButton={
+                <LaunchButton
+                  ariaLabel={t("projects.createProject")}
+                  dataTestId="create-project-submit"
+                  disabled={!draft.name.trim() || saving}
+                  loading={saving}
+                  onClick={() => {
+                    void handleCreate();
+                  }}
                 />
-              </div>
-            }
-            propertiesContent={propertyPills}
-            descriptionContent={
-              !aiGenerateMode ? (
-                <ProjectContentEditor
-                  key={editorResetKey}
-                  ref={editorRef}
-                  title={draft.name}
-                  onTitleChange={handleTitleChange}
-                  summary={draft.summary}
-                  onSummaryChange={handleSummaryChange}
-                  initialDescription={draft.description || undefined}
-                  onDescriptionChange={handleDescriptionChange}
-                  titleVisible={false}
-                  separatorVisible={false}
-                  descriptionClassName="no-bottom-border"
-                  descriptionMaxHeight="100%"
-                  repoPath={repoPath}
-                  className="flex h-full min-h-0 flex-col"
-                />
-              ) : undefined
-            }
-            descriptionFlexible={!aiGenerateMode}
-            metaClassName="py-2"
-            titleClassName="flex h-10 items-center py-0"
-            descriptionClassName={
-              aiGenerateMode
-                ? "flex shrink-0 justify-center pt-4"
-                : "min-h-0 overflow-hidden pt-2"
-            }
-            separatorClassName=""
-            scrollable
-          />
-        </div>
-      }
-      footer={
-        showFooter && !aiGenerateMode ? (
-          <>
-            <Button variant="secondary" size="small" onClick={handleReset}>
-              {t("common:actions.reset")}
-            </Button>
-            <Button
-              variant="primary"
-              size="small"
-              onClick={handleCreate}
-              disabled={!draft.name.trim() || saving}
-              data-testid="create-project-submit"
-            >
-              {saving ? t("common:status.saving") : t("projects.createProject")}
-            </Button>
-          </>
-        ) : undefined
+              }
+            />
+          )}
+        </CreatorContentLayout>
       }
     />
   );

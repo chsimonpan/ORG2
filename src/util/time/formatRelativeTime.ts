@@ -1,3 +1,5 @@
+import { resolveTimeZoneForIntl } from "@src/config/timezone";
+
 export type RelativeTimeStyle = "short" | "compact" | "long" | "nano" | "issue";
 
 const SEC = 1000;
@@ -52,7 +54,12 @@ export function formatRelativeTime(
     if (diffHr < 24) return `${diffHr} hr ago`;
     if (diffDay === 1) return "Yesterday";
     if (diffDay < 7) return `${diffDay} days ago`;
-    return new Date(ms).toLocaleDateString();
+    // Honor the explicit timezone preference like every other formatter
+    // (`resolveTimeZoneForIntl` answers undefined for "auto", which Intl
+    // treats as the system zone).
+    return new Date(ms).toLocaleDateString(undefined, {
+      timeZone: resolveTimeZoneForIntl(),
+    });
   }
 
   if (style === "compact") {

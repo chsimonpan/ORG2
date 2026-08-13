@@ -12,7 +12,9 @@ import type {
   ProofOfWork,
   WorkItemCloseOut,
   WorkItemExecutionLock,
+  WorkItemHandoff,
   WorkItemHistoryEvent,
+  WorkItemOriginSession,
   WorkItemRoutineSource,
   WorkItemSchedule,
   WorkItemWorkProduct,
@@ -104,6 +106,8 @@ export type WorkItemLabel = Label;
  */
 export interface WorkItemBase {
   session_id: string;
+  /** User-facing identifier; distinct from the stable internal row id. */
+  shortId?: string;
   user_id: string;
   name: string;
   status: string;
@@ -142,6 +146,13 @@ export interface WorkItemComment {
   author: string;
   content: string;
   created_at: string;
+  mentioned_user_ids?: string[];
+  parent_id?: string;
+  thread_id?: string;
+  resolved_at?: string;
+  resolved_by?: string;
+  conclusion?: boolean;
+  agent_session_id?: string;
 }
 
 // ============================================
@@ -156,6 +167,7 @@ export type {
   LinkedSessionType,
   LinkedSessionStatus,
   LinkedSession,
+  WorkItemOriginSession,
   DiffStats,
   TestResults,
   ProofOfWork,
@@ -209,10 +221,12 @@ export interface WorkItem extends WorkItemBase {
   startDate?: string;
   endDate?: string;
   linkedSessions?: LinkedSession[];
+  originSession?: WorkItemOriginSession;
   subIssueCount?: number;
   todos?: TodoItem[];
   comments?: WorkItemComment[];
   history?: WorkItemHistoryEvent[];
+  handoff?: WorkItemHandoff;
   delegations?: WorkItemDelegation[];
   orchestratorConfig?: OrchestratorConfig;
   orchestratorState?: OrchestratorState;

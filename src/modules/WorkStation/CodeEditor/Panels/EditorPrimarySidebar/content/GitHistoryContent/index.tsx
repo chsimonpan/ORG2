@@ -17,6 +17,7 @@ import React, {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { Virtuoso } from "react-virtuoso";
 
 import { useActionSystem } from "@src/ActionSystem";
 import { getGitCommits } from "@src/api/http/git/commits";
@@ -30,6 +31,12 @@ import {
 } from "@src/hooks/workStation/tabs/useWorkStationTabs";
 import { PRIMARY_SIDEBAR_HOVER } from "@src/modules/WorkStation/shared/tokens";
 import { Placeholder } from "@src/modules/shared/layouts/blocks";
+import {
+  type GitHistoryRequest,
+  getCachedGitHistory,
+  loadGitHistory,
+  writeGitHistoryCache,
+} from "@src/services/git/gitHistoryResource";
 import {
   SOURCE_CONTROL_CHANGES_TAB_ID,
   type SourceControlHistorySelection,
@@ -51,6 +58,7 @@ import {
 // ============================================
 
 const COMMITS_PAGE_SIZE = 25;
+const NOOP_REFRESH = () => undefined;
 
 // ============================================
 // Helpers
@@ -256,67 +264,85 @@ const GitHistoryContentInner: React.FC<GitHistoryContentInnerProps> = ({
         ? activeHistorySelection.commitSha
         : null;
 
-  const [commits, setCommits] = useState<GitCommitInfo[]>([]);
-  const [loading, setLoading] = useState(false);
+  const historyRequest = useMemo<GitHistoryRequest>(
+    () => ({
+      limit: COMMITS_PAGE_SIZE,
+      repoId,
+      repoPath,
+    }),
+    [repoId, repoPath]
+  );
+  const initialHistory = useMemo(
+    () => getCachedGitHistory(historyRequest),
+    [historyRequest]
+  );
+  const [commits, setCommits] = useState<GitCommitInfo[]>(
+    () => initialHistory?.commits ?? []
+  );
+  const [loading, setLoading] = useState(() => initialHistory === null);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
+  const [hasMore, setHasMore] = useState(
+    () => initialHistory?.hasMore ?? false
+  );
   const [error, setError] = useState<string | null>(null);
   const [contextMenuCommit, setContextMenuCommit] =
     useState<GitCommitInfo | null>(null);
-  const lastLoadedKeyRef = useRef<string | null>(null);
-  const latestInitialLoadRequestIdRef = useRef(0);
-  const sentinelRef = useRef<HTMLDivElement>(null);
+  const loadGenerationRef = useRef(0);
   const loadingMoreRef = useRef(false);
 
   const loadInitialCommits = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
       if (!repoId) return;
 
-      const loadKey = `${repoId}:${repoPath}`;
-      if (!force && lastLoadedKeyRef.current === loadKey) return;
-
-      const requestId = ++latestInitialLoadRequestIdRef.current;
+      const requestId = ++loadGenerationRef.current;
       setLoading(true);
       setError(null);
 
       try {
-        const result = await getGitCommits({
-          repo_id: repoId,
-          repo_path: repoPath,
-          limit: COMMITS_PAGE_SIZE,
-        });
+        const result = await loadGitHistory(historyRequest, { force });
 
-        if (requestId !== latestInitialLoadRequestIdRef.current) return;
+        if (requestId !== loadGenerationRef.current) return;
 
-        if (result?.commits) {
-          setCommits(result.commits);
-          setHasMore(result.commits.length >= COMMITS_PAGE_SIZE);
-          lastLoadedKeyRef.current = loadKey;
-        } else {
-          setError("Failed to load commit history");
-        }
+        setCommits(result.commits);
+        setHasMore(result.hasMore);
       } catch (err) {
-        if (requestId !== latestInitialLoadRequestIdRef.current) return;
+        if (requestId !== loadGenerationRef.current) return;
 
         setError(err instanceof Error ? err.message : "Failed to load commits");
       } finally {
-        if (requestId === latestInitialLoadRequestIdRef.current) {
+        if (requestId === loadGenerationRef.current) {
           setLoading(false);
         }
       }
     },
-    [repoId, repoPath]
+    [historyRequest, repoId]
   );
 
-  // Load commits on mount or when repo changes
+  // Reset all component-owned history when the repository scope changes. The
+  // generation also prevents a late request from repopulating a closed or
+  // repurposed history view.
   useEffect(() => {
+    loadGenerationRef.current += 1;
+    loadingMoreRef.current = false;
+    const cachedHistory = getCachedGitHistory(historyRequest);
+    setCommits(cachedHistory?.commits ?? []);
+    setHasMore(cachedHistory?.hasMore ?? false);
+    setLoading(cachedHistory === null);
+    setLoadingMore(false);
+    setError(null);
+    setContextMenuCommit(null);
     void loadInitialCommits();
-  }, [loadInitialCommits]);
 
-  // Refresh: clear cache and re-fetch from scratch
+    return () => {
+      loadGenerationRef.current += 1;
+      loadingMoreRef.current = false;
+    };
+  }, [historyRequest, loadInitialCommits]);
+
+  // Refresh in place: keep the last successful rows visible while revalidating.
   const handleRefresh = useCallback(() => {
-    lastLoadedKeyRef.current = null;
-    setHasMore(false);
+    loadingMoreRef.current = false;
+    setLoadingMore(false);
     setError(null);
     void loadInitialCommits({ force: true });
   }, [loadInitialCommits]);
@@ -324,12 +350,14 @@ const GitHistoryContentInner: React.FC<GitHistoryContentInnerProps> = ({
   // Register refresh callback with parent
   useEffect(() => {
     onRefreshReady?.(handleRefresh);
+    return () => onRefreshReady?.(NOOP_REFRESH);
   }, [onRefreshReady, handleRefresh]);
 
-  // Load more commits (called by IntersectionObserver)
+  // Load more commits when the virtual list reaches its current end.
   const handleLoadMore = useCallback(async () => {
     if (!repoId || loadingMoreRef.current || !hasMore) return;
 
+    const requestGeneration = loadGenerationRef.current;
     loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
@@ -340,43 +368,46 @@ const GitHistoryContentInner: React.FC<GitHistoryContentInnerProps> = ({
         skip: commits.length,
       });
 
+      if (requestGeneration !== loadGenerationRef.current) return;
+
       if (result?.commits) {
-        setCommits((prev) => [...prev, ...result.commits]);
-        setHasMore(result.commits.length >= COMMITS_PAGE_SIZE);
+        const nextHasMore = result.commits.length >= COMMITS_PAGE_SIZE;
+        setCommits((prev) => {
+          const nextCommits = [...prev, ...result.commits];
+          writeGitHistoryCache(historyRequest, {
+            commits: nextCommits,
+            hasMore: nextHasMore,
+          });
+          return nextCommits;
+        });
+        setHasMore(nextHasMore);
       } else {
         setHasMore(false);
       }
     } catch {
+      if (requestGeneration !== loadGenerationRef.current) return;
       setHasMore(false);
     } finally {
-      loadingMoreRef.current = false;
-      setLoadingMore(false);
+      if (requestGeneration === loadGenerationRef.current) {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
     }
-  }, [repoId, repoPath, commits.length, hasMore]);
-
-  // Infinite scroll via IntersectionObserver on sentinel element
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel || !hasMore) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && !loadingMoreRef.current) {
-          handleLoadMore();
-        }
-      },
-      { threshold: 0, rootMargin: "100px" }
-    );
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [hasMore, handleLoadMore]);
+  }, [repoId, repoPath, commits.length, hasMore, historyRequest]);
 
   const filteredCommits = useMemo(() => {
     if (!filterQuery) return commits;
     const lower = filterQuery.toLowerCase();
     return commits.filter((c) => c.summary.toLowerCase().includes(lower));
   }, [commits, filterQuery]);
+
+  // The old visible sentinel continued paging when the loaded page had no
+  // filter matches. Keep that behavior so a match in older history remains
+  // discoverable even though there is no virtual row to reach yet.
+  useEffect(() => {
+    if (!filterQuery || filteredCommits.length > 0 || !hasMore) return;
+    void handleLoadMore();
+  }, [filterQuery, filteredCommits.length, handleLoadMore, hasMore]);
 
   // Compute graph layout — pure function, deterministic output for same input
   // When a filter is active we skip the graph (flat list only)
@@ -450,14 +481,14 @@ const GitHistoryContentInner: React.FC<GitHistoryContentInnerProps> = ({
   );
 
   // Loading state
-  if (loading) {
+  if (loading && commits.length === 0) {
     return (
       <Placeholder variant="loading" placement="sidebar" fillParentHeight />
     );
   }
 
   // Error state
-  if (error) {
+  if (error && commits.length === 0) {
     return (
       <Placeholder
         variant="error"
@@ -480,7 +511,7 @@ const GitHistoryContentInner: React.FC<GitHistoryContentInnerProps> = ({
   }
 
   return (
-    <div className="flex h-full flex-col overflow-auto scrollbar-hide">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {filteredCommits.length === 0 && filterQuery ? (
         <Placeholder
           variant="empty"
@@ -489,30 +520,36 @@ const GitHistoryContentInner: React.FC<GitHistoryContentInnerProps> = ({
           fillParentHeight
         />
       ) : (
-        filteredCommits.map((commit, index) => (
-          <CommitRow
-            key={commit.sha}
-            commit={commit}
-            isSelected={commit.sha === activeCommitSha}
-            graphNode={
-              isGraphMode && !filterQuery
-                ? graphData.nodeMap.get(commit.sha)
-                : undefined
-            }
-            svgWidth={graphSvgWidth}
-            isFirst={index === 0}
-            onSelect={handleCommitSelect}
-            onContextMenu={handleCommitContextMenu}
-          />
-        ))
+        <Virtuoso
+          className="min-h-0 flex-1 scrollbar-hide"
+          data={filteredCommits}
+          computeItemKey={(_index, commit) => commit.sha}
+          fixedItemHeight={ROW_HEIGHT}
+          overscan={ROW_HEIGHT * 8}
+          endReached={() => {
+            void handleLoadMore();
+          }}
+          itemContent={(index, commit) => (
+            <CommitRow
+              commit={commit}
+              isSelected={commit.sha === activeCommitSha}
+              graphNode={
+                isGraphMode && !filterQuery
+                  ? graphData.nodeMap.get(commit.sha)
+                  : undefined
+              }
+              svgWidth={graphSvgWidth}
+              isFirst={index === 0}
+              onSelect={handleCommitSelect}
+              onContextMenu={handleCommitContextMenu}
+            />
+          )}
+        />
       )}
 
-      {/* Infinite scroll sentinel + loading indicator */}
+      {/* Loading indicator remains outside the virtual window. */}
       {hasMore && (
-        <div
-          ref={sentinelRef}
-          className="flex items-center justify-center py-2"
-        >
+        <div className="flex h-8 shrink-0 items-center justify-center">
           {loadingMore && (
             <Loader2
               size={SPINNER_TOKENS.default}

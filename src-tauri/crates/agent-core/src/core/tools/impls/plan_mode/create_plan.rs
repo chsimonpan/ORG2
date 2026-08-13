@@ -29,14 +29,21 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tokio::sync::Mutex as TokioMutex;
 
-use crate::coordination::agent_inbox::{
-    AgentInboxStore, AgentMessage, InsertInboxParams, RequestId,
+use crate::coordination::agent_inbox::RequestId;
+use crate::coordination::agent_org_plan_approvals::{
+    AgentOrgPlanApprovalStore, AgentOrgPlanInboxDelivery, CreateAgentOrgPlanApprovalParams,
 };
 use crate::coordination::agent_org_runs::{AgentOrgRunContext, COORDINATOR_MEMBER_ID};
+use crate::coordination::agent_org_tasks::{
+    task_execution_mode, AgentOrgTaskStore, Task, TaskExecutionMode, TaskStatus,
+};
+use crate::definitions::orgs::PlanApprovalPolicy;
 use crate::interaction::plan_approval::PlanApprovalManager;
 use crate::session::plan_mode::{
     plan_file_path, random_hash, slugify_plan_title, PlanPathCtx, PlanSlot, PlanSlotCache,
 };
+use crate::tools::impls::orchestration::inbox_wake::AppHandleInboxWakeHook;
+use crate::tools::impls::orchestration::org_send_message::InboxWakeHook;
 use crate::tools::names as tool_names;
 use crate::tools::traits::{Tool, ToolError};
 
@@ -72,6 +79,7 @@ pub struct CreatePlanToolContext {
     pub plan_approval_manager: Option<Arc<PlanApprovalManager>>,
     pub agent_org_context: Option<AgentOrgRunContext>,
     pub agent_org_current_member_id: Option<String>,
+    pub app_handle: Option<tauri::AppHandle>,
 }
 
 impl CreatePlanToolContext {
@@ -80,6 +88,7 @@ impl CreatePlanToolContext {
         plan_approval_manager: Option<Arc<PlanApprovalManager>>,
         agent_org_context: Option<AgentOrgRunContext>,
         agent_org_current_member_id: Option<String>,
+        app_handle: Option<tauri::AppHandle>,
     ) -> Self {
         Self {
             session_id: TokioMutex::new(None),
@@ -87,6 +96,7 @@ impl CreatePlanToolContext {
             plan_approval_manager,
             agent_org_context,
             agent_org_current_member_id,
+            app_handle,
         }
     }
 }
@@ -110,8 +120,8 @@ struct CreatePlanResult {
     hash: String,
     bytes_written: usize,
     new_plan: bool,
-    /// `true` when this call also fired `PlanApprovalManager::mark_ready`.
-    /// Subagent calls report `false` here.
+    /// `true` when the plan was submitted to either the solo-session or
+    /// Agent Org approval workflow.
     submitted_for_review: bool,
 }
 
@@ -143,6 +153,21 @@ impl Tool for CreatePlanTool {
     }
 
     fn llm_description(&self) -> Option<String> {
+        if let (Some(org_context), Some(member_id)) = (
+            self.context.agent_org_context.as_ref(),
+            self.context.agent_org_current_member_id.as_deref(),
+        ) {
+            if member_id != COORDINATOR_MEMBER_ID {
+                let approver = match org_context.plan_approval_policy {
+                    PlanApprovalPolicy::Coordinator => "the Coordinator",
+                    PlanApprovalPolicy::User => "the user in Group chat",
+                    PlanApprovalPolicy::Automatic => "the automatic policy",
+                };
+                return Some(format!(
+                    "Submit the complete markdown deliverable for your current Agent Org execution_mode=plan task to {approver}. This call binds the plan to the owned planning task, persists an approval revision, and ends your turn. It does not start a Build turn and you must not mark the planning task completed yourself; approval does that atomically and unlocks its dependent tasks. Supply title + full content. source_task_id is optional only when you own exactly one in_progress planning task. After revision feedback, call create_plan again with the full revised content and new_plan=false. After calling this tool, STOP immediately."
+                ));
+            }
+        }
         let mut description = concat!(
             "Write the current session's plan document and submit it to the user for review. ",
             "Only available in Plan mode. Supply a short descriptive `title` and the full ",
@@ -200,6 +225,10 @@ impl Tool for CreatePlanTool {
                     "type": "boolean",
                     "description": "Start a distinct new plan approval instead of updating the current pending approval. Defaults to false.",
                     "default": false
+                },
+                "source_task_id": {
+                    "type": "string",
+                    "description": "Agent Org only: exact owned in-progress plan task id. Optional when exactly one eligible planning task exists."
                 }
             }
         })
@@ -228,17 +257,37 @@ impl Tool for CreatePlanTool {
                 ToolError::InvalidParams("create_plan requires a non-empty `title`".into())
             })?
             .to_string();
+        crate::coordination::agent_org_payload_limits::validate_required_text(
+            "create_plan title",
+            &title,
+            crate::coordination::agent_org_payload_limits::PLAN_TITLE_MAX_CHARS,
+            crate::coordination::agent_org_payload_limits::PLAN_TITLE_MAX_BYTES,
+        )
+        .map_err(ToolError::InvalidParams)?;
 
         let content = params
             .get("content")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("create_plan requires `content`".into()))?
             .to_string();
+        crate::coordination::agent_org_payload_limits::validate_required_text(
+            "create_plan content",
+            &content,
+            crate::coordination::agent_org_payload_limits::PLAN_CONTENT_MAX_CHARS,
+            crate::coordination::agent_org_payload_limits::PLAN_CONTENT_MAX_BYTES,
+        )
+        .map_err(ToolError::InvalidParams)?;
 
         let new_plan = params
             .get("new_plan")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let requested_source_task_id = params
+            .get("source_task_id")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
 
         // Per-call session attribution comes from `CallContext` —
         // race-free even when concurrent background subagents share the
@@ -276,15 +325,23 @@ impl Tool for CreatePlanTool {
 
         // Resolve session-derived fields via the DB record. Any failure here is
         // an execution error (not an "invalid params" — the LLM can't fix it).
-        let record = crate::session::persistence::get_session(&session_id)
-            .map_err(|err| {
-                ToolError::ExecutionFailed(format!(
-                    "create_plan: failed to load session {session_id}: {err}"
-                ))
-            })?
-            .ok_or_else(|| {
-                ToolError::ExecutionFailed(format!("create_plan: session {session_id} not found"))
-            })?;
+        let record_session_id = session_id.clone();
+        let record = tokio::task::spawn_blocking(move || {
+            crate::session::persistence::get_session(&record_session_id)
+                .map_err(|err| err.to_string())
+        })
+        .await
+        .map_err(|err| {
+            ToolError::ExecutionFailed(format!("create_plan: session lookup worker failed: {err}"))
+        })?
+        .map_err(|err| {
+            ToolError::ExecutionFailed(format!(
+                "create_plan: failed to load session {session_id}: {err}"
+            ))
+        })?
+        .ok_or_else(|| {
+            ToolError::ExecutionFailed(format!("create_plan: session {session_id} not found"))
+        })?;
 
         let workspace_path = record.workspace_path.clone();
         // Hard invariant: subagents cannot reach `create_plan` because it
@@ -302,6 +359,32 @@ impl Tool for CreatePlanTool {
             )));
         }
         let agent_id = record.agent_definition_id.as_deref().unwrap_or("default");
+        let org_plan_source_task = match (
+            self.context.agent_org_context.as_ref(),
+            self.context.agent_org_current_member_id.as_deref(),
+        ) {
+            (Some(org_context), Some(member_id)) if member_id != COORDINATOR_MEMBER_ID => {
+                let org_context = org_context.clone();
+                let member_id = member_id.to_string();
+                Some(
+                    tokio::task::spawn_blocking(move || {
+                        resolve_source_plan_task(
+                            &org_context,
+                            &member_id,
+                            requested_source_task_id.as_deref(),
+                        )
+                    })
+                    .await
+                    .map_err(|err| {
+                        ToolError::ExecutionFailed(format!(
+                            "create_plan: source-task worker failed: {err}"
+                        ))
+                    })?
+                    .map_err(ToolError::InvalidParams)?,
+                )
+            }
+            _ => None,
+        };
 
         // Decide whether to update the current pending approval slot or rotate it.
         let slot = if let Some(pending) = pending_plan.as_ref() {
@@ -349,36 +432,58 @@ impl Tool for CreatePlanTool {
             }
         };
 
-        if let Some(parent) = slot.resolved_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|err| {
-                ToolError::ExecutionFailed(format!(
-                    "create_plan: failed to create {}: {err}",
-                    parent.display()
-                ))
-            })?;
+        let is_agent_org_worker = matches!(
+            (
+                self.context.agent_org_context.as_ref(),
+                self.context.agent_org_current_member_id.as_deref(),
+            ),
+            (Some(_), Some(member_id)) if member_id != COORDINATOR_MEMBER_ID
+        );
+        if !is_agent_org_worker {
+            // Solo/coordinator plans keep the existing PlanApprovalManager
+            // path. Agent Org worker plans are deliberately not written here:
+            // their durable approval transaction stages the file, commits the
+            // canonical SQLite revision, and only then installs the artifact.
+            // This avoids leaving an untracked new plan file if the approval
+            // transaction fails or the process exits between these steps.
+            let write_path = slot.resolved_path.clone();
+            let write_content = content.clone();
+            tokio::task::spawn_blocking(move || -> Result<(), String> {
+                if let Some(parent) = write_path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|err| {
+                        format!("create_plan: failed to create {}: {err}", parent.display())
+                    })?;
+                }
+                std::fs::write(&write_path, write_content.as_bytes()).map_err(|err| {
+                    format!(
+                        "create_plan: failed to write {}: {err}",
+                        write_path.display()
+                    )
+                })
+            })
+            .await
+            .map_err(|err| {
+                ToolError::ExecutionFailed(format!("create_plan: file worker failed: {err}"))
+            })?
+            .map_err(ToolError::ExecutionFailed)?;
         }
 
-        std::fs::write(&slot.resolved_path, content.as_bytes()).map_err(|err| {
-            ToolError::ExecutionFailed(format!(
-                "create_plan: failed to write {}: {err}",
-                slot.resolved_path.display()
-            ))
-        })?;
-
         // Two submission paths:
-        //   * Org member (not coordinator) → route the plan to the
-        //     coordinator's inbox as a typed `PlanApprovalRequest`. There
-        //     is no human in the loop to click Build inside an LLM-driven
-        //     org run; the coordinator is the only entity that can
-        //     actually approve.
+        //   * Org member (not coordinator) → persist a task-bound approval.
+        //     The run snapshot selects coordinator, user, or automatic
+        //     approval. Approval completes the planning task; it never
+        //     starts an unrelated Build turn in the Planner session.
         //   * Top-level session, coordinator, or solo plan-mode session →
         //     keep the existing user-facing flow (broadcast via
         //     `PlanApprovalManager::mark_ready` so the FE Build button
         //     lights up).
         if let Some(org_ctx) = self.context.agent_org_context.as_ref() {
-            let sender_member_id = self.context.agent_org_current_member_id.as_deref();
-            if sender_member_id.is_some() && sender_member_id != Some(COORDINATOR_MEMBER_ID) {
-                let sender_member_id = sender_member_id.expect("checked Some above");
+            if let Some(sender_member_id) = self
+                .context
+                .agent_org_current_member_id
+                .as_deref()
+                .filter(|member_id| *member_id != COORDINATOR_MEMBER_ID)
+            {
                 let sender_agent_id = org_ctx
                     .members
                     .iter()
@@ -390,25 +495,77 @@ impl Tool for CreatePlanTool {
                         ))
                     })?;
                 let request_id = RequestId::new();
-                let message = AgentMessage::PlanApprovalRequest {
-                    request_id: request_id.clone(),
+                let source_task = org_plan_source_task.as_ref().ok_or_else(|| {
+                    ToolError::ExecutionFailed(
+                        "create_plan: Agent Org planning task binding disappeared".to_string(),
+                    )
+                })?;
+                let root_session_id = org_ctx.root_session_id.clone().ok_or_else(|| {
+                    ToolError::ExecutionFailed(
+                        "create_plan: Agent Org run has no root session".to_string(),
+                    )
+                })?;
+                let approval_params = CreateAgentOrgPlanApprovalParams {
+                    request_id: request_id.as_str().to_string(),
+                    org_run_id: org_ctx.run_id.clone(),
+                    source_task_id: source_task.id.clone(),
+                    source_member_id: sender_member_id.to_string(),
+                    source_session_id: session_id.clone(),
+                    root_session_id,
+                    policy: org_ctx.plan_approval_policy,
                     plan_title: slot.title.clone(),
                     plan_path: slot.resolved_path.to_string_lossy().into_owned(),
                     plan_content: content.clone(),
                 };
-                AgentInboxStore::insert(InsertInboxParams {
-                    recipient_agent_id: org_ctx.coordinator_agent_id.clone(),
-                    recipient_member_id: Some(COORDINATOR_MEMBER_ID.to_string()),
-                    sender_agent_id,
-                    sender_member_id: Some(sender_member_id.to_string()),
-                    org_run_id: Some(org_ctx.run_id.clone()),
-                    message,
+
+                let policy = org_ctx.plan_approval_policy;
+                let coordinator_agent_id = org_ctx.coordinator_agent_id.clone();
+                let sender_member_id = sender_member_id.to_string();
+                let wake_member_ids = tokio::task::spawn_blocking(move || {
+                    match policy {
+                        PlanApprovalPolicy::Coordinator => {
+                            AgentOrgPlanApprovalStore::create_pending_with_request(
+                                approval_params,
+                                AgentOrgPlanInboxDelivery {
+                                    recipient_agent_id: coordinator_agent_id,
+                                    sender_agent_id,
+                                    sender_member_id: Some(sender_member_id),
+                                },
+                            )?;
+                            Ok(vec![COORDINATOR_MEMBER_ID.to_string()])
+                        }
+                        PlanApprovalPolicy::User => {
+                            AgentOrgPlanApprovalStore::create_pending(approval_params)?;
+                            // The pending row is projected into the Group chat
+                            // Run View. No model wake is needed while the user
+                            // is the designated approver.
+                            Ok(Vec::new())
+                        }
+                        PlanApprovalPolicy::Automatic => {
+                            let approved = AgentOrgPlanApprovalStore::create_and_approve_automatic(
+                                approval_params,
+                            )?;
+                            Ok(approved.wake_member_ids)
+                        }
+                    }
                 })
+                .await
                 .map_err(|err| {
                     ToolError::ExecutionFailed(format!(
-                        "create_plan: failed to deliver plan to coordinator inbox: {err}"
+                        "create_plan: approval worker failed: {err}"
+                    ))
+                })?
+                .map_err(|err: String| {
+                    ToolError::ExecutionFailed(format!(
+                        "create_plan: failed to persist Agent Org plan approval: {err}"
                     ))
                 })?;
+                if let Some(app_handle) = self.context.app_handle.clone() {
+                    let wake_hook = AppHandleInboxWakeHook::new(app_handle);
+                    for member_id in wake_member_ids {
+                        wake_hook.wake_member(&member_id, &org_ctx.run_id);
+                    }
+                }
 
                 let result = CreatePlanResult {
                     path: slot.resolved_path.to_string_lossy().into_owned(),
@@ -474,6 +631,41 @@ impl Tool for CreatePlanTool {
     }
 }
 
+fn resolve_source_plan_task(
+    org_context: &AgentOrgRunContext,
+    member_id: &str,
+    requested_task_id: Option<&str>,
+) -> Result<Task, String> {
+    let tasks = AgentOrgTaskStore::list(&org_context.run_id)?;
+    let mut candidates = tasks
+        .into_iter()
+        .filter(|task| {
+            task.owner.as_deref() == Some(member_id)
+                && task.status == TaskStatus::InProgress
+                && task_execution_mode(task) == TaskExecutionMode::Plan
+        })
+        .collect::<Vec<_>>();
+    if let Some(task_id) = requested_task_id {
+        return candidates
+            .into_iter()
+            .find(|task| task.id == task_id)
+            .ok_or_else(|| {
+                format!(
+                    "source_task_id '{task_id}' must identify an in_progress plan task owned by member '{member_id}'"
+                )
+            });
+    }
+    match candidates.len() {
+        1 => Ok(candidates.remove(0)),
+        0 => Err(format!(
+            "create_plan requires an in_progress execution_mode=plan task owned by member '{member_id}'"
+        )),
+        _ => Err(format!(
+            "create_plan found multiple in_progress plan tasks owned by member '{member_id}'; retry with source_task_id"
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,6 +673,7 @@ mod tests {
     fn tool_without_manager() -> CreatePlanTool {
         CreatePlanTool::new(Arc::new(CreatePlanToolContext::new(
             PlanSlotCache::new(),
+            None,
             None,
             None,
             None,
@@ -530,6 +723,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_blank_content() {
+        let tool = tool_without_manager();
+        tool.set_session_key("s1").await;
+        let err = tool
+            .execute(
+                serde_json::json!({"title": "A plan", "content": "  \n  "}),
+                &crate::tools::traits::CallContext::default(),
+            )
+            .await
+            .expect_err("blank plan content must be rejected");
+        assert!(err
+            .to_string()
+            .contains("create_plan content must not be empty"));
+    }
+
+    #[tokio::test]
     async fn rejects_when_session_key_unset() {
         let tool = tool_without_manager();
         let err = tool
@@ -562,6 +771,7 @@ mod tests {
         let tool = CreatePlanTool::new(Arc::new(CreatePlanToolContext::new(
             PlanSlotCache::new(),
             Some(manager),
+            None,
             None,
             None,
         )));

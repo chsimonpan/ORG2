@@ -213,6 +213,7 @@ pub async fn process_gateway_message(
         .ok()
         .map(|r| crate::lifecycle::TerminalTurnSignal {
             turn_id: r.turn_id.clone(),
+            turn_intent_id: None,
             status: crate::lifecycle::TurnTerminalStatus::Completed,
             completed_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         });
@@ -225,14 +226,7 @@ pub async fn process_gateway_message(
 
     match result {
         Ok(processing_result) => {
-            let content = crate::session::status_bar::append_status_bar_for_channel(
-                &msg.channel,
-                processing_result.content.clone(),
-                &session,
-                processing_result.total_tokens,
-                processing_result.context_tokens,
-            )
-            .await;
+            let content = processing_result.content;
             let out_preview: String = crate::utils::safe_truncate_chars_to_string(&content, 80);
             info!(
                 "[agent-loop] Response for {}:{}: {}...",

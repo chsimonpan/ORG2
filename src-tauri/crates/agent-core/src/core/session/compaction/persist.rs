@@ -86,39 +86,40 @@ pub(crate) fn append_in_place_compact_boundary(
     )
     .map_err(|err| err.to_string())?;
 
-    let (durable_messages, durable_tokens_after) =
-        match unified_persistence::load_llm_history_for_active_journey(session_id) {
-            Ok(messages) => {
-                let tokens_after = ContextCompactor::estimate_messages_tokens(&messages);
-                if token_delta.is_some() {
-                    unified_persistence::update_compact_boundary_token_delta(
-                        session_id,
-                        &id,
-                        tokens_before,
-                        Some(tokens_after as i64),
-                    )
-                    .map_err(|err| err.to_string())?;
-                }
-                (Some(messages), Some(tokens_after))
+    let (durable_messages, durable_tokens_after) = match unified_persistence::load_llm_history(
+        session_id,
+    ) {
+        Ok(messages) => {
+            let tokens_after = ContextCompactor::estimate_messages_tokens(&messages);
+            if token_delta.is_some() {
+                unified_persistence::update_compact_boundary_token_delta(
+                    session_id,
+                    &id,
+                    tokens_before,
+                    Some(tokens_after as i64),
+                )
+                .map_err(|err| err.to_string())?;
             }
-            Err(err) => {
-                tracing::warn!(
+            (Some(messages), Some(tokens_after))
+        }
+        Err(err) => {
+            tracing::warn!(
                     "[compact_persist] failed to reload durable compact view for {} after boundary append: {}",
                     session_id,
                     err
                 );
-                if token_delta.is_some() {
-                    unified_persistence::update_compact_boundary_token_delta(
-                        session_id,
-                        &id,
-                        tokens_before,
-                        fallback_tokens_after,
-                    )
-                    .map_err(|err| err.to_string())?;
-                }
-                (None, fallback_tokens_after.map(|tokens| tokens as usize))
+            if token_delta.is_some() {
+                unified_persistence::update_compact_boundary_token_delta(
+                    session_id,
+                    &id,
+                    tokens_before,
+                    fallback_tokens_after,
+                )
+                .map_err(|err| err.to_string())?;
             }
-        };
+            (None, fallback_tokens_after.map(|tokens| tokens as usize))
+        }
+    };
 
     Ok(AppendedCompactBoundary {
         id,

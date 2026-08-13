@@ -1,6 +1,6 @@
 /**
- * Managed-cloud session comments client (migration 0014, design
- * session-comments-design-0707 §4).
+ * Managed-cloud session comments client (canonical design:
+ * docs/architecture/managed-cloud-collaboration.md).
  *
  * Typed throwing wrappers for the five `org2_cloud` comment RPCs, in the
  * `org2CloudSharesClient` idiom (raw fetch, JWT Bearer + `Content-Profile:
@@ -17,26 +17,18 @@
  * - Tombstones ride the list with an EMPTY body + `deletedAt` (thread shape
  *   preserved; the client renders "comment deleted").
  *
- * 0002 (comment agent tasks, design session-comments-agent-pickup-design-0707
- * §3/§4) additive extensions, parsed tolerantly so pre-0002 backends keep
- * working:
- * - Every comment carries `kind` ('user' | 'agent_report'); absent on
- *   pre-0002 ⇒ undefined ⇒ 'user' semantics. The add RPC accepts
- *   `agent_report` only from the session owner; task completion also stamps
- *   reports server-side.
- * - `cloud_list_session_comments` also returns a top-level `tasks` array
- *   (`comment_task_wire` rows for THIS session — schema imported from
- *   org2CloudCommentTasksClient so the two clients cannot drift); absent on
- *   pre-0002 ⇒ []. It NEVER carries a lease token (invariant 1) — the claim
- *   response is the only carrier.
+ * Every comment carries `kind` ('user' | 'agent_report'); absent on an older
+ * backend means ordinary user semantics. Only the cloud-session owner's
+ * authenticated client may stamp `agent_report` after its local model round.
  */
 import { z } from "zod/v4";
 
+import { createLogger } from "@src/hooks/logger";
+
 import { ORG2_CLOUD_POSTGREST_SCHEMA, getCloudEndpoint } from "./config";
-import {
-  type CloudCommentTask,
-  CloudCommentTaskWireSchema,
-} from "./org2CloudCommentTasksClient";
+import { fetchWithTransportRetry } from "./org2CloudFetchRetry";
+
+const log = createLogger("Org2CloudCommentsClient");
 
 /** RPC-enforced body bound (0014 SIZE note) — mirrored in composers. */
 export const CLOUD_COMMENT_MAX_BODY_LENGTH = 4000;
@@ -96,7 +88,7 @@ async function callCommentRpc(
   body: Record<string, unknown>
 ): Promise<unknown> {
   const endpoint = getCloudEndpoint();
-  const response = await fetch(
+  const response = await fetchWithTransportRetry(
     `${endpoint.supabaseUrl}/rest/v1/rpc/${functionName}`,
     {
       method: "POST",
@@ -171,21 +163,32 @@ const CloudSessionCommentWireSchema = z.object({
     .nullish()
     .transform((value) => value ?? undefined)
     .optional(),
+  // The two enum fields degrade UNKNOWN values to undefined instead of
+  // failing: a newer backend introducing a verdict/kind must render as the
+  // absent-field fallback on this client, never brick the listing.
   resolution: z
     .enum(["resolved", "wont_fix"])
     .nullish()
     .transform((value) => value ?? undefined)
-    .optional(),
+    .optional()
+    .catch(undefined),
   /**
-   * 0002 discriminator; absent on pre-0002 backends ⇒ undefined ⇒ 'user'
-   * semantics. The server restricts `agent_report` writes to the session
-   * owner (and stamps task-completion reports internally).
+   * Agent-reply discriminator; absent on an older backend means `user`.
+   * The server accepts `agent_report` only from the cloud-session owner.
    */
   kind: z
     .enum(["user", "agent_report"])
     .nullish()
     .transform((value) => value ?? undefined)
-    .optional(),
+    .optional()
+    .catch(undefined),
+  /**
+   * Explicit user ids targeted by the comment (0010 Team Inbox). Uncapped on
+   * READ — the 50-id bound is enforced where it protects something (this
+   * client's outbound request, the server RPC); re-checking it here would
+   * turn a future server-side cap raise into a bricked listing.
+   */
+  mentionedUserIds: z.array(z.string()).optional(),
 });
 
 export type CloudSessionComment = z.output<
@@ -197,12 +200,59 @@ const AddCommentResultSchema = z.object({
 });
 
 const ListCommentsResultSchema = z.object({
-  comments: z.array(CloudSessionCommentWireSchema).default([]),
-  // 0002 embed: this session's `comment_task_wire` rows (structurally no
-  // lease_token — zod strips unknown keys anyway). Absent on pre-0002
-  // backends — default to [] so callers never branch on backend age.
-  tasks: z.array(CloudCommentTaskWireSchema).default([]),
+  // Rows parse individually in `parseCommentRows` — one malformed row must
+  // cost that row, not the whole thread listing (the tolerant-record rule).
+  comments: z.array(z.unknown()).default([]),
+  /** Viewer-derived server capability; false for imports, forks and members. */
+  viewerOwnsSession: z.boolean().default(false),
+  /** 0004 delta anchor; absent on pre-delta backends. */
+  serverTime: z
+    .string()
+    .nullish()
+    .transform((value) => value ?? undefined)
+    .optional(),
 });
+
+/**
+ * Per-row salvage for the listing: a malformed row is dropped alone and the
+ * FIRST casualty is named (id + first zod issue) so a live "dropped N"
+ * symptom stays attributable after the row ages out. Without this, one bad
+ * row pins the whole session's comment pane in error-retry for every member.
+ */
+function parseCommentRows(
+  sessionId: string,
+  rows: readonly unknown[]
+): CloudSessionComment[] {
+  const parsed: CloudSessionComment[] = [];
+  let dropped = 0;
+  let firstDrop: string | undefined;
+  for (const row of rows) {
+    const result = CloudSessionCommentWireSchema.safeParse(row);
+    if (result.success) {
+      parsed.push(result.data);
+      continue;
+    }
+    dropped += 1;
+    if (dropped === 1) {
+      const record = row as Record<string, unknown> | null;
+      const rowId = typeof record?.id === "string" ? record.id : "<no id>";
+      const issue = result.error.issues[0];
+      firstDrop = `${rowId.slice(0, 64)} (${
+        issue
+          ? `${issue.path.join(".") || "<root>"}: ${issue.message}`
+          : "unknown issue"
+      })`;
+    }
+  }
+  if (dropped > 0) {
+    log.rateLimited(
+      `comments-malformed-${sessionId}`,
+      60_000,
+      `cloud_list_session_comments dropped ${dropped} malformed row(s) for session ${sessionId}, first: ${firstDrop}`
+    );
+  }
+  return parsed;
+}
 
 const EditCommentResultSchema = z.object({
   editedAt: z.string(),
@@ -224,8 +274,19 @@ export interface AddSessionCommentInput {
   eventId?: string;
   /** Reply target: an existing TOP-LEVEL comment of the same session. */
   parentId?: string;
-  /** 'agent_report' is accepted by the server only from the session owner. */
+  /** 'agent_report' — accepted only from the cloud-session owner. */
   kind?: "agent_report";
+  /**
+   * Explicit active org-member ids to notify. Display names are never parsed
+   * server-side because they are mutable and may not be unique.
+   */
+  mentionedUserIds?: string[];
+  /**
+   * Local session the comment ORIGINATED from (the fork the author is
+   * viewing). Stored server-side for per-fork count attribution; omitted /
+   * null keeps the comment counted on the source plane.
+   */
+  originSessionId?: string | null;
 }
 
 /**
@@ -247,11 +308,49 @@ export async function addSessionComment(
   // user comments so clients remain compatible with pre-extension backends;
   // only the additive agent-report path requires the newer argument.
   if (input.kind) body.p_kind = input.kind;
-  const payload = await callCommentRpc(
-    "cloud_add_session_comment",
-    accessToken,
-    body
-  );
+  // `p_origin_session_id` was added after the base comments migration (same
+  // pre-extension-compat rule as p_kind). Only forks/imports set it — a
+  // source-plane comment omits it and coalesces to the source at count time.
+  if (input.originSessionId) body.p_origin_session_id = input.originSessionId;
+  const mentionedUserIds = [
+    ...new Set(input.mentionedUserIds?.filter(Boolean) ?? []),
+  ];
+  if (mentionedUserIds.length > 50) {
+    throw new Org2CloudCommentError("ORG2_VALIDATION");
+  }
+  if (mentionedUserIds.length > 0) {
+    body.p_mentioned_user_ids = mentionedUserIds;
+  }
+  let payload: unknown;
+  try {
+    payload = await callCommentRpc(
+      mentionedUserIds.length > 0
+        ? "cloud_add_session_comment_with_mentions"
+        : "cloud_add_session_comment",
+      accessToken,
+      body
+    );
+  } catch (error) {
+    // Graceful degradation to a pre-origin backend: PostgREST answers 404
+    // when no function matches the argument set, so drop the additive origin
+    // arg and retry once. The comment still posts (counted on the source
+    // plane); per-fork attribution just waits for the migration.
+    if (
+      "p_origin_session_id" in body &&
+      mentionedUserIds.length === 0 &&
+      error instanceof Org2CloudCommentError &&
+      error.status === 404
+    ) {
+      delete body.p_origin_session_id;
+      payload = await callCommentRpc(
+        "cloud_add_session_comment",
+        accessToken,
+        body
+      );
+    } else {
+      throw error;
+    }
+  }
   return AddCommentResultSchema.parse(payload).comment;
 }
 
@@ -291,7 +390,7 @@ export type CloudCommentResolution = "resolved" | "wont_fix";
 /**
  * Top-level only; thread author OR session owner OR org admin. Idempotent
  * both ways (`resolved` sets, `!resolved` clears). Resolution stays
- * HUMAN-only — the task complete RPC never touches it.
+ * HUMAN-only — agent replies never change it implicitly.
  */
 export async function resolveSessionComment(
   accessToken: string,
@@ -323,26 +422,71 @@ export async function resolveSessionComment(
 
 export interface SessionCommentsListing {
   comments: CloudSessionComment[];
-  /**
-   * This session's agent tasks (0002 `comment_task_wire` embed,
-   * `created_at` asc; one per thread head — UNIQUE comment_id). [] on
-   * pre-0002 backends. NEVER carries a lease token — the claim response
-   * is the only carrier.
-   */
-  tasks: CloudCommentTask[];
+  viewerOwnsSession: boolean;
+  /** 0004 delta anchor for the caller's next `since`; absent pre-delta. */
+  serverTime?: string;
+  /** The `since` the server actually honored; undefined ⇒ full listing. */
+  appliedSince?: string;
 }
 
+/** supabaseUrl set of backends that rejected the p_since signature (pre-0004). */
+const commentsDeltaUnsupportedEndpoints = new Set<string>();
+
+function isCommentsDeltaSignatureUnsupported(error: unknown): boolean {
+  return (
+    error instanceof Org2CloudCommentError &&
+    error.status === 404 &&
+    /could not find the function/i.test(error.message)
+  );
+}
+
+export const __SESSION_COMMENTS_DELTA_INTERNALS = {
+  resetDeltaSupport: () => commentsDeltaUnsupportedEndpoints.clear(),
+};
+
 /**
- * Full thread list for one readable session, `created_at` asc (no
- * pagination — the 500-row cap bounds the response). Tombstones included.
- * 0002 embeds the session's task rows in the SAME fetch, so thread UIs get
- * task state riding the existing 30s TTL machinery without a second RPC.
+ * Thread list for one readable session, `created_at` asc (no pagination —
+ * the 500-row cap bounds the response). Tombstones included. With
+ * `options.since` a 0004 backend returns only rows stamped at or past it
+ * (`appliedSince` echoes the honored cursor); a pre-0004 backend rejects the
+ * signature once per endpoint and every listing degrades to full. Callers
+ * MUST treat `appliedSince === undefined` as a full listing regardless of
+ * what they requested.
  */
 export async function listSessionComments(
   accessToken: string,
   orgId: string,
-  sessionId: string
+  sessionId: string,
+  options?: { since?: string }
 ): Promise<SessionCommentsListing> {
+  const endpointUrl = getCloudEndpoint().supabaseUrl;
+  const since =
+    options?.since !== undefined &&
+    !commentsDeltaUnsupportedEndpoints.has(endpointUrl)
+      ? options.since
+      : undefined;
+  if (since !== undefined) {
+    try {
+      const payload = await callCommentRpc(
+        "cloud_list_session_comments",
+        accessToken,
+        {
+          p_org_id: orgId,
+          p_session_id: sessionId,
+          p_since: since,
+        }
+      );
+      const result = ListCommentsResultSchema.parse(payload);
+      return {
+        ...result,
+        comments: parseCommentRows(sessionId, result.comments),
+        appliedSince: since,
+      };
+    } catch (error) {
+      if (!isCommentsDeltaSignatureUnsupported(error)) throw error;
+      commentsDeltaUnsupportedEndpoints.add(endpointUrl);
+    }
+  }
   const payload = await callCommentRpc(
     "cloud_list_session_comments",
     accessToken,
@@ -351,5 +495,9 @@ export async function listSessionComments(
       p_session_id: sessionId,
     }
   );
-  return ListCommentsResultSchema.parse(payload);
+  const result = ListCommentsResultSchema.parse(payload);
+  return {
+    ...result,
+    comments: parseCommentRows(sessionId, result.comments),
+  };
 }

@@ -25,17 +25,18 @@ import type { Atom } from "jotai";
 import { useStore } from "jotai";
 import { useCallback, useEffect, useRef } from "react";
 
-import {
-  enterAgentOrgSessionIntervention,
-  getSession,
-} from "@src/api/tauri/agent";
+import { getSession } from "@src/api/tauri/agent";
 import { Message } from "@src/components/Message";
-import type { AgentExecMode } from "@src/config/sessionCreatorConfig";
+import {
+  type AgentExecMode,
+  resolveSessionAgentExecMode,
+} from "@src/config/sessionCreatorConfig";
 import {
   beginOptimisticTurn,
   failOptimisticTurn,
 } from "@src/engines/SessionCore/control/optimisticTurnStatus";
 import { cancelTurnForTimelineBoundary } from "@src/engines/SessionCore/control/sessionTimelineBoundary";
+import { publishTurnIntentDispatch } from "@src/engines/SessionCore/control/turnIntentDispatchLifecycle";
 import {
   beginTurnDispatch,
   confirmTurnRunning,
@@ -49,11 +50,10 @@ import { createSyntheticUserEvent } from "@src/engines/SessionCore/sync/adapters
 import { createLogger } from "@src/hooks/logger";
 import { markSessionActive } from "@src/store/session";
 import {
+  closePostStopDispatchEpisodeAtom,
   lastUserMessageAtom,
   setSessionRuntimeStatusAtom,
-  userInitiatedCancelAtom,
 } from "@src/store/session/cliSessionStatusAtom";
-import { creatorDefaultExecModeAtom } from "@src/store/session/creatorDefaultExecModeAtom";
 import {
   type LastModelSelection,
   creatorDefaultModelSelectionAtom,
@@ -62,10 +62,10 @@ import { sessionMapAtom } from "@src/store/session/sessionAtom";
 import {
   type QueuedMessage,
   messageQueueAtom,
+  messageQueueHydratedAtom,
   queueEditingAtom,
   queueFlushRequestAtom,
 } from "@src/store/ui/messageQueueAtom";
-import { invokeTauri } from "@src/util/platform/tauri/init";
 import { resolveModelForMessage } from "@src/util/session/resolveModelForMessage";
 import { selectionFromSession } from "@src/util/session/selectionFromSession";
 import {
@@ -73,6 +73,15 @@ import {
   isCliSession,
   isCursorIdeSession,
 } from "@src/util/session/sessionDispatch";
+
+import {
+  type BackendDispatchVerdict,
+  classifyBackendSessionStatus,
+} from "./backendDispatchVerdict";
+import {
+  disposeMessageQueuePersistence,
+  hydrateMessageQueue,
+} from "./messageQueuePersistence";
 
 const log = createLogger("useQueueDispatch");
 
@@ -91,54 +100,6 @@ function queuedMessageAgeMs(message: QueuedMessage): number {
   return Date.now() - createdAtMs;
 }
 
-/**
- * Backend statuses that mean "a turn is genuinely still executing".
- * `waiting_for_user` / `waiting_for_funds` keep the turn open too — a natural
- * follow-up must not be injected while an interactive tool blocks the turn.
- */
-const BACKEND_ACTIVE_STATUSES = new Set([
-  "running",
-  "installing",
-  "waiting_for_user",
-  "waiting_for_funds",
-]);
-
-/**
- * Failure-class terminal statuses: the session is dead and the backend will
- * accept-but-swallow any message sent to it (no scheduler turn ever runs).
- * Natural drain must park instead of dispatch — observed 2026-06-11 when six
- * queued messages were flushed into a panicked subagent 20 minutes after it
- * failed and silently vanished.
- *
- * `completed` is deliberately NOT here: a completed turn is the normal
- * drain trigger (finish turn → status completed → dispatch next queued
- * message). `cancelled` is also dispatchable — a user Stop already parks
- * via `holdSessionQueueForStopAtom`, and a follow-up resumes the session.
- */
-const BACKEND_DEAD_STATUSES = new Set([
-  "failed",
-  "error",
-  "timeout",
-  "killed",
-  "abandoned",
-  "archived",
-]);
-
-export type BackendDispatchVerdict = "busy" | "dead" | "ready";
-
-/**
- * Pure classifier for a backend-reported session status.
- * Exported for tests — the async wrapper below owns the RPC plumbing.
- */
-export function classifyBackendSessionStatus(
-  status: string | undefined | null
-): BackendDispatchVerdict {
-  if (!status) return "ready";
-  if (BACKEND_ACTIVE_STATUSES.has(status)) return "busy";
-  if (BACKEND_DEAD_STATUSES.has(status)) return "dead";
-  return "ready";
-}
-
 /** Re-check cadence while the backend reports the session still busy. */
 const QUEUE_BACKEND_RECHECK_MS = 3_000;
 
@@ -150,19 +111,18 @@ const QUEUE_BACKEND_RECHECK_MS = 3_000;
  * session-status broadcasts). Dispatching on a falsely-idle FSM injects the
  * queued message into the middle of a still-running turn — or into a session
  * that already died. This asks the backend — the only authority on execution
- * — before letting a natural drain proceed. Fail-open ("ready") on RPC
- * errors: if the backend is unreachable the dispatch itself will fail and
- * park the message.
+ * — before letting a natural drain proceed. Fail closed ("unknown") on RPC
+ * errors: a status-read failure does not prove that a turn is idle, so keep
+ * the durable queue row visible and retry instead of risking overlap.
  */
 async function getBackendDispatchVerdict(
   sessionId: string
 ): Promise<BackendDispatchVerdict> {
   try {
     if (isCliSession(sessionId)) {
-      const status = (await invokeTauri("cli_agent_status", { sessionId })) as {
-        status?: string;
-      } | null;
-      return classifyBackendSessionStatus(status?.status);
+      // CLI finality is push-owned by CliTurnLifecycleCoordinator. Re-reading
+      // status here would reintroduce one polling RPC per queued turn.
+      return "ready";
     }
     if (isAgentSession(sessionId)) {
       const meta = await getSession(sessionId);
@@ -170,12 +130,17 @@ async function getBackendDispatchVerdict(
     }
     return "ready";
   } catch {
-    return "ready";
+    return "unknown";
   }
 }
 
 export function useQueueDispatch(): void {
   const store = useStore();
+
+  useEffect(() => {
+    void hydrateMessageQueue(store);
+    return () => disposeMessageQueuePersistence(store);
+  }, [store]);
 
   // ── Dispatch lock ─────────────────────────────────────────────────────────
   // One dispatch at a time, globally. The in-flight id additionally guards
@@ -223,17 +188,20 @@ export function useQueueDispatch(): void {
         );
       const agentExecMode: AgentExecMode =
         msg.agentExecMode ??
-        (session?.agentExecMode as AgentExecMode | undefined) ??
-        store.get(creatorDefaultExecModeAtom);
+        resolveSessionAgentExecMode(session?.agentExecMode);
       const { model, accountId } = resolveModelForMessage(lastModelSelection);
 
       // Synchronous turn reserve BEFORE any await: from this instant every
       // submit and every other dispatch pass observes the session as busy.
       const dispatchGeneration = beginTurnDispatch(sessionId);
+      publishTurnIntentDispatch(msg.turnIntentId, {
+        sessionId,
+        generation: dispatchGeneration,
+      });
 
       // An explicit dispatch concludes any pending stop episode.
       if (msg.priority === "now") {
-        store.set(userInitiatedCancelAtom, false);
+        store.set(closePostStopDispatchEpisodeAtom, sessionId);
       }
 
       // Capture the payload for Stop-restore before the async append.
@@ -246,6 +214,7 @@ export function useQueueDispatch(): void {
       beginOptimisticTurn(sessionId, "queue");
 
       void (async () => {
+        let userEventId: string | null = null;
         try {
           const userEvent = createSyntheticUserEvent(
             sessionId,
@@ -255,10 +224,8 @@ export function useQueueDispatch(): void {
               turnIntentId: msg.turnIntentId,
             }
           );
+          userEventId = userEvent.id;
           await eventStoreProxy.append([userEvent], sessionId);
-          void enterAgentOrgSessionIntervention(sessionId).catch((error) => {
-            log.warn("[useQueueDispatch] intervention failed:", error);
-          });
           // Pass displayContent as displayText when it differs from content
           // (i.e. skill pills were expanded) so the persisted event stores
           // the pill format and re-editing shows the pill, not the YAML.
@@ -274,6 +241,8 @@ export function useQueueDispatch(): void {
             imageDataUrls,
             clientMessageId: `queued:${sessionId}:${msg.id}`,
             turnIntentId: msg.turnIntentId,
+            turnIntentSource: msg.priority === "now" ? "force_send" : "queue",
+            directUserIntent: true,
           });
           // Backend accepted the message — confirm the turn as running.
           confirmTurnRunning(sessionId);
@@ -299,6 +268,16 @@ export function useQueueDispatch(): void {
           }
         } catch (err) {
           log.error("[useQueueDispatch] dispatch failed:", err);
+          if (userEventId) {
+            try {
+              await eventStoreProxy.removeByIdPrefix(userEventId, sessionId);
+            } catch (cleanupError) {
+              log.warn(
+                "[useQueueDispatch] failed to remove optimistic user event:",
+                cleanupError
+              );
+            }
+          }
           // IPC failed before the backend received the message: close the
           // reserved turn and park the message so it does not retry in a
           // tight loop — the user can fix the issue and press Send Now.
@@ -331,6 +310,7 @@ export function useQueueDispatch(): void {
       wakeTimerRef.current = null;
     }
     if (dispatchLockRef.current) return;
+    if (!store.get(messageQueueHydratedAtom)) return;
     if (store.get(queueEditingAtom)) return;
 
     const queue = store.get(messageQueueAtom);
@@ -342,9 +322,12 @@ export function useQueueDispatch(): void {
         !sentQueuedMessageIdsRef.current.has(msg.id)
     );
 
-    // ── Explicit "now" dispatches take absolute precedence ─────────────────
-    const explicitMsg = candidates.find((msg) => msg.priority === "now");
-    if (explicitMsg) {
+    // ── Explicit "now" dispatches take absolute precedence per session ───────
+    // A blocked Send Now for session A must not freeze an idle session B. Scan
+    // every explicit candidate, dispatch the first idle one, and request at
+    // most one interrupt for each active message while continuing the pass.
+    const explicitMessages = candidates.filter((msg) => msg.priority === "now");
+    for (const explicitMsg of explicitMessages) {
       const phase = getTurnPhase(explicitMsg.sessionId);
       if (phase === "idle") {
         dispatchLockRef.current = true;
@@ -363,22 +346,25 @@ export function useQueueDispatch(): void {
         !interruptRequestedByMessageIdRef.current.has(explicitMsg.id)
       ) {
         // Send Now against an active turn: interrupt it once. The provider's
-        // cancelled terminal flips the FSM idle, which re-triggers this pass
-        // and dispatches the message above.
+        // cancelled terminal flips the FSM idle, which re-triggers this pass.
         interruptRequestedByMessageIdRef.current.add(explicitMsg.id);
         void cancelTurnForTimelineBoundary(
           explicitMsg.sessionId,
           "force-send"
         ).catch((error) => {
+          // A failed interrupt must be retryable. Keeping the id in this set
+          // would strand the message until an unrelated lifecycle signal.
+          interruptRequestedByMessageIdRef.current.delete(explicitMsg.id);
           log.warn("[useQueueDispatch] force-send interrupt failed:", error);
         });
       }
-      // stopping (or interrupt already requested): wait for the terminal.
-      return;
+      // `stopping` and already-requested interrupts wait for their own
+      // terminal, but do not block dispatchable work in another session.
     }
 
     // ── Natural FIFO drain ──────────────────────────────────────────────────
     for (const msg of candidates) {
+      if (msg.priority === "now") continue;
       if (msg.requiresExplicitDispatch) continue; // held by a user Stop
       if (getTurnPhase(msg.sessionId) !== "idle") continue; // turn active
       const remainingVisibleMs = MIN_QUEUE_VISIBLE_MS - queuedMessageAgeMs(msg);
@@ -396,10 +382,9 @@ export function useQueueDispatch(): void {
       // backend before injecting a natural follow-up into the session.
       void getBackendDispatchVerdict(msg.sessionId).then((verdict) => {
         if (inFlightMessageIdRef.current !== msg.id) return;
-        if (verdict === "busy") {
-          // Still executing — back off and re-check. Do NOT mark the FSM:
-          // presentation state may legitimately disagree; the queue only
-          // needs to know "not yet".
+        if (verdict === "busy" || verdict === "unknown") {
+          // Still executing or backend state is unknown — back off and
+          // re-check. Never infer idle from a failed status read.
           inFlightMessageIdRef.current = null;
           dispatchLockRef.current = false;
           if (wakeTimerRef.current === null) {
@@ -459,6 +444,7 @@ export function useQueueDispatch(): void {
   useEffect(() => {
     const unsubscribers = [
       store.sub(messageQueueAtom as Atom<QueuedMessage[]>, tryDispatchNext),
+      store.sub(messageQueueHydratedAtom as Atom<boolean>, tryDispatchNext),
       store.sub(turnLifecycleSignalAtom as Atom<number>, tryDispatchNext),
       store.sub(queueFlushRequestAtom as Atom<number>, tryDispatchNext),
       store.sub(queueEditingAtom as Atom<boolean>, tryDispatchNext),

@@ -3,20 +3,31 @@
 //! A run records that an Agent Org launched through the normal Rust session
 //! stack, while the root session remains the transcript source of truth.
 
+mod finality;
 mod helpers;
+mod progress;
 mod store;
 mod worker;
 
 #[cfg(test)]
 mod tests;
 
+pub(crate) use finality::guaranteed_current_turn_effects_with_connection;
+pub use finality::{
+    AgentOrgFinalityAssessment, AgentOrgFinalityBlocker, AgentOrgFinalityDecision,
+    AgentOrgFinalityFacts, AgentOrgFinalityProjection, AgentOrgFinalitySessionFact,
+    AgentOrgGuaranteedTurnEffects,
+};
+pub(crate) use progress::bump_work_revision_in_tx;
+pub use progress::AgentOrgRunProgress;
 pub use store::AgentOrgRunStore;
-pub use worker::{StaleWorkerRelease, WorkerSessionInfo, WorkerSessionRuntime};
+pub(crate) use worker::recovery_dispatch_recipient_is_available;
+pub use worker::{WorkerSessionInfo, WorkerSessionRuntime};
 
 use rusqlite::{Connection, Result as SqliteResult};
 use serde::Serialize;
 
-use crate::definitions::orgs::{HierarchyMode, OrgDefinition};
+use crate::definitions::orgs::{HierarchyMode, OrgDefinition, PlanApprovalPolicy};
 
 pub const COORDINATOR_MEMBER_ID: &str = "coordinator";
 pub(crate) const DEFAULT_COORDINATOR_DISPLAY_NAME: &str = "Coordinator";
@@ -128,6 +139,13 @@ pub struct AgentOrgParticipant {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum AgentOrgCompletionRequestOutcome {
+    Recorded { progress: AgentOrgRunProgress },
+    OpenTasks { unresolved_task_ids: Vec<String> },
+}
+
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentOrgRunContext {
     pub run_id: String,
@@ -152,6 +170,8 @@ pub struct AgentOrgRunContext {
     /// surfaced in the LLM system prompt and enforced by
     /// `org_send_message`. Mirror of `OrgDefinition.hierarchy_mode`.
     pub hierarchy_mode: HierarchyMode,
+    /// Plan-approval policy captured in the launch snapshot.
+    pub plan_approval_policy: PlanApprovalPolicy,
     /// Session ID of the coordinator (root) session for this run. Used by
     /// the frontend to navigate directly to the coordinator's chat history
     /// when the run is paused or the coordinator is not the active session.
@@ -294,6 +314,65 @@ impl AgentOrgRunContext {
         allowed
     }
 
+    /// Member ids that `manager_member_id` may directly supervise on the
+    /// shared task board. Task authority deliberately differs from message
+    /// routing: unrestricted peer discussion in `Soft` mode does not make
+    /// every peer every other peer's manager. `Flat` drops the hierarchy, so
+    /// only the coordinator has cross-member task authority in that mode.
+    pub fn direct_report_member_ids_for(&self, manager_member_id: &str) -> Vec<String> {
+        if self.hierarchy_mode == HierarchyMode::Flat
+            || manager_member_id == COORDINATOR_MEMBER_ID
+            || self.participant_by_member_id(manager_member_id).is_none()
+        {
+            return Vec::new();
+        }
+
+        let mut direct_reports = self
+            .members
+            .iter()
+            .filter(|member| member.parent_member_id.as_deref() == Some(manager_member_id))
+            .map(|member| member.member_id.clone())
+            .collect::<Vec<_>>();
+        direct_reports.sort();
+        direct_reports.dedup();
+        direct_reports
+    }
+
+    /// Task assignees that `caller_member_id` is authorized to manage.
+    ///
+    /// - coordinator: itself plus every roster member;
+    /// - ordinary member: itself;
+    /// - manager member in Soft/Strict: itself plus direct reports.
+    ///
+    /// This is the task-governance source of truth. It must not be replaced by
+    /// `allowed_recipient_member_ids_for`: permission to talk to a peer is not
+    /// permission to assign that peer work.
+    pub fn allowed_task_target_member_ids_for(&self, caller_member_id: &str) -> Vec<String> {
+        if self.participant_by_member_id(caller_member_id).is_none() {
+            return Vec::new();
+        }
+
+        let mut allowed = if caller_member_id == COORDINATOR_MEMBER_ID {
+            self.participants()
+                .into_iter()
+                .map(|participant| participant.member_id)
+                .collect::<Vec<_>>()
+        } else {
+            let mut member_ids = vec![caller_member_id.to_string()];
+            member_ids.extend(self.direct_report_member_ids_for(caller_member_id));
+            member_ids
+        };
+        allowed.sort();
+        allowed.dedup();
+        allowed
+    }
+
+    pub fn can_assign_task_to(&self, caller_member_id: &str, target_member_id: &str) -> bool {
+        self.allowed_task_target_member_ids_for(caller_member_id)
+            .iter()
+            .any(|member_id| member_id == target_member_id)
+    }
+
     pub fn check_routing(&self, from_member_id: &str, to_member_id: &str) -> RoutingDecision {
         if self
             .allowed_recipient_member_ids_for(from_member_id)
@@ -372,5 +451,6 @@ pub fn init_schema(conn: &Connection) -> SqliteResult<()> {
         CREATE INDEX IF NOT EXISTS idx_agent_org_runs_status
             ON agent_org_runs(status);",
     )?;
+    progress::init_schema(conn)?;
     Ok(())
 }

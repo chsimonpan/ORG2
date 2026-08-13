@@ -8,6 +8,10 @@ fn claude_fable_5_is_always_on() {
     let caps = resolve("claude-fable-5-20260601", None);
     assert_eq!(caps.thinking, ThinkingSupport::AlwaysOn);
     assert_eq!(caps.context_window, 1_000_000);
+
+    let opus = resolve("claude-opus-5", None);
+    assert_eq!(opus.thinking, ThinkingSupport::AlwaysOn);
+    assert_eq!(opus.context_window, 1_000_000);
 }
 
 #[test]
@@ -88,6 +92,10 @@ fn gpt5_is_always_on() {
     let gpt55 = resolve("gpt-5.5", None);
     assert_eq!(gpt55.thinking, ThinkingSupport::AlwaysOn);
     assert_eq!(gpt55.context_window, 1_050_000);
+
+    let gpt56 = resolve("gpt-5.6-sol", None);
+    assert_eq!(gpt56.thinking, ThinkingSupport::AlwaysOn);
+    assert_eq!(gpt56.context_window, 1_050_000);
 }
 
 #[test]
@@ -409,8 +417,6 @@ fn variant_with_context(model: &str, ctx: Option<u64>) -> ModelVariant {
         reasoning: None,
         fast: false,
         context_window: ctx,
-        context_window_override: None,
-        reasoning_effort_override: None,
     }
 }
 
@@ -459,55 +465,4 @@ fn keyvault_zero_context_window_falls_back_to_family() {
 fn explicit_context_window_beats_keyvault_override() {
     let window = super::resolve_effective_context_window("claude-opus-4.6", None, Some(64_000));
     assert_eq!(window, 64_000);
-}
-
-#[test]
-fn effective_context_precedence_is_explicit_then_vault_then_reported_then_family() {
-    let mut variant = variant_with_context("claude-opus-4.6", Some(256_000));
-    variant.context_window_override = Some(128_000);
-    assert_eq!(
-        super::resolve_effective_context_window_from_variants(
-            "claude-opus-4.6",
-            Some(64_000),
-            &[variant.clone()]
-        ),
-        64_000
-    );
-    assert_eq!(
-        super::resolve_effective_context_window_from_variants("claude-opus-4.6", None, &[variant]),
-        128_000
-    );
-    assert_eq!(
-        super::resolve_effective_context_window_from_variants(
-            "claude-opus-4.6",
-            None,
-            &[variant_with_context("claude-opus-4.6", Some(256_000))]
-        ),
-        256_000
-    );
-    assert_eq!(
-        super::resolve_effective_context_window_from_variants("claude-opus-4.6", None, &[]),
-        1_000_000
-    );
-}
-
-#[test]
-fn effective_context_prefers_exact_variant_before_base_fallback() {
-    let mut base = variant_with_context("gpt-5.5", Some(128_000));
-    base.context_window_override = Some(64_000);
-    let mut exact = variant_with_context("gpt-5.5-high", Some(256_000));
-    exact.context_window_override = Some(192_000);
-
-    assert_eq!(
-        super::resolve_effective_context_window_from_variants(
-            "gpt-5.5-high",
-            None,
-            &[base.clone(), exact.clone()]
-        ),
-        192_000
-    );
-    assert_eq!(
-        super::resolve_effective_context_window_from_variants("gpt-5.5-high", None, &[exact, base]),
-        192_000
-    );
 }

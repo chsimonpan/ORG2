@@ -32,6 +32,8 @@ export interface ChatPanelCliTerminalLaunchOptions {
  * Props for the main ChatPanel component
  */
 export interface ChatPanelProps {
+  /** Current window viewport width shared by the parent layout. */
+  viewportWidth: number | undefined;
   /** Whether to use external width management */
   useExternalWidth?: boolean;
   /** Session sidebar width for layout calculations */
@@ -60,11 +62,18 @@ export interface ChatPanelProps {
   sessionCreatorSlot?: ComponentType<{
     className?: string;
     variant?: "default" | "fullScreen";
+    layout?: "default" | "launchpad";
     centerFullScreenContent?: boolean;
+    composerHeaderContent?: ReactNode;
+    heroFooterSlot?: ReactNode;
+    pinnedActionsContent?: ReactNode;
     footerSlot?: ReactNode;
     innerClassName?: string;
     leadingActionSlot?: ReactNode;
     hideRepoLine?: boolean;
+    hideWorkItemAttachmentControl?: boolean;
+    includeHumanSession?: boolean;
+    onCreateWorkItem?: () => void;
     onRegionNoticeChange?: (notice: ChatPanelRegionNotice | null) => void;
     hidePresenceButton?: boolean;
     initialContent?: string;

@@ -6,6 +6,7 @@ import Button from "@src/components/Button";
 import ComposerBar from "@src/components/ComposerBar";
 import type { ComposerInputRef } from "@src/components/ComposerInput";
 import { VoiceInputButton, VoiceRecordingBar } from "@src/components/Voice";
+import { INPUT_AREA_CONTROL_GROUP_CLASS } from "@src/config/inputAreaTokens";
 import type { PromptPolishControl } from "@src/engines/ChatPanel/hooks/useInputArea/types";
 import type { UseVoiceInputResult } from "@src/hooks/voice";
 
@@ -39,7 +40,7 @@ interface SharedComposerBarProps {
   onDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
   onDragLeave: (event: React.DragEvent<HTMLDivElement>) => void;
   onDrop: (event: React.DragEvent<HTMLDivElement>) => void;
-  onImagePaste: (files: File[]) => void;
+  onImagePaste?: (files: File[]) => void;
   onAddContent: () => void;
   onUpload: () => void;
   onOpenSkillsTools: () => void;
@@ -57,7 +58,6 @@ interface SharedComposerBarProps {
   onInterrupt: () => Promise<void>;
   onResume: () => Promise<void>;
   isCursorIde: boolean;
-  sessionId?: string;
 }
 
 interface EditComposerBarProps extends SharedComposerBarProps {
@@ -143,7 +143,6 @@ export const EditComposerBar: React.FC<EditComposerBarProps> = ({
   onInterrupt,
   onResume,
   isCursorIde,
-  sessionId,
 }) => {
   const { t } = useTranslation("sessions");
 
@@ -153,9 +152,7 @@ export const EditComposerBar: React.FC<EditComposerBarProps> = ({
       onUpload={onUpload}
       onOpenSkillsTools={onOpenSkillsTools}
       dropdownDirection="down"
-      toolbarItemGap={false}
       showContextInfo={!isCursorIde}
-      sessionId={sessionId}
       editorSlot={
         <InputEditor
           composerInputRef={composerInputRef}
@@ -268,8 +265,6 @@ interface NormalComposerContentProps extends SharedComposerBarProps {
   showVoiceUi: boolean;
   voice: UseVoiceInputResult;
   currentRepoPath?: string;
-  isCursorCompactRow: boolean;
-  suppressToolbarHover: boolean;
   onContentChange: (text: string) => void;
   onBlur: () => void;
   onSubmit: (capturedText?: string) => void;
@@ -286,6 +281,8 @@ interface NormalComposerContentProps extends SharedComposerBarProps {
   promptPolish: PromptPolishControl;
   promptPolishDisabled: boolean;
   submitDisabled?: boolean;
+  showAgentControls?: boolean;
+  showImageAttachments?: boolean;
 }
 
 export const NormalComposerContent: React.FC<NormalComposerContentProps> = ({
@@ -329,13 +326,10 @@ export const NormalComposerContent: React.FC<NormalComposerContentProps> = ({
   showVoiceUi,
   voice,
   currentRepoPath,
-  isCursorCompactRow,
-  suppressToolbarHover,
   placeholder,
   trailingHint,
   currentInputEmpty,
   stopSuppressedForEmptyInput,
-  sessionId,
   isWpGeneWorking,
   isPendingCancel,
   isSessionTerminal,
@@ -344,19 +338,22 @@ export const NormalComposerContent: React.FC<NormalComposerContentProps> = ({
   promptPolish,
   promptPolishDisabled,
   submitDisabled,
+  showAgentControls = true,
+  showImageAttachments = true,
 }) => {
   const { t } = useTranslation("sessions");
 
   return (
     <div className="flex min-h-0 w-full flex-col">
-      <ImageAttachmentPreview ownerId={dropTargetId} />
+      {showImageAttachments && (
+        <ImageAttachmentPreview ownerId={dropTargetId} />
+      )}
       {showVoiceUi ? (
         <VoiceRecordingBar
           elapsedSeconds={voice.elapsedSeconds}
           onCancel={voice.cancel}
           onAccept={voice.stop}
           onAddContent={onAddContent}
-          compact={isCursorCompactRow}
         />
       ) : (
         <ComposerBar
@@ -364,11 +361,8 @@ export const NormalComposerContent: React.FC<NormalComposerContentProps> = ({
           onUpload={onUpload}
           onOpenSkillsTools={onOpenSkillsTools}
           dropdownDirection="up"
-          toolbarItemGap={false}
           repoPath={currentRepoPath}
-          sessionId={sessionId}
-          inlineLayout={isCursorCompactRow}
-          showContextInfo={!isCursorIde}
+          showContextInfo={showAgentControls && !isCursorIde}
           editorSlot={
             <InputEditor
               key="chat-panel-input-editor"
@@ -396,7 +390,6 @@ export const NormalComposerContent: React.FC<NormalComposerContentProps> = ({
               placeholder={placeholder || t("input.defaultPlaceholder")}
               trailingHint={trailingHint}
               onImagePaste={onImagePaste}
-              compact={isCursorCompactRow}
             />
           }
           leftPrefix={
@@ -410,22 +403,20 @@ export const NormalComposerContent: React.FC<NormalComposerContentProps> = ({
             />
           }
           pills={
-            <div
-              className={`inline-flex items-center ${
-                suppressToolbarHover ? "pointer-events-none" : ""
-              }`.trim()}
-            >
+            <div className={INPUT_AREA_CONTROL_GROUP_CLASS}>
               {modePill}
               {modelPill}
             </div>
           }
           submitButton={
             <div className="flex h-7 items-center gap-0.5">
-              <PromptPolishButton
-                control={promptPolish}
-                disabled={promptPolishDisabled}
-              />
-              {voiceFeatureEnabled && (
+              {showAgentControls && (
+                <PromptPolishButton
+                  control={promptPolish}
+                  disabled={promptPolishDisabled}
+                />
+              )}
+              {showAgentControls && voiceFeatureEnabled && (
                 <VoiceInputButton
                   onPressStart={voice.start}
                   onPressEnd={voice.stop}

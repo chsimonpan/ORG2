@@ -4,12 +4,11 @@
  * Handles data transformations and computations for work items.
  *
  * OPTIMIZED: Uses Rust-computed view data internally:
- * - Kanban/Gantt/Calendar views computed in Rust
- * - Status grouping computed in Rust
- * - Single IPC call for all view data
+ * - Only the active view projection is computed in Rust
+ * - Single IPC call for the active view data
  * - Search and status filtering done in Rust
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { enrichedWorkItemToUI, projectApi } from "@src/api/http/project";
 import type {
@@ -18,7 +17,6 @@ import type {
   RustCalendarEvent,
   RustGanttTask,
   RustKanbanTask,
-  WorkItemPartialUpdate,
   WorkItemsViewData,
 } from "@src/api/http/project";
 import type { CalendarEvent } from "@src/features/CalendarView";
@@ -27,11 +25,18 @@ import type { KanbanTask } from "@src/features/KanbanBoard";
 import { createLogger } from "@src/hooks/logger";
 import { useDebouncedCallback } from "@src/hooks/perf";
 import { useProjectDataChanged } from "@src/hooks/project";
+import { useCurrentUserMemberIds } from "@src/hooks/project/useCurrentUserMemberId";
 import type { WorkItem as WorkItemExtended } from "@src/types/core/workItem";
 
-import { type OnAssignmentChanges, type StatusFilterType } from "../types";
+import {
+  type OnAssignmentChanges,
+  type StatusFilterType,
+  type WorkItemsViewTab,
+} from "../types";
+import { toWorkItemPartialUpdate } from "../workItemPartialUpdate";
 import {
   countWorkItemsByStatus,
+  filterWorkItemsBySearchQuery,
   getWorkItemNavigation,
   groupWorkItemsForStatusFilter,
 } from "../workItemsViewModel";
@@ -41,95 +46,6 @@ const logger = createLogger("useWorkItemsData");
 // ============================================
 // Type Converters
 // ============================================
-
-/**
- * Convert UI WorkItemExtended partial updates to Rust WorkItemPartialUpdate format.
- * Only includes fields that are present in the input.
- */
-function uiToPartialUpdate(
-  data: Partial<WorkItemExtended>
-): WorkItemPartialUpdate {
-  const updates: WorkItemPartialUpdate = {};
-
-  if (data.name !== undefined) {
-    updates.title = data.name;
-  }
-  if (data.spec !== undefined) {
-    updates.body = data.spec;
-  }
-  if (data.workItemStatus !== undefined) {
-    updates.status = data.workItemStatus;
-  }
-  if (data.priority !== undefined) {
-    updates.priority = data.priority;
-  }
-  if ("project" in data) {
-    updates.project = data.project?.id ?? null;
-  }
-  // WorkItem uses `star`, not `starred`
-  if (data.star !== undefined) {
-    updates.starred = data.star;
-  }
-  if ("assignee" in data) {
-    updates.assignee = data.assignee?.id ?? null;
-  }
-  if ("assigneeType" in data) {
-    updates.assigneeType = data.assigneeType ?? null;
-  }
-  if ("labels" in data) {
-    updates.labels = data.labels?.map((label) => label.id) ?? [];
-  }
-  if ("milestone" in data) {
-    updates.milestone = data.milestone?.id ?? null;
-  }
-  if ("startDate" in data) {
-    updates.startDate = data.startDate ?? null;
-  }
-  if ("endDate" in data) {
-    updates.targetDate = data.endDate ?? null;
-  }
-  if ("target_date" in data) {
-    updates.targetDate = data.target_date ?? null;
-  }
-  if (data.todos !== undefined) {
-    updates.todos = data.todos?.map((todo) => ({
-      id: todo.id,
-      content: todo.content,
-      status: todo.status,
-    }));
-  }
-  if (data.comments !== undefined) {
-    updates.comments = data.comments?.map((comment) => ({
-      id: comment.id,
-      author: comment.author,
-      content: comment.content,
-      created_at: comment.created_at,
-    }));
-  }
-  if (data.linkedSessions !== undefined) {
-    updates.linkedSessions = data.linkedSessions;
-  }
-  if (data.orchestratorConfig !== undefined) {
-    updates.orchestratorConfig = data.orchestratorConfig;
-  }
-  if (data.orchestratorState !== undefined) {
-    updates.orchestratorState = data.orchestratorState;
-  }
-  if (data.schedule !== undefined) {
-    updates.schedule = data.schedule ?? null;
-  }
-  if (data.executionLock !== undefined) {
-    updates.executionLock = data.executionLock ?? null;
-  }
-  if (data.closeOut !== undefined) {
-    updates.closeOut = data.closeOut ?? null;
-  }
-  if (data.workProducts !== undefined) {
-    updates.workProducts = data.workProducts;
-  }
-
-  return updates;
-}
 
 function rustKanbanToFrontend(task: RustKanbanTask): KanbanTask {
   return {
@@ -186,6 +102,7 @@ interface UseWorkItemsDataParams {
   sharedMembers?: MemberEntry[];
   /** Whether this tab is currently visible */
   isActive?: boolean;
+  activeView: WorkItemsViewTab;
 }
 
 export function useWorkItemsData({
@@ -198,6 +115,7 @@ export function useWorkItemsData({
   sharedLabels: _sharedLabels,
   sharedMembers,
   isActive = true,
+  activeView,
 }: UseWorkItemsDataParams) {
   // ============================================
   // Rust View Data (optimized path)
@@ -206,6 +124,8 @@ export function useWorkItemsData({
   const [viewData, setViewData] = useState<WorkItemsViewData | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
   const [viewError, setViewError] = useState<string | null>(null);
+  const loadGenerationRef = useRef(0);
+  const purgedProjectSlugRef = useRef<string | null>(null);
 
   // Debounced search query for IPC calls (avoid IPC on every keystroke)
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(searchQuery);
@@ -220,42 +140,74 @@ export function useWorkItemsData({
   }, [searchQuery, debouncedSetSearchQuery]);
 
   const fetchViewData = useCallback(async () => {
+    if (!isActive) return;
     if (!projectSlug) {
       setViewData(null);
       return;
     }
 
+    const loadGeneration = loadGenerationRef.current + 1;
+    loadGenerationRef.current = loadGeneration;
     setViewLoading(true);
     setViewError(null);
 
     try {
-      await projectApi.purgeExpiredDeletedWorkItems(projectSlug);
+      if (purgedProjectSlugRef.current !== projectSlug) {
+        await projectApi.purgeExpiredDeletedWorkItems(projectSlug);
+        if (loadGenerationRef.current !== loadGeneration) return;
+        purgedProjectSlugRef.current = projectSlug;
+      }
       const data = await projectApi.readWorkItemsViewData(projectSlug, {
         statusFilter: statusFilter !== "all" ? statusFilter : undefined,
         searchQuery: debouncedSearchQuery.trim() || undefined,
+        view:
+          activeView === "Kanban"
+            ? "kanban"
+            : activeView === "Gantt"
+              ? "gantt"
+              : activeView === "Calendar"
+                ? "calendar"
+                : "list",
       });
+      if (loadGenerationRef.current !== loadGeneration) return;
       setViewData(data);
     } catch (err) {
+      if (loadGenerationRef.current !== loadGeneration) return;
       const message =
         err instanceof Error ? err.message : "Failed to load work items";
       logger.error("View data fetch error:", err);
       setViewError(message);
     } finally {
-      setViewLoading(false);
+      if (loadGenerationRef.current === loadGeneration) {
+        setViewLoading(false);
+      }
     }
-  }, [projectSlug, statusFilter, debouncedSearchQuery]);
+  }, [activeView, debouncedSearchQuery, isActive, projectSlug, statusFilter]);
 
   useEffect(() => {
-    fetchViewData();
-  }, [fetchViewData]);
+    if (!isActive) {
+      loadGenerationRef.current += 1;
+      return;
+    }
+    void fetchViewData();
+    return () => {
+      loadGenerationRef.current += 1;
+    };
+  }, [fetchViewData, isActive]);
 
   // Listen for orgii-data-changed events
   useProjectDataChanged(
-    useCallback(() => {
-      if (isActive) {
-        fetchViewData();
-      }
-    }, [isActive, fetchViewData])
+    useCallback(
+      (change) => {
+        if (
+          isActive &&
+          (!change?.projectSlug || change.projectSlug === projectSlug)
+        ) {
+          fetchViewData();
+        }
+      },
+      [isActive, fetchViewData, projectSlug]
+    )
   );
 
   // ============================================
@@ -283,9 +235,10 @@ export function useWorkItemsData({
   // Members: use shared data from useProjectData, only fetch if not provided
   const [localMembers, setLocalMembers] = useState<MemberEntry[]>([]);
   const members = sharedMembers?.length ? sharedMembers : localMembers;
+  const { currentUser } = useCurrentUserMemberIds(members);
 
   useEffect(() => {
-    if (sharedMembers?.length || !projectSlug) return;
+    if (!isActive || sharedMembers?.length || !projectSlug) return;
     let cancelled = false;
 
     projectApi.readMembers(projectSlug).then((file) => {
@@ -297,7 +250,7 @@ export function useWorkItemsData({
     return () => {
       cancelled = true;
     };
-  }, [projectSlug, sharedMembers]);
+  }, [isActive, projectSlug, sharedMembers]);
 
   // Single IPC call: atomic read-modify-write with label/member resolution
   const updateWorkItemSource = useCallback(
@@ -314,7 +267,7 @@ export function useWorkItemsData({
           return false;
         }
 
-        const updates = uiToPartialUpdate(data);
+        const updates = toWorkItemPartialUpdate(data, currentUser);
         if (Object.keys(updates).length === 0) {
           return true;
         }
@@ -343,7 +296,7 @@ export function useWorkItemsData({
         return false;
       }
     },
-    [projectSlug, shortIdMap]
+    [currentUser, projectSlug, shortIdMap]
   );
 
   const teamId = "file";
@@ -374,23 +327,7 @@ export function useWorkItemsData({
       return workItems;
     }
 
-    const search = searchQuery.toLowerCase().trim();
-    if (!search) {
-      return workItems;
-    }
-
-    return workItems.filter((workItem) => {
-      const name = workItem.name?.toLowerCase() || "";
-      const labels =
-        workItem.labels?.map((label) => label.name.toLowerCase()).join(" ") ||
-        "";
-      const assignee = workItem.assignee?.name?.toLowerCase() || "";
-      return (
-        name.includes(search) ||
-        labels.includes(search) ||
-        assignee.includes(search)
-      );
-    });
+    return filterWorkItemsBySearchQuery(workItems, searchQuery);
   }, [workItems, searchQuery, debouncedSearchQuery]);
 
   const selectedWorkItem = useMemo(
@@ -412,17 +349,17 @@ export function useWorkItemsData({
 
   const kanbanTasks = useMemo((): KanbanTask[] => {
     if (!viewData) return [];
-    return viewData.kanbanTasks.map(rustKanbanToFrontend);
+    return (viewData.kanbanTasks ?? []).map(rustKanbanToFrontend);
   }, [viewData]);
 
   const ganttTasks = useMemo((): GanttTask[] => {
     if (!viewData) return [];
-    return viewData.ganttTasks.map(rustGanttToFrontend);
+    return (viewData.ganttTasks ?? []).map(rustGanttToFrontend);
   }, [viewData]);
 
   const calendarEvents = useMemo((): CalendarEvent[] => {
     if (!viewData) return [];
-    return viewData.calendarEvents.map(rustCalendarToFrontend);
+    return (viewData.calendarEvents ?? []).map(rustCalendarToFrontend);
   }, [viewData]);
 
   const navigation = useMemo(

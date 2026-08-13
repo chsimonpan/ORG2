@@ -6,8 +6,6 @@ import type { GitWorktreeEntry } from "@src/api/http/git/types";
 import { useGitStatus } from "@src/contexts/git";
 import { useRepoGitInitialization } from "@src/hooks/git";
 import { useGitFiles } from "@src/hooks/git/sourceControl";
-import { createLogger } from "@src/hooks/logger";
-import { loadGitFileDiffContent } from "@src/hooks/workStation/editor/gitDiffContent";
 import type { UseGitDiffStateReturn } from "@src/hooks/workStation/git/useGitDiffState";
 import {
   sourceControlFilterModeAtom,
@@ -40,9 +38,8 @@ import {
   resolveScopeRepoRoot,
 } from "./Panels/EditorPrimarySidebar/tabs/sourceControlScopePickerHelpers";
 import { resolveGitDiffSelection } from "./sourceControlSelection";
+import { rememberSourceControlFocusPath } from "./sourceControlStateTransitions";
 import { useStashCount } from "./useStashCount";
-
-const logger = createLogger("SourceControlSetup");
 
 interface UseSourceControlSetupParams {
   repoPath: string;
@@ -57,6 +54,8 @@ interface UseSourceControlSetupParams {
 export interface UseSourceControlSetupReturn {
   sourceControlFilterMode: SourceControlFilterMode;
   sourceControlFilterCounts: SourceControlFilterCounts;
+  /** Repo/worktree root currently selected by the Source Control scope picker. */
+  sourceControlActiveRepoRoot: string;
   sourceControlHeaderFilter: React.ReactNode;
   sourceControlHeaderScopePicker: React.ReactNode;
   tabSidebarExtraContext: {
@@ -110,6 +109,10 @@ export function useSourceControlSetup({
     enabled: isGitInitialized === true && hasWorktrees,
     worktreesReady: !worktreesLoading,
   });
+  const sourceControlActiveRepoRoot = useMemo(
+    () => resolveScopeRepoRoot(scope, repoPath),
+    [repoPath, scope]
+  );
 
   const repoName = useMemo(() => {
     const segments = repoPath.replace(/\/+$/, "").split("/");
@@ -154,9 +157,8 @@ export function useSourceControlSetup({
     if (!repoPath) {
       return { uncommitted: 0, unstaged: 0, staged: 0 };
     }
-    const activeRepoRoot = resolveScopeRepoRoot(scope, repoPath);
     const files = Array.from(gitFilesByPath.values()).filter(
-      (file) => (file.repoRoot ?? repoPath) === activeRepoRoot
+      (file) => (file.repoRoot ?? repoPath) === sourceControlActiveRepoRoot
     );
     const staged = files.filter((file) => file.staged).length;
     return {
@@ -164,7 +166,7 @@ export function useSourceControlSetup({
       unstaged: files.length - staged,
       staged,
     };
-  }, [gitFilesByPath, repoPath, scope]);
+  }, [gitFilesByPath, repoPath, sourceControlActiveRepoRoot]);
 
   const sourceControlStashCount = useStashCount({
     repoPath,
@@ -387,29 +389,22 @@ export function useSourceControlSetup({
         path: relativePath,
         repoRoot: effectiveRepoPath,
       });
+      setPrimaryPanel((state) =>
+        rememberSourceControlFocusPath(state, absolutePath)
+      );
       setSourceControlFocusTarget({ path: absolutePath, nonce: Date.now() });
 
-      if (file.oldContent !== undefined || !effectiveRepoPath) return;
-
-      loadGitFileDiffContent({
-        repoPath: effectiveRepoPath,
-        file,
-        relativePath,
-      })
-        .then((diffFile) => {
-          if (!diffFile) return;
-          setGitDiffFile(relativePath, diffFile);
-        })
-        .catch((error) => {
-          logger.error("Failed to load git diff:", error);
-        });
+      // AllChangesView loads content only after its target section expands.
+      // Keep the click metadata-only while remembering the same path for a
+      // later hand-off to Focus mode.
     },
-    [repoPath, setGitDiffFile, setSourceControlFocusTarget]
+    [repoPath, setGitDiffFile, setPrimaryPanel, setSourceControlFocusTarget]
   );
 
   return {
     sourceControlFilterMode,
     sourceControlFilterCounts,
+    sourceControlActiveRepoRoot,
     sourceControlHeaderFilter,
     sourceControlHeaderScopePicker,
     tabSidebarExtraContext,

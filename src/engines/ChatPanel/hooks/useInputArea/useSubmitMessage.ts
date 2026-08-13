@@ -18,17 +18,14 @@ import { useAtomValue, useStore } from "jotai";
 import React, { useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { projectApi } from "@src/api/http/project";
 import { rejectQuestion, respondQuestion } from "@src/api/tauri/agent";
 import Message from "@src/components/Message";
 import { extractQuestionBatch } from "@src/engines/ChatPanel/InputArea/AskQuestionCard/extractQuestionBatch";
 import { chatEventsAtom } from "@src/engines/SessionCore";
 import { parseAddressCommentsSlashCommand } from "@src/features/Org2Cloud/addressCommentsSlashToken";
 import { useAddressCommentsSlashCommand } from "@src/features/Org2Cloud/useAddressCommentsSlashCommand";
-import { useKeyVault } from "@src/hooks/keyVault";
 import { createLogger } from "@src/hooks/logger";
 import { useSecretScanGuard } from "@src/hooks/security/useSecretScanGuard";
-import { useSessionModelField } from "@src/hooks/session/useSessionPatch";
 import { sessionByIdAtom } from "@src/store/session";
 import type { ChatImageAttachment } from "@src/store/ui/chatImageAtom";
 import { wpReadOnlyAtom } from "@src/store/ui/chatPanelAtom";
@@ -80,6 +77,10 @@ export function stripContextPillBase64(text: string): string {
 export interface UseSubmitMessageOptions {
   refs: InputAreaRefs;
   draftSessionId: string;
+  /** Session whose comment threads Address Comments targets when the
+   * composer dispatches elsewhere (external-history fork composer, where
+   * `draftSessionId` is empty by design). */
+  addressSessionId?: string | null;
   replyTargetEventId: string | undefined;
   flushDraft: (text: string) => Promise<void>;
   clearReplyTarget: () => Promise<void>;
@@ -103,6 +104,7 @@ export interface UseSubmitMessageOptions {
   ) => Promise<void>;
   onSubmitOverride?: (input: SubmitOverrideInput) => Promise<boolean>;
   submitDisabled?: boolean;
+  enableAgentInterceptors?: boolean;
 }
 
 // ============================================================================
@@ -118,6 +120,7 @@ function lastSerializedPillLabel(rawLabel: string): string {
 export function useSubmitMessage({
   refs,
   draftSessionId,
+  addressSessionId,
   replyTargetEventId,
   flushDraft,
   clearReplyTarget,
@@ -126,17 +129,16 @@ export function useSubmitMessage({
   handleSessChatSubmit,
   onSubmitOverride,
   submitDisabled = false,
+  enableAgentInterceptors = true,
 }: UseSubmitMessageOptions): (options?: SubmitMessageOptions) => Promise<void> {
   const { t } = useTranslation("sessions");
   const store = useStore();
   const wpReadOnly = useAtomValue(wpReadOnlyAtom);
-  const { setModel: setSessionModel } = useSessionModelField(draftSessionId);
-  const { accounts: keyVaultAccounts } = useKeyVault({ autoLoad: true });
   const submitInFlightKeyRef = useRef<string | null>(null);
   const { runManualCompact } = useManualCompact();
   const guardAgainstSecrets = useSecretScanGuard();
   const addressComments = useAddressCommentsSlashCommand(
-    draftSessionId || null
+    draftSessionId || addressSessionId || null
   );
 
   return useCallback(
@@ -153,7 +155,11 @@ export function useSubmitMessage({
 
       if (!refs.composerInputRef.current) return;
 
-      // Hold ordinary sends while this session's durable transcript is being compacted.
+      // ── Compaction gate ──────────────────────────────────────────────────
+      // While this session's durable transcript is being rewritten by a
+      // manual compaction, hold new messages instead of dispatching them.
+      // (The backend scheduler serializes them anyway; this keeps the UX
+      // honest — the user sees why nothing is happening.)
       if (
         draftSessionId &&
         store.get(manualCompactInFlightSessionAtom) === draftSessionId
@@ -172,64 +178,12 @@ export function useSubmitMessage({
 
       if (!hasText && !hasAttachedImages) return;
 
-      // ── Built-in /model command ───────────────────────────────────────────
-      // # 模型切换指令：拦截 `/model <模型名>`，只切换当前 session 模型，不发送给 agent。
-      if (hasText && !hasAttachedImages) {
-        const requestedModel = parseModelSlashCommand(displayText);
-        if (requestedModel !== null) {
-          if (!draftSessionId) {
-            Message.warning("No active session to switch model");
-            return;
-          }
-          try {
-            const availableModels = keyVaultAccounts.flatMap((account) => [
-              ...(account.enabledModels ?? []),
-              ...(account.availableModels ?? []),
-            ]);
-            const resolvedModel = resolveModelSlashTarget(
-              requestedModel,
-              availableModels
-            );
-            await setSessionModel(resolvedModel);
-            // # 本地系统提示：复用普通提交通道把切换结果写入聊天历史，便于回看模型变更。
-            await handleSessChatSubmit(
-              undefined,
-              `已切换到 ${resolvedModel}`,
-              `[Local System] 已切换到 ${resolvedModel}`
-            );
-            refs.composerInputRef.current.clear();
-            refs.setHasContent(false);
-            void flushDraft("").catch((err: unknown) => {
-              log.warn(
-                "[useSubmitMessage] flushDraft(/model clear) failed:",
-                err
-              );
-            });
-            Message.success(`已切换到 ${resolvedModel}`);
-          } catch (err) {
-            const reason = err instanceof Error ? err.message : String(err);
-            Message.error(`模型切换失败: ${reason}`);
-          }
-          return;
-        }
-
-        if (displayText.trim() === "/model") {
-          const availableModels = Array.from(
-            new Set(
-              keyVaultAccounts.flatMap((account) => [
-                ...(account.enabledModels ?? []),
-                ...(account.availableModels ?? []),
-              ])
-            )
-          ).slice(0, 20);
-          Message.info(
-            availableModels.length > 0
-              ? `可选模型：${availableModels.join("、")}`
-              : "未从 Key Vault 读取到可选模型"
-          );
-          return;
-        }
-
+      // ── /compact slash command ───────────────────────────────────────────
+      // `/compact [instructions]` runs a manual context compaction instead
+      // of dispatching a message (Claude Code parity). Only a pure text
+      // command qualifies — attached images mean the user is sending real
+      // content that happens to start with "/compact".
+      if (enableAgentInterceptors && hasText && !hasAttachedImages) {
         const compactCommand = parseCompactSlashCommand(displayText);
         if (compactCommand) {
           refs.composerInputRef.current.clear();
@@ -243,22 +197,14 @@ export function useSubmitMessage({
           return;
         }
 
-        const dispatched = await dispatchBuiltinSlashCommand(displayText);
-        if (dispatched) {
-          refs.composerInputRef.current.clear();
-          refs.setHasContent(false);
-          void flushDraft("").catch((err: unknown) => {
-            log.warn("[useSubmitMessage] flushDraft(slash clear) failed:", err);
-          });
-          return;
-        }
-
         const addressDraft = parseAddressCommentsSlashCommand(displayText);
         if (addressDraft) {
           refs.composerInputRef.current.clear();
-          void flushDraft("").catch((err: unknown) => {
-            log.warn("[useSubmitMessage] flushDraft(address) failed:", err);
-          });
+          if (draftSessionId) {
+            void flushDraft("").catch((err: unknown) => {
+              log.warn("[useSubmitMessage] flushDraft(address) failed:", err);
+            });
+          }
           addressComments.run({
             selectedHeadIds: addressDraft.selectedHeadIds,
             instruction: addressDraft.instruction,
@@ -284,7 +230,7 @@ export function useSubmitMessage({
       // ── Question intercept ────────────────────────────────────────────────
       // When the agent asked a question and the user typed a reply in the main
       // input, forward the typed text as the question answer before dispatching.
-      if (hasText && draftSessionId) {
+      if (enableAgentInterceptors && hasText && draftSessionId) {
         const events = store.get(chatEventsAtom);
         for (const event of events) {
           if (event.sessionId && event.sessionId !== draftSessionId) continue;
@@ -312,16 +258,18 @@ export function useSubmitMessage({
       }
 
       // ── MCP slash-command resolution ─────────────────────────────────────
-      try {
-        const rendered = await resolveMcpSlashCommand(displayText.trim());
-        if (rendered !== null) {
-          displayText = rendered;
+      if (enableAgentInterceptors) {
+        try {
+          const rendered = await resolveMcpSlashCommand(displayText.trim());
+          if (rendered !== null) {
+            displayText = rendered;
+          }
+        } catch (err) {
+          Message.error(
+            `MCP prompt failed: ${err instanceof Error ? err.message : String(err)}`
+          );
+          return;
         }
-      } catch (err) {
-        Message.error(
-          `MCP prompt failed: ${err instanceof Error ? err.message : String(err)}`
-        );
-        return;
       }
 
       // ── Skill pill expansion ──────────────────────────────────────────────
@@ -587,77 +535,10 @@ export function useSubmitMessage({
       replyTargetEventId,
       clearReplyTarget,
       onSubmitOverride,
-      setSessionModel,
-      keyVaultAccounts,
       submitDisabled,
+      enableAgentInterceptors,
       runManualCompact,
       addressComments,
     ]
   );
-}
-
-export function parseModelSlashCommand(text: string): string | null {
-  const match = text.trim().match(/^\/model\s+(.+)$/i);
-  return match ? match[1].trim() : null;
-}
-
-export function resolveModelSlashTarget(
-  requested: string,
-  models: string[]
-): string {
-  const needle = requested.toLowerCase();
-  const uniqueModels = Array.from(new Set(models.filter(Boolean)));
-  // # 模糊匹配：先精确、再按别名/片段匹配，保持 /model alias 的低输入成本。
-  return (
-    uniqueModels.find((model) => model.toLowerCase() === needle) ??
-    uniqueModels.find((model) => model.toLowerCase().includes(needle)) ??
-    requested
-  );
-}
-
-async function dispatchBuiltinSlashCommand(text: string): Promise<boolean> {
-  const trimmed = text.trim();
-  const arg = trimmed.replace(/^\/(session|project|wi)\s+new\s*/i, "").trim();
-  if (/^\/project\s+new(\s|$)/i.test(trimmed)) {
-    const slug = (arg || `project-${Date.now()}`)
-      .toLowerCase()
-      .replace(/[^a-z0-9-]+/g, "-");
-    // # 前端闭环：直接写入项目存储，不再把明确语义的内建指令交给 agent 猜。
-    const now = new Date().toISOString();
-    await projectApi.writeProject(
-      slug,
-      {
-        id: slug,
-        name: arg || "未命名项目",
-        org_id: "personal",
-        workspace_id: undefined,
-        status: "active",
-        priority: "medium",
-        health: "green",
-        members: [],
-        labels: [],
-        linked_repos: [],
-        created_at: now,
-        updated_at: now,
-        next_work_item_id: 1,
-        work_item_prefix: slug.slice(0, 3).toUpperCase(),
-        work_item_prefix_custom: false,
-      },
-      arg || "通过 /project new 创建",
-      true
-    );
-    Message.success(`已创建项目：${arg || slug}`);
-    return true;
-  }
-  if (/^\/wi\s+new(\s|$)/i.test(trimmed)) {
-    Message.success("已识别 /wi new：请在项目面板补全任务归属后创建");
-    return true;
-  }
-  if (/^\/session\s+new(\s|$)/i.test(trimmed)) {
-    Message.success(
-      "已识别 /session new：请使用侧栏新建会话入口选择模型与仓库"
-    );
-    return true;
-  }
-  return false;
 }

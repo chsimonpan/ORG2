@@ -142,7 +142,7 @@
     "timezoneAuto": "自動（ブラウザ）",
     "timezoneSearchPlaceholder": "近くの都市を検索",
     "sendOnEnter": "Enter でメッセージを送信",
-    "sendOnEnterDesc": "有効にすると Enter で送信し、Shift+Enter で改行します。無効の場合は Ctrl/Cmd+Enter で送信します",
+    "sendOnEnterDesc": "有効にすると Enter で送信し、Shift+Enter と Ctrl/Cmd+Enter で改行します。無効の場合は Ctrl/Cmd+Enter で送信します",
     "language": "言語",
     "languageSearchPlaceholder": "言語を検索...",
     "languageNames": {
@@ -227,7 +227,10 @@
     "presenceGuidanceOnlineDefault": "私はキーボードの前にいます。不明点はいつでも確認し、破壊的な操作を実行する前に必ず確認してください",
     "presenceGuidanceInvisibleDefault": "近くにいますがオフライン表示です。基本的には自律的に進め、高リスクな操作や大きなリファクタリングのときだけ通知してください。その他の質問は一つずつではなく、まとめてください",
     "presenceGuidanceAwayDefault": "私は席を外しています。私の返答を待たず、手元の情報で最善の判断をして、完了できることを進め、戻ったとき用に結果と未解決の質問を簡潔に残してください",
-    "followSystem": "システムに従う"
+    "followSystem": "システムに従う",
+    "preferences": "設定",
+    "usePointerCursors": "ポインターカーソルを使用",
+    "usePointerCursorsDesc": "インタラクティブな要素にカーソルを合わせたときにポインターへ変更します"
   },
   "background": {
     "title": "背景",
@@ -703,8 +706,34 @@
     "test": {
       "sent": "テスト通知を送信しました",
       "permissionWarning": "テスト通知の送信に失敗しました。権限を確認してください。",
-      "sendFailed": "テスト通知を送信できません。通知の権限を確認してから再試行してください。"
-    }
+      "sendFailed": "テスト通知を送信できません。通知の権限を確認してから再試行してください。",
+      "soundFailed": "通知音を再生できません。システムの音量を確認してください。"
+    },
+    "teamInbox": "チーム受信トレイ",
+    "soundPreset": "通知音",
+    "soundPresetDesc": "通知で再生する音を選択します",
+    "previewSound": "試聴",
+    "soundPresets": {
+      "classic": "クラシック",
+      "gentle": "やさしい",
+      "ascending": "上昇",
+      "bell": "ベル"
+    },
+    "criticalOnly": "重要な通知のみ",
+    "criticalOnlyDesc": "承認が必要な操作、またはタスクの失敗のみ通知します",
+    "quietHours": "サイレントスケジュール",
+    "quietHoursDesc": "毎日の指定した時間帯は通常の通知を停止します",
+    "quietHoursSchedule": "サイレント時間",
+    "quietHoursScheduleDesc": "デバイスのローカル時刻を使用します。開始と終了が同じ時刻の場合は無効になります。",
+    "quietHoursStart": "開始",
+    "quietHoursEnd": "終了",
+    "allowCriticalDuringQuietHours": "重要な通知を許可",
+    "allowCriticalDuringQuietHoursDesc": "承認リクエストと失敗はシステム通知を表示できますが、音は鳴りません",
+    "backgroundCompletionSummary": "バックグラウンドの完了をまとめる",
+    "backgroundCompletionSummaryDesc": "サイレント時間の終了後にまとめて1件通知します",
+    "mutedSessions": "ミュート中のSession",
+    "mutedSessionsDesc": "このデバイスで {{count}} 件のSessionがミュートされています",
+    "clearMutedSessions": "すべて解除"
   },
   "editor": {
     "tabEditor": "エディタ",
@@ -923,7 +952,24 @@
     "diskCategory_screenshots": "ブラウザスクリーンショット",
     "diskCategory_agentWorktrees": "Agent Session Worktrees",
     "diskCategory_lspBin": "LSP Server バイナリ",
-    "loadZeroRows": "クリックしてさらに {{count}} 件を読み込む"
+    "loadZeroRows": "クリックしてさらに {{count}} 件を読み込む",
+    "appMemory": "App memory",
+    "appBackend": "ORG2 backend",
+    "appWebviewHelpers": "Owned WebView helpers",
+    "rssMappedDiagnostic": "RSS / mapped memory (diagnostic)",
+    "measurement": "Measurement",
+    "measurementKinds": {
+      "native": "Native effective memory",
+      "compatibility": "Compatibility metric",
+      "mixed": "Mixed native / fallback metrics",
+      "rss_fallback": "RSS fallback",
+      "unavailable": "Unavailable"
+    },
+    "toolProcessDiagnostics": "Terminal, CLI & tool processes (RSS diagnostic)",
+    "excludedFromAppMemory": "excluded from App memory",
+    "noToolProcesses": "No terminal, CLI, MCP, or tool processes detected",
+    "categoryAgentCli": "CLI agent",
+    "categoryMcpOrTool": "MCP / tool process"
   },
   "dependencies": {
     "systemDependencies": "システム Dependencies",
@@ -977,7 +1023,13 @@
     "tableSize": "サイズ",
     "tablePercentage": "割合",
     "scanFailed": "ディスク使用量のスキャンに失敗しました",
-    "openFolderFailed": "フォルダを開けませんでした"
+    "openFolderFailed": "フォルダを開けませんでした",
+    "browserCache": "ブラウザーキャッシュ",
+    "browserCacheDesc": "使用中 {{used}} · {{cleanable}} を安全に消去できます",
+    "cleanBrowserCache": "クリーンアップ",
+    "browserCacheCleaned": "ブラウザーストレージを {{size}} 解放しました",
+    "browserCacheAlreadyClean": "ブラウザーキャッシュはすでにクリーンです",
+    "browserCacheCleanFailed": "ブラウザーキャッシュを消去できませんでした"
   },
   "agentSessions": {
     "title": "Agent Session",
@@ -991,7 +1043,7 @@
     "decryptEffect": "Decrypt エフェクト",
     "decryptEffectDesc": "Agent メッセージに Decrypt アニメーションを有効にする",
     "sendOnEnter": "Enter でメッセージを送信",
-    "sendOnEnterDesc": "有効にすると Enter で送信し、Shift+Enter で改行します。無効の場合は Ctrl/Cmd+Enter で送信します"
+    "sendOnEnterDesc": "有効にすると Enter で送信し、Shift+Enter と Ctrl/Cmd+Enter で改行します。無効の場合は Ctrl/Cmd+Enter で送信します"
   },
   "languageServers": {
     "languageServersDesc": "オートコンプリート、診断、コードインテリジェンスのためのLSPサーバーを管理",

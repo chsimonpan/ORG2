@@ -1,5 +1,5 @@
 use chrono::Utc;
-use rusqlite::{params, OptionalExtension, Result as SqliteResult};
+use rusqlite::{params, Connection, OptionalExtension, Result as SqliteResult};
 
 use agent_core::session::AgentExecMode;
 use database::db::get_connection;
@@ -8,7 +8,9 @@ use super::super::types::{
     session_defaults, KeySource, SessionRunner, SessionStatus, DEFAULT_CODE_SESSION_FLOW,
     PERSONAL_ORG_ID,
 };
-use super::types::{CliHistoryMutation, CodeSession, CreateCodeSessionParams};
+use super::types::{
+    CliHistoryMutation, CliSessionStatusSnapshot, CodeSession, CreateCodeSessionParams,
+};
 
 pub(super) fn now_iso() -> String {
     Utc::now().to_rfc3339()
@@ -86,6 +88,15 @@ pub fn create_session(
         .as_ref()
         .filter(|v| !v.is_empty())
         .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "[]".to_string()));
+    let product_mode = if params.work_item_id.is_some() {
+        "project".to_string()
+    } else {
+        params
+            .product_mode
+            .clone()
+            .filter(|mode| matches!(mode.as_str(), "build" | "plan" | "ask" | "project"))
+            .unwrap_or_else(|| "build".to_string())
+    };
 
     // Native-transcript capability is decided once at creation and frozen:
     // a later capability flip must never re-route an existing session's
@@ -102,8 +113,8 @@ pub fn create_session(
              proxy_session_id, background, key_source, additional_directories,
              parent_session_id, org_member_id, org_id, project_id, project_name,
              project_slug, work_item_id, agent_role, created_at, updated_at,
-             transcript_source)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
+             transcript_source, product_mode, agent_exec_mode)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)",
         params![
             session_id, name, SessionStatus::Pending.as_ref(), flow, runner, params.cli_agent_type,
             params.model, params.tier, params.account_id,
@@ -112,6 +123,7 @@ pub fn create_session(
             additional_dirs_json, params.parent_session_id, params.org_member_id,
             org_id, params.project_id, params.project_name, params.project_slug,
             params.work_item_id, params.agent_role, ts, ts, transcript_source,
+            product_mode, AgentExecMode::Build.as_str(),
         ],
     )?;
 
@@ -137,7 +149,7 @@ const SESSION_COLUMNS: &str =
      COALESCE(cs.org_id, 'personal-org'), cs.project_id, cs.project_name,
      cs.project_slug, cs.work_item_id, cs.agent_role,
      cs.created_at, cs.updated_at,
-     COALESCE(cs.transcript_source, 'chunks')";
+     COALESCE(cs.transcript_source, 'chunks'), cs.product_mode";
 
 /// Get a session by ID.
 pub fn get_session(session_id: &str) -> SqliteResult<Option<CodeSession>> {
@@ -166,6 +178,39 @@ pub fn list_sessions() -> SqliteResult<Vec<CodeSession>> {
     rows.collect()
 }
 
+/// Load only lifecycle fields for a bounded set of sessions. This is used by
+/// reconnect/focus reconciliation and deliberately avoids hydrating complete
+/// session rows or scanning unrelated sessions.
+pub fn status_snapshots(session_ids: &[String]) -> SqliteResult<Vec<CliSessionStatusSnapshot>> {
+    if session_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let conn = get_connection()?;
+    let placeholders = std::iter::repeat_n("?", session_ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let query = format!(
+        "SELECT session_id, status, updated_at FROM code_sessions WHERE session_id IN ({placeholders})"
+    );
+    let mut stmt = conn.prepare(&query)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(session_ids), |row| {
+        let raw_status: String = row.get(1)?;
+        let status = SessionStatus::parse(&raw_status).ok_or_else(|| {
+            rusqlite::Error::FromSqlConversionFailure(
+                1,
+                rusqlite::types::Type::Text,
+                format!("invalid code session status: {raw_status}").into(),
+            )
+        })?;
+        Ok(CliSessionStatusSnapshot {
+            session_id: row.get(0)?,
+            status,
+            updated_at: row.get(2)?,
+        })
+    })?;
+    rows.collect()
+}
+
 /// One page of sessions ordered by recent activity. Serves the sidebar's
 /// paginated category view without loading the whole table.
 pub fn list_sessions_page(limit: usize, offset: usize) -> SqliteResult<Vec<CodeSession>> {
@@ -181,24 +226,85 @@ pub fn list_sessions_page(limit: usize, offset: usize) -> SqliteResult<Vec<CodeS
     rows.collect()
 }
 
+/// One stable-keyset page of unpinned, top-level CLI sessions for the sidebar.
+///
+/// `pinned` and `parent_session_id` are filtered before LIMIT so neither
+/// pinned sessions nor worker/subagent rows consume ordinary CLI capacity.
+pub fn list_unpinned_root_sessions_page(
+    limit: usize,
+    cursor: Option<(&str, &str)>,
+) -> SqliteResult<Vec<CodeSession>> {
+    let conn = get_connection()?;
+    let bounded_limit = limit.min(i64::MAX as usize) as i64;
+    if let Some((updated_at, session_id)) = cursor {
+        let query = format!(
+            "SELECT {} FROM code_sessions cs
+             WHERE cs.pinned = 0
+               AND cs.parent_session_id IS NULL
+               AND (
+                 cs.updated_at < ?1
+                 OR (cs.updated_at = ?1 AND cs.session_id < ?2)
+               )
+             ORDER BY cs.updated_at DESC, cs.session_id DESC
+             LIMIT ?3",
+            SESSION_COLUMNS
+        );
+        let mut stmt = conn.prepare(&query)?;
+        let rows = stmt.query_map(
+            params![updated_at, session_id, bounded_limit],
+            row_to_session,
+        )?;
+        return rows.collect();
+    }
+
+    let query = format!(
+        "SELECT {} FROM code_sessions cs
+         WHERE cs.pinned = 0
+           AND cs.parent_session_id IS NULL
+         ORDER BY cs.updated_at DESC, cs.session_id DESC
+         LIMIT ?1",
+        SESSION_COLUMNS
+    );
+    let mut stmt = conn.prepare(&query)?;
+    let rows = stmt.query_map(params![bounded_limit], row_to_session)?;
+    rows.collect()
+}
+
 /// Update session status.
 pub fn update_status(session_id: &str, status: SessionStatus) -> SqliteResult<bool> {
     let conn = get_connection()?;
-    let now = now_iso();
-    let affected = if status.is_terminal() {
-        conn.execute(
-            "UPDATE code_sessions SET status = ?2, pid = NULL, updated_at = ?3 WHERE session_id = ?1",
-            params![session_id, status.as_ref(), now],
-        )?
-    } else {
-        conn.execute(
-            "UPDATE code_sessions SET status = ?2, updated_at = ?3 WHERE session_id = ?1",
-            params![session_id, status.as_ref(), now],
-        )?
-    };
-    if affected > 0 {
+    let affected = update_status_row(&conn, session_id, status, None)?;
+    if affected {
         sync_orgtrack_mirror(session_id);
     }
+    Ok(affected)
+}
+
+fn update_status_row(
+    conn: &Connection,
+    session_id: &str,
+    status: SessionStatus,
+    error: Option<&str>,
+) -> SqliteResult<bool> {
+    let now = now_iso();
+    let affected = match (status.is_terminal(), error) {
+        (true, Some(error)) => conn.execute(
+            "UPDATE code_sessions SET status = ?2, error_message = ?3, pid = NULL, updated_at = ?4 WHERE session_id = ?1",
+            params![session_id, status.as_ref(), error, now],
+        )?,
+        (false, Some(error)) => conn.execute(
+            "UPDATE code_sessions SET status = ?2, error_message = ?3, updated_at = ?4 WHERE session_id = ?1",
+            params![session_id, status.as_ref(), error, now],
+        )?,
+        (true, None) => conn.execute(
+            "UPDATE code_sessions SET status = ?2, pid = NULL, updated_at = ?3 WHERE session_id = ?1",
+            params![session_id, status.as_ref(), now],
+        )?,
+        (false, None) => conn.execute(
+            "UPDATE code_sessions SET status = ?2, updated_at = ?3 WHERE session_id = ?1",
+            params![session_id, status.as_ref(), now],
+        )?,
+    };
     Ok(affected > 0)
 }
 
@@ -209,22 +315,103 @@ pub fn update_status_with_error(
     error: &str,
 ) -> SqliteResult<bool> {
     let conn = get_connection()?;
-    let now = now_iso();
-    let affected = if status.is_terminal() {
-        conn.execute(
-            "UPDATE code_sessions SET status = ?2, error_message = ?3, pid = NULL, updated_at = ?4 WHERE session_id = ?1",
-            params![session_id, status.as_ref(), error, now],
-        )?
-    } else {
-        conn.execute(
-            "UPDATE code_sessions SET status = ?2, error_message = ?3, updated_at = ?4 WHERE session_id = ?1",
-            params![session_id, status.as_ref(), error, now],
-        )?
-    };
-    if affected > 0 {
+    let affected = update_status_row(&conn, session_id, status, Some(error))?;
+    if affected {
         sync_orgtrack_mirror(session_id);
     }
-    Ok(affected > 0)
+    Ok(affected)
+}
+
+/// Atomically accept a CLI turn: the session and its intent become running
+/// together, so reconnect cannot observe a split-brain lifecycle snapshot.
+pub fn accept_cli_turn(
+    session_id: &str,
+    turn_intent_id: &str,
+    client_message_id: &str,
+) -> Result<(), String> {
+    accept_cli_turn_with_source(
+        session_id,
+        turn_intent_id,
+        Some(client_message_id),
+        session_persistence::turn_intents::TurnIntentSource::UserSubmit,
+    )
+}
+
+/// `accept_cli_turn` for a resumed session: same atomic acceptance, but the
+/// intent is sourced as `Resume` and has no client message behind it — resume
+/// replays the session's stored `user_input` instead of a fresh submit.
+pub fn accept_cli_resume_turn(session_id: &str, turn_intent_id: &str) -> Result<(), String> {
+    accept_cli_turn_with_source(
+        session_id,
+        turn_intent_id,
+        None,
+        session_persistence::turn_intents::TurnIntentSource::Resume,
+    )
+}
+
+fn accept_cli_turn_with_source(
+    session_id: &str,
+    turn_intent_id: &str,
+    client_message_id: Option<&str>,
+    source: session_persistence::turn_intents::TurnIntentSource,
+) -> Result<(), String> {
+    let conn = get_connection().map_err(|err| err.to_string())?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|err| err.to_string())?;
+    if !update_status_row(&tx, session_id, SessionStatus::Running, None)
+        .map_err(|err| err.to_string())?
+    {
+        return Err(format!("session not found: {session_id}"));
+    }
+    session_persistence::turn_intents::upsert_initial_on(
+        &tx,
+        session_id,
+        turn_intent_id,
+        client_message_id,
+        None,
+        source,
+        session_persistence::turn_intents::TurnIntentStatus::Queued,
+    )
+    .map_err(|err| err.to_string())?;
+    session_persistence::turn_intents::update_status_on(
+        &tx,
+        session_id,
+        turn_intent_id,
+        session_persistence::turn_intents::TurnIntentStatus::Running,
+    )
+    .map_err(|err| err.to_string())?;
+    tx.commit().map_err(|err| err.to_string())?;
+    sync_orgtrack_mirror(session_id);
+    Ok(())
+}
+
+/// Atomically persist a CLI session status and the matching intent terminal.
+pub fn update_cli_turn_lifecycle(
+    session_id: &str,
+    status: SessionStatus,
+    error: Option<&str>,
+    turn_intent: Option<(&str, session_persistence::turn_intents::TurnIntentStatus)>,
+) -> Result<(), String> {
+    let conn = get_connection().map_err(|err| err.to_string())?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|err| err.to_string())?;
+    if !update_status_row(&tx, session_id, status, error).map_err(|err| err.to_string())? {
+        return Err(format!("session not found: {session_id}"));
+    }
+    if let Some((turn_intent_id, intent_status)) = turn_intent {
+        session_persistence::turn_intents::update_status_on(
+            &tx,
+            session_id,
+            turn_intent_id,
+            intent_status,
+        )
+        .map_err(|err| err.to_string())?;
+    }
+    tx.commit().map_err(|err| err.to_string())?;
+    sync_orgtrack_mirror(session_id);
+    Ok(())
 }
 
 /// Store the PID of the CLI subprocess.
@@ -597,6 +784,37 @@ pub fn update_model_and_account(
     Ok(affected > 0)
 }
 
+/// Link the Project root Work Item created by the bootstrap flow.
+/// Guarded on `work_item_id IS NULL` so a concurrent duplicate submit
+/// can never repoint an already-linked session (same contract as the
+/// agent-side `link_bootstrap_work_item`).
+pub fn link_bootstrap_work_item(session_id: &str, work_item_id: &str) -> SqliteResult<bool> {
+    let conn = get_connection()?;
+    let affected = conn.execute(
+        "UPDATE code_sessions
+         SET work_item_id = ?2, updated_at = ?3
+         WHERE session_id = ?1 AND work_item_id IS NULL",
+        params![session_id, work_item_id, now_iso()],
+    )?;
+    if affected > 0 {
+        sync_orgtrack_mirror(session_id);
+    }
+    Ok(affected > 0)
+}
+
+/// Set the product-mode axis (validated upstream by `session_patch`).
+pub fn update_product_mode(session_id: &str, product_mode: &str) -> SqliteResult<bool> {
+    let conn = get_connection()?;
+    let affected = conn.execute(
+        "UPDATE code_sessions SET product_mode = ?2, updated_at = ?3 WHERE session_id = ?1",
+        params![session_id, product_mode, now_iso()],
+    )?;
+    if affected > 0 {
+        sync_orgtrack_mirror(session_id);
+    }
+    Ok(affected > 0)
+}
+
 /// Update the per-session execution mode on a CLI session row.
 /// Mirrors `agent_core::session::persistence::update_agent_exec_mode`.
 /// Does not bump `updated_at`; this is composer control state, not activity.
@@ -610,6 +828,31 @@ pub fn update_agent_exec_mode(session_id: &str, mode: &str) -> SqliteResult<bool
     let affected = conn.execute(
         "UPDATE code_sessions SET agent_exec_mode = ?2 WHERE session_id = ?1",
         params![session_id, parsed.as_str()],
+    )?;
+    if affected > 0 {
+        sync_orgtrack_mirror(session_id);
+    }
+    Ok(affected > 0)
+}
+
+/// Atomically update the product-mode and execution-mode axes behind one
+/// composer selection. See the native-session equivalent for the invariant.
+pub fn update_mode_axes(
+    session_id: &str,
+    product_mode: &str,
+    agent_exec_mode: &str,
+) -> SqliteResult<bool> {
+    let parsed = AgentExecMode::parse(agent_exec_mode).ok_or_else(|| {
+        rusqlite::Error::ToSqlConversionFailure(
+            format!("unknown AgentExecMode value: {agent_exec_mode:?}").into(),
+        )
+    })?;
+    let conn = get_connection()?;
+    let affected = conn.execute(
+        "UPDATE code_sessions
+         SET product_mode = ?2, agent_exec_mode = ?3
+         WHERE session_id = ?1",
+        params![session_id, product_mode, parsed.as_str()],
     )?;
     if affected > 0 {
         sync_orgtrack_mirror(session_id);
@@ -680,6 +923,19 @@ pub fn update_proxy_credentials(
 
 /// Delete a session and all its chunks (CASCADE) + per-round token usage records.
 pub fn delete_session(session_id: &str) -> SqliteResult<bool> {
+    if let Err(error) =
+        agent_core::tools::impls::coding::exec::shell_replay::ensure_session_replays_deletable(
+            session_id,
+        )
+    {
+        return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
+            std::io::Error::other(error),
+        )));
+    }
+    agent_core::tools::impls::coding::exec::shell_replay::queue_session_replay_cleanup(session_id)
+        .map_err(|error| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(error)))
+        })?;
     let conn = get_connection()?;
     conn.execute(
         "DELETE FROM code_session_chunks WHERE session_id = ?1",
@@ -706,11 +962,27 @@ pub fn delete_session(session_id: &str) -> SqliteResult<bool> {
     )?;
     if affected > 0 {
         if let Err(err) =
+            agent_core::tools::impls::coding::exec::shell_replay::remove_session_replays(session_id)
+        {
+            tracing::warn!(session_id, error = %err, "[cli-persistence] shell replay delete failed");
+        }
+        if let Err(err) =
             crate::agent_sessions::session_directory::orgtrack_adapter::remove_mirrored_session(
                 session_id,
             )
         {
             tracing::warn!(session_id, error = %err, "[cli-persistence] orgtrack delete mirror failed");
+        }
+        let hosted_codex_profile = app_paths::codex_hosted_cli_profile_dir(session_id);
+        if hosted_codex_profile.exists() {
+            if let Err(err) = std::fs::remove_dir_all(&hosted_codex_profile) {
+                tracing::warn!(
+                    session_id,
+                    path = %hosted_codex_profile.display(),
+                    error = %err,
+                    "[cli-persistence] hosted Codex profile delete failed"
+                );
+            }
         }
     }
     Ok(affected > 0)
@@ -833,5 +1105,6 @@ fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<CodeSession> {
         created_at: row.get(39)?,
         updated_at: row.get(40)?,
         transcript_source: row.get(41)?,
+        product_mode: row.get(42)?,
     })
 }

@@ -29,7 +29,6 @@ function ref<T>(value: T): { current: T } {
 function createCtx(): EventHandlerContext {
   return {
     filterSessionIdRef: ref("session-1"),
-    execOutputBufferRef: ref(""),
     onAgentCompleteRef: ref(undefined),
     onContextUsageRef: ref(undefined),
     onTokenUpdateRef: ref(undefined),
@@ -201,6 +200,7 @@ describe("Rust Agent session handlers", () => {
         type: "agent:turn_completed",
         sessionId: "session-1",
         turnId: "turn-1",
+        turnIntentId: "intent-1",
         turnStatus: "completed",
         sessionStatus: "idle",
       },
@@ -214,6 +214,7 @@ describe("Rust Agent session handlers", () => {
       undefined,
       {
         turnId: "turn-1",
+        turnIntentId: "intent-1",
         turnStatus: "completed",
       }
     );

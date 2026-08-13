@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import { ORG2_CLOUD_OFFICIAL_SUPABASE_URL } from "./config";
 import {
   CLOUD_ASSIGNABLE_ROLES,
   CLOUD_INVITE_STATE,
+  CLOUD_INVITE_WEB_BASE_URL,
   type CloudMemberLike,
   buildCloudInviteLink,
   buildCloudSessionShareLink,
@@ -50,11 +52,12 @@ describe("invite code generation + hashing", () => {
 });
 
 describe("cloud invite deep link", () => {
-  it("builds and parses a round-trip link", () => {
-    const link = buildCloudInviteLink("c0de");
-    expect(link).toBe("orgii://cloud/join?invite=c0de");
-    expect(isCloudInviteDeepLink(link)).toBe(true);
-    expect(parseCloudInviteDeepLink(link)).toEqual({ inviteCode: "c0de" });
+  it("builds a shareable HTTPS link with the invite kept in the fragment", () => {
+    const inviteCode = "c0de".repeat(16);
+    const link = buildCloudInviteLink(inviteCode);
+    expect(link).toBe(`${CLOUD_INVITE_WEB_BASE_URL}#invite=${inviteCode}`);
+    expect(new URL(link).search).toBe("");
+    expect(isCloudInviteDeepLink(link)).toBe(false);
   });
 
   it("rejects collaboration links and foreign schemes", () => {
@@ -71,14 +74,46 @@ describe("cloud invite deep link", () => {
   });
 
   it("parseCloudInviteInput accepts raw codes and links alike", () => {
+    const fragmentCode = "f".repeat(64);
+    const queryCode = "0".repeat(64);
     expect(parseCloudInviteInput("  rawcode  ")).toBe("rawcode");
     expect(parseCloudInviteInput("orgii://cloud/join?invite=abc")).toBe("abc");
+    expect(
+      parseCloudInviteInput(
+        `${CLOUD_INVITE_WEB_BASE_URL}#invite=${fragmentCode}`
+      )
+    ).toBe(fragmentCode);
+    expect(
+      parseCloudInviteInput(`${CLOUD_INVITE_WEB_BASE_URL}?invite=${queryCode}`)
+    ).toBe(queryCode);
+    expect(
+      parseCloudInviteInput(
+        `${CLOUD_INVITE_WEB_BASE_URL}?invite=${queryCode}#invite=${fragmentCode}`
+      )
+    ).toBe(fragmentCode);
+    expect(
+      parseCloudInviteInput(
+        `${CLOUD_INVITE_WEB_BASE_URL}?invite=${queryCode}#invite=`
+      )
+    ).toBe(queryCode);
+    // Same 64-hex contract as the handoff page: uppercase normalizes,
+    // non-hex codes on the right origin are rejected.
+    expect(
+      parseCloudInviteInput(
+        `${CLOUD_INVITE_WEB_BASE_URL}#invite=${fragmentCode.toUpperCase()}`
+      )
+    ).toBe(fragmentCode);
+    expect(
+      parseCloudInviteInput(`${CLOUD_INVITE_WEB_BASE_URL}#invite=not-a-code`)
+    ).toBeNull();
     expect(parseCloudInviteInput("")).toBeNull();
     // An orgii:// link that is NOT a cloud invite must not fall through to
     // being treated as a raw code.
     expect(
       parseCloudInviteInput("orgii://collaboration/join?invite=abc")
     ).toBeNull();
+    expect(parseCloudInviteInput("https://example.com/#invite=abc")).toBeNull();
+    expect(parseCloudInviteInput("ftp://example.com/invite")).toBeNull();
   });
 });
 
@@ -86,9 +121,64 @@ describe("cloud session share deep link (0012)", () => {
   it("builds and parses a round-trip link", () => {
     const token = "a".repeat(64);
     const link = buildCloudSessionShareLink(token);
-    expect(link).toBe(`orgii://cloud/session?share=${token}`);
+    expect(link).toBe(`orgii://cloud/session?share=${token}&endpoint=official`);
     expect(isCloudShareDeepLink(link)).toBe(true);
-    expect(parseCloudShareDeepLink(link)).toEqual({ shareToken: token });
+    expect(parseCloudShareDeepLink(link)).toEqual({
+      shareToken: token,
+      endpoint: { kind: "official" },
+    });
+  });
+
+  it("normalizes an override pointing at the OFFICIAL deployment to official", () => {
+    const token = "d".repeat(64);
+    const link = buildCloudSessionShareLink(token, {
+      isOfficial: false,
+      supabaseUrl: `${ORG2_CLOUD_OFFICIAL_SUPABASE_URL}/`,
+    });
+    expect(link).toBe(`orgii://cloud/session?share=${token}&endpoint=official`);
+    expect(parseCloudShareDeepLink(link)).toEqual({
+      shareToken: token,
+      endpoint: { kind: "official" },
+    });
+  });
+
+  it("heals already-minted custom links whose URL is the official deployment", () => {
+    const token = "e".repeat(64);
+    const link = `orgii://cloud/session?share=${token}&endpoint=custom&endpointUrl=${encodeURIComponent(
+      ORG2_CLOUD_OFFICIAL_SUPABASE_URL
+    )}`;
+    expect(parseCloudShareDeepLink(link)).toEqual({
+      shareToken: token,
+      endpoint: { kind: "official" },
+    });
+  });
+
+  it("round-trips custom endpoint provenance without credentials", () => {
+    const token = "b".repeat(64);
+    const link = buildCloudSessionShareLink(token, {
+      isOfficial: false,
+      supabaseUrl: "https://cloud.example.com/",
+    });
+    expect(link).not.toContain("anon");
+    expect(parseCloudShareDeepLink(link)).toEqual({
+      shareToken: token,
+      endpoint: {
+        kind: "custom",
+        supabaseUrl: "https://cloud.example.com",
+      },
+    });
+  });
+
+  it("treats pre-provenance links as official and rejects unsafe custom URLs", () => {
+    const token = "c".repeat(64);
+    expect(
+      parseCloudShareDeepLink(`orgii://cloud/session?share=${token}`)
+    ).toEqual({ shareToken: token, endpoint: { kind: "official" } });
+    expect(
+      parseCloudShareDeepLink(
+        `orgii://cloud/session?share=${token}&endpoint=custom&endpointUrl=http%3A%2F%2Fevil.example.com`
+      )
+    ).toBeNull();
   });
 
   it("share and join links never cross-parse", () => {
@@ -114,17 +204,22 @@ describe("cloud session share deep link (0012)", () => {
     const token = "f".repeat(64);
     expect(parseCloudShareInput(buildCloudSessionShareLink(token))).toEqual({
       shareToken: token,
+      endpoint: { kind: "official" },
     });
     expect(
       parseCloudShareInput(`  ${buildCloudSessionShareLink(token)}  `)
-    ).toEqual({ shareToken: token });
+    ).toEqual({ shareToken: token, endpoint: { kind: "official" } });
   });
 
   it("parseCloudShareInput accepts a bare 64-char hex token", () => {
     const token = "0123456789abcdef".repeat(4);
-    expect(parseCloudShareInput(token)).toEqual({ shareToken: token });
+    expect(parseCloudShareInput(token)).toEqual({
+      shareToken: token,
+      endpoint: { kind: "current" },
+    });
     expect(parseCloudShareInput(`  ${token}\n`)).toEqual({
       shareToken: token,
+      endpoint: { kind: "current" },
     });
   });
 
@@ -278,6 +373,7 @@ describe("management error codes", () => {
     ["ORG2_QUOTA_EXCEEDED", "cloud.orgManagement.errors.quotaExceeded"],
     ["ORG2_FORBIDDEN", "cloud.orgManagement.errors.forbidden"],
     ["ORG2_MEMBER_NOT_FOUND", "cloud.orgManagement.errors.memberNotFound"],
+    ["ORG2_ALREADY_MEMBER", "cloud.orgManagement.errors.alreadyMember"],
     ["ORG2_INVITE_INVALID", "cloud.orgManagement.errors.inviteInvalid"],
     ["ORG2_INVITE_REVOKED", "cloud.orgManagement.errors.inviteRevoked"],
     ["ORG2_INVITE_EXPIRED", "cloud.orgManagement.errors.inviteExpired"],
@@ -298,5 +394,22 @@ describe("management error codes", () => {
     expect(cloudManagementErrorMessage("plain failure", translate)).toBe(
       "plain failure"
     );
+  });
+
+  it("maps fetch transport failures to the network message (not raw 'Load failed')", () => {
+    const translate = (key: string) => `T(${key})`;
+    expect(
+      cloudManagementErrorMessage(new TypeError("Load failed"), translate)
+    ).toBe("T(cloud.orgManagement.errors.network)");
+    expect(
+      cloudManagementErrorMessage(new TypeError("Failed to fetch"), translate)
+    ).toBe("T(cloud.orgManagement.errors.network)");
+    // A programming TypeError keeps its raw message.
+    expect(
+      cloudManagementErrorMessage(
+        new TypeError("x is not a function"),
+        translate
+      )
+    ).toBe("x is not a function");
   });
 });

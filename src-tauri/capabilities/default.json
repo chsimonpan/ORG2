@@ -5,15 +5,11 @@
   "windows": [
     "main",
     "add-context-window",
-    "new-project-window",
     "exist-project-window",
     "new-project-workflow-window",
     "add-workitem-window",
-    "mode-selection-window-*",
-    "workspace-*",
     "ui-agent-window",
     "browser-*",
-    "tab-*",
     "shell-*",
     "app-window-*"
   ],
@@ -51,6 +47,7 @@
     "core:window:default",
     "core:window:allow-start-dragging",
     "core:window:allow-set-decorations",
+    "core:window:allow-set-theme",
     "core:window:allow-set-size",
     "core:window:allow-center",
     "core:window:allow-set-background-color",

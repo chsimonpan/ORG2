@@ -10,7 +10,7 @@ use tokio::process::Command;
 
 use crate::agent_sessions::cli::commands::{
     cli_agent_chunks, cli_agent_create, cli_agent_message, cli_agent_resume, cli_agent_run,
-    cli_agent_status,
+    cli_agent_status, CliMessageRequest, CliRunRequest,
 };
 use crate::agent_sessions::cli::persistence::{self, CreateCodeSessionParams};
 use crate::agent_sessions::cli::session_runner;
@@ -162,6 +162,8 @@ pub async fn test_cursor_cli_runtime(
         account_id: Some(request.account_id.clone()),
         repo_path: Some(request.workspace_path.clone()),
         branch: None,
+        worktree_path: None,
+        worktree_base_ref: None,
         proxy_token: None,
         proxy_url: None,
         hosted_token: None,
@@ -179,6 +181,7 @@ pub async fn test_cursor_cli_runtime(
         project_slug: None,
         work_item_id: None,
         agent_role: None,
+        product_mode: None,
     };
 
     let created = match cli_agent_create(create_params).await {
@@ -195,14 +198,11 @@ pub async fn test_cursor_cli_runtime(
         }));
     }
 
-    if let Err(err) = cli_agent_run(
-        session_id.clone(),
-        request.content.clone(),
-        None,
-        None,
-        None,
-        None,
-    )
+    if let Err(err) = cli_agent_run(CliRunRequest {
+        session_id: session_id.clone(),
+        user_input: request.content.clone(),
+        ..Default::default()
+    })
     .await
     {
         return Json(json!({ "error": format!("cli_agent_run failed: {err}") }));
@@ -275,6 +275,8 @@ pub async fn test_cursor_cli_account_switch(
         account_id: Some(request.initial_account_id.clone()),
         repo_path: Some(request.workspace_path.clone()),
         branch: None,
+        worktree_path: None,
+        worktree_base_ref: None,
         proxy_token: None,
         proxy_url: None,
         hosted_token: None,
@@ -292,6 +294,7 @@ pub async fn test_cursor_cli_account_switch(
         project_slug: None,
         work_item_id: None,
         agent_role: None,
+        product_mode: None,
     };
 
     let created = match cli_agent_create(create_params).await {
@@ -299,14 +302,11 @@ pub async fn test_cursor_cli_account_switch(
         Err(err) => return Json(json!({ "error": format!("cli_agent_create failed: {err}") })),
     };
     let session_id = created.session_id;
-    if let Err(err) = cli_agent_run(
-        session_id.clone(),
-        request.initial_content.clone(),
-        None,
-        None,
-        None,
-        None,
-    )
+    if let Err(err) = cli_agent_run(CliRunRequest {
+        session_id: session_id.clone(),
+        user_input: request.initial_content.clone(),
+        ..Default::default()
+    })
     .await
     {
         return Json(json!({ "error": format!("initial cli_agent_run failed: {err}") }));
@@ -318,15 +318,12 @@ pub async fn test_cursor_cli_account_switch(
         Err(err) => return Json(json!({ "error": err, "session_id": session_id })),
     };
 
-    if let Err(err) = cli_agent_message(
-        session_id.clone(),
-        request.followup_content.clone(),
-        None,
-        Some(request.followup_account_id.clone()),
-        None,
-        None,
-        None,
-    )
+    if let Err(err) = cli_agent_message(CliMessageRequest {
+        session_id: session_id.clone(),
+        content: request.followup_content.clone(),
+        account_id: Some(request.followup_account_id.clone()),
+        ..Default::default()
+    })
     .await
     {
         return Json(json!({ "error": format!("cli_agent_message failed: {err}") }));
@@ -390,6 +387,8 @@ pub async fn test_claude_code_cli_account_switch(
         account_id: Some(request.initial_account_id.clone()),
         repo_path: Some(request.workspace_path.clone()),
         branch: None,
+        worktree_path: None,
+        worktree_base_ref: None,
         proxy_token: None,
         proxy_url: None,
         hosted_token: None,
@@ -407,6 +406,7 @@ pub async fn test_claude_code_cli_account_switch(
         project_slug: None,
         work_item_id: None,
         agent_role: None,
+        product_mode: None,
     };
 
     let created = match cli_agent_create(create_params).await {
@@ -414,14 +414,11 @@ pub async fn test_claude_code_cli_account_switch(
         Err(err) => return Json(json!({ "error": format!("cli_agent_create failed: {err}") })),
     };
     let session_id = created.session_id;
-    if let Err(err) = cli_agent_run(
-        session_id.clone(),
-        request.initial_content.clone(),
-        None,
-        None,
-        None,
-        None,
-    )
+    if let Err(err) = cli_agent_run(CliRunRequest {
+        session_id: session_id.clone(),
+        user_input: request.initial_content.clone(),
+        ..Default::default()
+    })
     .await
     {
         return Json(json!({ "error": format!("initial cli_agent_run failed: {err}") }));
@@ -439,15 +436,13 @@ pub async fn test_claude_code_cli_account_switch(
     let baseline_chunk_count = initial_chunks.len();
     let baseline_updated_at = initial_session.updated_at.clone();
 
-    if let Err(err) = cli_agent_message(
-        session_id.clone(),
-        request.followup_content.clone(),
-        Some(model.clone()),
-        Some(request.followup_account_id.clone()),
-        None,
-        None,
-        None,
-    )
+    if let Err(err) = cli_agent_message(CliMessageRequest {
+        session_id: session_id.clone(),
+        content: request.followup_content.clone(),
+        model: Some(model.clone()),
+        account_id: Some(request.followup_account_id.clone()),
+        ..Default::default()
+    })
     .await
     {
         return Json(json!({ "error": format!("cli_agent_message failed: {err}") }));
@@ -543,6 +538,8 @@ pub async fn test_codex_cli_account_switch(
         account_id: Some(request.initial_account_id.clone()),
         repo_path: Some(request.workspace_path.clone()),
         branch: None,
+        worktree_path: None,
+        worktree_base_ref: None,
         proxy_token: None,
         proxy_url: None,
         hosted_token: None,
@@ -560,6 +557,7 @@ pub async fn test_codex_cli_account_switch(
         project_slug: None,
         work_item_id: None,
         agent_role: None,
+        product_mode: None,
     };
 
     let created = match cli_agent_create(create_params).await {
@@ -572,14 +570,11 @@ pub async fn test_codex_cli_account_switch(
     let initial_codex_home = app_paths::codex_cli_profile_dir(&request.initial_account_id);
     let followup_codex_home = app_paths::codex_cli_profile_dir(&request.followup_account_id);
 
-    if let Err(err) = cli_agent_run(
-        session_id.clone(),
-        request.initial_content.clone(),
-        None,
-        None,
-        None,
-        None,
-    )
+    if let Err(err) = cli_agent_run(CliRunRequest {
+        session_id: session_id.clone(),
+        user_input: request.initial_content.clone(),
+        ..Default::default()
+    })
     .await
     {
         return Json(json!({ "error": format!("initial cli_agent_run failed: {err}") }));
@@ -597,15 +592,13 @@ pub async fn test_codex_cli_account_switch(
     let baseline_chunk_count = initial_chunks.len();
     let baseline_updated_at = initial_session.updated_at.clone();
 
-    if let Err(err) = cli_agent_message(
-        session_id.clone(),
-        request.followup_content.clone(),
-        Some(model.clone()),
-        Some(request.followup_account_id.clone()),
-        None,
-        None,
-        None,
-    )
+    if let Err(err) = cli_agent_message(CliMessageRequest {
+        session_id: session_id.clone(),
+        content: request.followup_content.clone(),
+        model: Some(model.clone()),
+        account_id: Some(request.followup_account_id.clone()),
+        ..Default::default()
+    })
     .await
     {
         return Json(json!({ "error": format!("cli_agent_message failed: {err}") }));
@@ -711,6 +704,8 @@ pub async fn test_cli_resume_lock_isolation() -> Json<serde_json::Value> {
             .ok()
             .map(|path| path.to_string_lossy().to_string()),
         branch: None,
+        worktree_path: None,
+        worktree_base_ref: None,
         proxy_token: None,
         proxy_url: None,
         hosted_token: None,
@@ -728,6 +723,7 @@ pub async fn test_cli_resume_lock_isolation() -> Json<serde_json::Value> {
         project_slug: None,
         work_item_id: None,
         agent_role: None,
+        product_mode: None,
     };
 
     let stale_session = match cli_agent_create(create_params("E2E stale resume lock probe")).await {
@@ -787,14 +783,11 @@ pub async fn test_cli_resume_lock_isolation() -> Json<serde_json::Value> {
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
 
     let peer_start = std::time::Instant::now();
-    let peer_result = cli_agent_run(
-        peer_session_id.clone(),
-        "E2E peer start should not wait on unrelated resume cleanup".to_string(),
-        None,
-        None,
-        None,
-        None,
-    )
+    let peer_result = cli_agent_run(CliRunRequest {
+        session_id: peer_session_id.clone(),
+        user_input: "E2E peer start should not wait on unrelated resume cleanup".to_string(),
+        ..Default::default()
+    })
     .await;
     let peer_start_ms = peer_start.elapsed().as_millis() as u64;
 

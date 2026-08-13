@@ -22,88 +22,6 @@ type TCommon = (key: string, defaultValue?: string) => string;
 
 const SUBAGENT_SESSION_ID_SEGMENT = ":subagent:";
 
-interface BuildSessionRowActionsParams {
-  activeSessionMoreMenuId: string;
-  expandedSubagentParentIds: ReadonlySet<string>;
-  handleMenuItemContextMenu: (
-    event: React.MouseEvent<HTMLButtonElement>,
-    key: string,
-    item: NavigationMenuItem
-  ) => Promise<void>;
-  handleTogglePin: (sessionId: string) => Promise<void> | void;
-  handleToggleSubagentExpansion: (sessionId: string) => void;
-  item: NavigationMenuItem;
-  pinLabel: string;
-  session: Session;
-  setActiveSessionMoreMenuId: React.Dispatch<React.SetStateAction<string>>;
-  subagentParentIds: ReadonlySet<string>;
-  tCommon: TCommon;
-  unpinLabel: string;
-}
-
-export function buildSessionRowActions({
-  activeSessionMoreMenuId,
-  expandedSubagentParentIds,
-  handleMenuItemContextMenu,
-  handleTogglePin,
-  handleToggleSubagentExpansion,
-  item,
-  pinLabel,
-  session,
-  setActiveSessionMoreMenuId,
-  subagentParentIds,
-  tCommon,
-  unpinLabel,
-}: BuildSessionRowActionsParams): NavigationMenuRowAction[] {
-  const isChildSession =
-    Boolean(session.parentSessionId) || item.id.includes(SUBAGENT_SESSION_ID_SEGMENT);
-
-  // Subagent rows have no pin/more-menu affordances.
-  if (isChildSession) return [];
-
-  const rowActions: NavigationMenuRowAction[] = [];
-  const hasSubagentChildren = subagentParentIds.has(item.id);
-  if (hasSubagentChildren) {
-    const expanded = expandedSubagentParentIds.has(item.id);
-    rowActions.push({
-      icon: expanded ? ChevronsDownUp : ChevronsUpDown,
-      label: expanded
-        ? tCommon("sessions:sidebar.hideSubagents", "Hide subagents")
-        : tCommon("sessions:sidebar.showSubagents", "Show subagents"),
-      active: expanded,
-      onClick: () => handleToggleSubagentExpansion(item.id),
-    });
-  }
-
-  if (!isChatPanelTuiSessionId(item.id)) {
-    rowActions.push({
-      icon: session.pinned ? PinOff : Pin,
-      label: session.pinned ? unpinLabel : pinLabel,
-      onClick: () => {
-        void handleTogglePin(item.id);
-      },
-    });
-  }
-
-  if (!isCursorIdeSession(item.id)) {
-    rowActions.push({
-      icon: MoreHorizontal,
-      label: tCommon("actions.more", "More actions"),
-      active: activeSessionMoreMenuId === item.id,
-      onClick: (event) => {
-        setActiveSessionMoreMenuId(item.id);
-        void handleMenuItemContextMenu(event, item.key, item).finally(() => {
-          setActiveSessionMoreMenuId((currentId) =>
-            currentId === item.id ? "" : currentId
-          );
-        });
-      },
-    });
-  }
-
-  return rowActions;
-}
-
 interface UseSessionRowActionsParams {
   activeSessionMoreMenuId: string;
   deleteSessionCreatorDraft: (draftId: string) => void;
@@ -139,19 +57,13 @@ export function useDecorateSessionRowActions({
 }: UseSessionRowActionsParams): (
   items: readonly NavigationMenuItem[]
 ) => NavigationMenuItem[] {
-  const decorateSessionItems = useCallback(
-    (items: readonly NavigationMenuItem[]): NavigationMenuItem[] => {
-      const decorateItem = (item: NavigationMenuItem): NavigationMenuItem => {
-        const decoratedChildren = item.children
-          ? item.children.map(decorateItem)
-          : undefined;
-        const baseItem = decoratedChildren
-          ? { ...item, children: decoratedChildren }
-          : item;
+  return useCallback(
+    (items: readonly NavigationMenuItem[]): NavigationMenuItem[] =>
+      items.map((item) => {
         const draftId = getDraftIdFromMenuItemId(item.id);
         if (draftId) {
           return {
-            ...baseItem,
+            ...item,
             showMoreActions: true,
             rowActions: [
               {
@@ -164,31 +76,57 @@ export function useDecorateSessionRowActions({
         }
 
         const session = sessionMap.get(item.id);
-        if (!session) return baseItem;
-        const rowActions = buildSessionRowActions({
-          activeSessionMoreMenuId,
-          expandedSubagentParentIds,
-          handleMenuItemContextMenu,
-          handleTogglePin,
-          handleToggleSubagentExpansion,
-          item,
-          pinLabel,
-          session,
-          setActiveSessionMoreMenuId,
-          subagentParentIds,
-          tCommon,
-          unpinLabel,
-        });
+        if (!session) return item;
+        const rowActions: NavigationMenuRowAction[] = [];
+        const isChildSession =
+          Boolean(session.parentSessionId) ||
+          item.id.includes(SUBAGENT_SESSION_ID_SEGMENT);
+        // Subagent rows have no pin/more-menu affordances.
+        if (isChildSession) return item;
+        const hasSubagentChildren = subagentParentIds.has(item.id);
+        if (hasSubagentChildren) {
+          const expanded = expandedSubagentParentIds.has(item.id);
+          rowActions.push({
+            icon: expanded ? ChevronsDownUp : ChevronsUpDown,
+            label: expanded
+              ? tCommon("sessions:sidebar.hideSubagents", "Hide subagents")
+              : tCommon("sessions:sidebar.showSubagents", "Show subagents"),
+            onClick: () => handleToggleSubagentExpansion(item.id),
+          });
+        }
+        if (!isChildSession && !isChatPanelTuiSessionId(item.id)) {
+          rowActions.push({
+            icon: session.pinned ? PinOff : Pin,
+            label: session.pinned ? unpinLabel : pinLabel,
+            onClick: () => {
+              void handleTogglePin(item.id);
+            },
+          });
+        }
+        if (!isCursorIdeSession(item.id)) {
+          rowActions.push({
+            icon: MoreHorizontal,
+            label: tCommon("actions.more"),
+            active: activeSessionMoreMenuId === item.id,
+            dataTestId: `sidebar-session-more-${item.id}`,
+            onClick: (event) => {
+              setActiveSessionMoreMenuId(item.id);
+              void handleMenuItemContextMenu(event, item.key, item).finally(
+                () => {
+                  setActiveSessionMoreMenuId((currentId) =>
+                    currentId === item.id ? "" : currentId
+                  );
+                }
+              );
+            },
+          });
+        }
         return {
-          ...baseItem,
-          // # ORG2 tree sessions can be nested under child rows; recursive decoration must explicitly enable the action slot so NavigationMenuRow swaps the timestamp for pin/more actions on hover.
+          ...item,
           showMoreActions: true,
           rowActions,
         };
-      };
-
-      return items.map(decorateItem);
-    },
+      }),
     [
       activeSessionMoreMenuId,
       deleteSessionCreatorDraft,
@@ -204,6 +142,4 @@ export function useDecorateSessionRowActions({
       unpinLabel,
     ]
   );
-
-  return decorateSessionItems;
 }

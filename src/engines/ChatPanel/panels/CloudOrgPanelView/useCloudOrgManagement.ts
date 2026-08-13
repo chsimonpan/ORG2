@@ -11,7 +11,7 @@
  * so they fail fast without a round-trip — the server guard stays the
  * authority for races.
  */
-import { useAtom, useSetAtom } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -24,6 +24,7 @@ import {
   type CloudOrgMember,
   ensureFreshSession,
 } from "@src/features/Org2Cloud/org2CloudClient";
+import { broadcastOrgControlChangedToPeers } from "@src/features/Org2Cloud/org2CloudControlBus";
 import {
   type CreatedCloudInvite,
   createCloudInvite,
@@ -37,20 +38,30 @@ import {
   updateCloudMemberRole,
 } from "@src/features/Org2Cloud/org2CloudManagementClient";
 import {
+  CLOUD_INVITE_STATE,
   type CloudAssignableRole,
   type CloudInviteRecord,
   cloudManagementErrorMessage,
+  deriveCloudInviteState,
   wouldRemoveLastAdmin,
 } from "@src/features/Org2Cloud/org2CloudOrgManagement";
-import { useRefetchOrg2CloudOrgs } from "@src/features/Org2Cloud/org2CloudOrgsAtom";
+import {
+  org2CloudRosterVersionAtom,
+  useRefetchOrg2CloudOrgs,
+} from "@src/features/Org2Cloud/org2CloudOrgsAtom";
 import { setMemberSharingFloor } from "@src/features/Org2Cloud/org2CloudSyncClient";
 import { createLogger } from "@src/hooks/logger";
-import { closeCloudOrgManagementChatPanelTabAtom } from "@src/store/chatPanel/chatPanelTabsAtom";
+import { closeOrganizationChatPanelTabAtom } from "@src/store/chatPanel/chatPanelTabsAtom";
 import { getInviteExpiresAt } from "@src/store/collaboration/inviteDefaults";
 import {
   COLLAB_SESSION_ACCESS_MODE,
   type CollabSessionAccessMode,
 } from "@src/store/collaboration/types";
+import {
+  SETUP_GUIDE_PERSISTED_MILESTONE,
+  completeSetupGuideMilestone,
+} from "@src/store/settings/setupGuideProgress";
+import { saveSetupGuideProgressAtom } from "@src/store/settings/setupGuideProgressAtom";
 import { copyText } from "@src/util/data/clipboard";
 
 const log = createLogger("CloudOrgManagement");
@@ -82,9 +93,12 @@ export function useCloudOrgManagement({
   const { t } = useTranslation("navigation");
   const [auth, setAuth] = useAtom(org2CloudAuthAtom);
   const closeCloudOrgManagementTab = useSetAtom(
-    closeCloudOrgManagementChatPanelTabAtom
+    closeOrganizationChatPanelTabAtom
   );
+  const saveSetupGuideProgress = useSetAtom(saveSetupGuideProgressAtom);
   const refetchOrgs = useRefetchOrg2CloudOrgs();
+  const rosterVersionByOrg = useAtomValue(org2CloudRosterVersionAtom);
+  const rosterVersion = rosterVersionByOrg[orgId] ?? 0;
 
   // Invites (admin-only surface)
   const [invites, setInvites] = useState<CloudInviteRecord[]>([]);
@@ -135,9 +149,10 @@ export function useCloudOrgManagement({
     return fresh.accessToken;
   }, [setAuth, t]);
 
-  // Invite inventory: admin-only; reset + refetch when the panel switches
-  // orgs (cloud_list_invites raises ORG2_ADMIN_REQUIRED for non-admins, so
-  // members never even call it).
+  // Org switches own the panel-local reset. Keep this separate from the
+  // inventory fetch below: a teammate accepting an invite bumps the roster
+  // version, but must not erase the still-usable one-time copy window for a
+  // multi-use invite.
   useEffect(() => {
     setInvites([]);
     setInviteListError(null);
@@ -149,13 +164,34 @@ export function useCloudOrgManagement({
     setRenameSaved(false);
     setTransferError(null);
     setDeleteError(null);
+  }, [orgId, isAdmin]);
+
+  // Invite inventory: admin-only. A successful accept updates
+  // org_memberships, whose Realtime invalidation bumps this org's roster
+  // version. Refetch on that signal so usedCount / remaining uses do not stay
+  // stale in an already-open owner panel. cloud_list_invites raises
+  // ORG2_ADMIN_REQUIRED for non-admins, so members never call it.
+  useEffect(() => {
     if (!isAdmin) return;
     let cancelled = false;
     void (async () => {
       try {
+        setInviteListError(null);
         const token = await getFreshToken();
         const list = await listCloudInvites(token, orgId);
-        if (!cancelled) setInvites(list);
+        if (!cancelled) {
+          setInvites(list);
+          setLatestCreatedInvite((current) => {
+            if (!current) return null;
+            const refreshed = list.find(
+              (invite) => invite.inviteId === current.inviteId
+            );
+            return refreshed &&
+              deriveCloudInviteState(refreshed) === CLOUD_INVITE_STATE.ACTIVE
+              ? current
+              : null;
+          });
+        }
       } catch (error) {
         log.warn("cloud_list_invites failed:", error);
         if (!cancelled) {
@@ -166,7 +202,7 @@ export function useCloudOrgManagement({
     return () => {
       cancelled = true;
     };
-  }, [orgId, isAdmin, getFreshToken, t]);
+  }, [orgId, isAdmin, getFreshToken, rosterVersion, t]);
 
   const flashCopied = useCallback(() => {
     setCopyingInvite(true);
@@ -190,6 +226,14 @@ export function useCloudOrgManagement({
               : getInviteExpiresAt(options.expiresInDays),
         });
         setLatestCreatedInvite(created);
+        void saveSetupGuideProgress((progress) =>
+          completeSetupGuideMilestone(
+            progress,
+            SETUP_GUIDE_PERSISTED_MILESTONE.TEAMMATE_INVITED
+          )
+        ).catch((error: unknown) => {
+          log.warn("failed to persist setup guide invite milestone", error);
+        });
         // Local prepend mirrors the server row (created_at desc ordering)
         // without an extra list round-trip.
         setInvites((current) => [
@@ -215,7 +259,14 @@ export function useCloudOrgManagement({
         setCreatingInvite(false);
       }
     },
-    [creatingInvite, flashCopied, getFreshToken, orgId, t]
+    [
+      creatingInvite,
+      flashCopied,
+      getFreshToken,
+      orgId,
+      saveSetupGuideProgress,
+      t,
+    ]
   );
 
   const handleCopyInvite = useCallback(async () => {
@@ -388,6 +439,7 @@ export function useCloudOrgManagement({
       try {
         const token = await getFreshToken();
         await renameCloudOrg(token, orgId, name);
+        broadcastOrgControlChangedToPeers(orgId, "roster");
         // Selector + panel header read from org2CloudOrgsAtom.
         await refetchOrgs({
           until: (orgs) =>

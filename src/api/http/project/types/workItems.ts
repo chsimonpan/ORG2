@@ -6,6 +6,7 @@ import type {
   ProofOfWork,
 } from "./agentWorkflow";
 import type { CommentEntry, TodoEntry } from "./common";
+import type { ProjectData, ProjectOrg } from "./projectRecords";
 import type { WorkItemRoutineSource, WorkItemSchedule } from "./routines";
 
 export const WORK_ITEM_HISTORY_ACTION = {
@@ -154,6 +155,37 @@ export interface WorkItemWorkProduct {
   updatedAt: string;
 }
 
+export type WorkItemHandoffStatus = "pending" | "accepted" | "returned";
+
+export interface WorkItemHandoff {
+  id: string;
+  status: WorkItemHandoffStatus;
+  senderMemberId: string;
+  senderName: string;
+  recipientMemberId: string;
+  recipientName: string;
+  note?: string;
+  requestedAt: string;
+  respondedAt?: string;
+  responseNote?: string;
+}
+
+export interface WorkItemHandoffTransition {
+  handoffId: string;
+  action: "accept" | "return";
+  actor: WorkItemMutationActor;
+  note?: string;
+}
+
+/** Immutable provenance for the agent session that created a Work Item. */
+export interface WorkItemOriginSession {
+  session_id: string;
+  provider: string;
+  actor_id: string;
+  session_type: "native" | "cli";
+  captured_at: string;
+}
+
 export interface WorkItemFrontmatter {
   id: string;
   short_id: string;
@@ -166,9 +198,11 @@ export interface WorkItemFrontmatter {
   labels: string[];
   milestone?: string;
   parent?: string;
+  stage?: number;
   start_date?: string;
   target_date?: string;
   created_by?: string;
+  origin_session?: WorkItemOriginSession;
   created_at: string;
   updated_at: string;
   deleted_at?: string;
@@ -176,6 +210,7 @@ export interface WorkItemFrontmatter {
   todos: TodoEntry[];
   comments?: CommentEntry[];
   history?: WorkItemHistoryEvent[];
+  handoff?: WorkItemHandoff;
   linked_sessions?: LinkedSession[];
   proof_of_work?: ProofOfWork;
   orchestrator_config?: OrchestratorConfig;
@@ -212,10 +247,12 @@ export interface WorkItemPartialUpdate {
   assigneeType?: string | null;
   labels?: string[];
   milestone?: string | null;
+  stage?: number | null;
   startDate?: string | null;
   targetDate?: string | null;
   todos?: TodoEntry[];
   comments?: CommentEntry[];
+  handoff?: WorkItemHandoff | null;
   linkedSessions?: LinkedSession[];
   orchestratorConfig?: OrchestratorConfig;
   orchestratorState?: OrchestratorState;
@@ -223,6 +260,13 @@ export interface WorkItemPartialUpdate {
   executionLock?: WorkItemExecutionLock | null;
   closeOut?: WorkItemCloseOut | null;
   workProducts?: WorkItemWorkProduct[];
+  /** Identity of the user initiating this mutation; used only for history attribution. */
+  actor?: WorkItemMutationActor;
+}
+
+export interface WorkItemMutationActor {
+  id: string;
+  name: string;
 }
 
 export interface ResolvedPerson {
@@ -275,11 +319,13 @@ export interface EnrichedWorkItem {
   updatedAt: string;
   deletedAt?: string;
   createdBy?: string;
+  originSession?: WorkItemOriginSession;
   createdByPerson?: ResolvedPerson;
 
   todos: TodoEntry[];
   comments: CommentEntry[];
   history: WorkItemHistoryEvent[];
+  handoff?: WorkItemHandoff;
 
   linkedSessions: LinkedSession[];
   proofOfWork?: ProofOfWork;
@@ -351,27 +397,31 @@ export interface StatusCounts {
   duplicate: number;
 }
 
-export interface GroupedWorkItems {
-  backlog: EnrichedWorkItem[];
-  planned: EnrichedWorkItem[];
-  inProgress: EnrichedWorkItem[];
-  inReview: EnrichedWorkItem[];
-  completed: EnrichedWorkItem[];
-  cancelled: EnrichedWorkItem[];
-  duplicate: EnrichedWorkItem[];
-}
-
 /**
- * Complete work items response with all pre-computed views.
- * Single IPC call returns everything needed for display.
+ * Work-items response with only the requested view projection.
  */
 export interface WorkItemsViewData {
   items: EnrichedWorkItem[];
   counts: StatusCounts;
-  kanbanTasks: RustKanbanTask[];
-  ganttTasks: RustGanttTask[];
-  calendarEvents: RustCalendarEvent[];
-  grouped: GroupedWorkItems;
+  kanbanTasks?: RustKanbanTask[];
+  ganttTasks?: RustGanttTask[];
+  calendarEvents?: RustCalendarEvent[];
+}
+
+export interface WorkspaceProjectWorkItems {
+  project: ProjectData;
+  workItems: EnrichedWorkItem[];
+}
+
+export interface WorkspaceStandaloneWorkItem {
+  orgId: string;
+  workItem: WorkItemData;
+}
+
+export interface WorkspaceWorkItemsData {
+  projectEntries: WorkspaceProjectWorkItems[];
+  standaloneWorkItems: WorkspaceStandaloneWorkItem[];
+  orgs: ProjectOrg[];
 }
 
 export interface BatchItemError {

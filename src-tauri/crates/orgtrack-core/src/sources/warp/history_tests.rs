@@ -95,6 +95,30 @@ fn discovers_official_cross_platform_database_paths() {
 }
 
 #[test]
+fn candidate_paths_include_explicit_xdg_state_home_root() {
+    // `dirs::state_dir()` is `None` on macOS/Windows even when the user
+    // exports `$XDG_STATE_HOME` for an XDG-aware Warp install — the explicit
+    // env probe must appear as its own candidate. Restore the var afterwards
+    // so parallel tests on XDG-configured machines keep their environment.
+    let key = "XDG_STATE_HOME";
+    let original = std::env::var_os(key);
+    std::env::set_var(key, "/orgii-test-xdg/state-home");
+
+    let paths = warp_history_candidate_paths();
+
+    match original {
+        Some(value) => std::env::set_var(key, value),
+        None => std::env::remove_var(key),
+    }
+
+    assert!(paths.contains(
+        &PathBuf::from("/orgii-test-xdg/state-home")
+            .join("warp-terminal")
+            .join(WARP_DB_FILENAME)
+    ));
+}
+
+#[test]
 fn session_prefix_round_trips() {
     assert_eq!(
         warp_conversation_id_from_session_id("warpapp-conversation-1").unwrap(),
@@ -143,14 +167,8 @@ fn metadata_uses_summary_usage_parent_and_invalidates_cache_signatures() {
         .expect("record");
     let blobs = load_task_blobs(&conn, "conversation-1").expect("task blobs");
     let analysis = analyze_task_blobs("warpapp-conversation-1", &blobs, 0);
-    let input = conversation_to_cache_input(
-        record.clone(),
-        analysis,
-        Path::new("/tmp/warp.sqlite"),
-        100,
-        200,
-        "wal:10",
-    );
+    let input =
+        conversation_to_cache_input(record.clone(), analysis, Path::new("/tmp/warp.sqlite"));
 
     assert_eq!(input.session_id, "warpapp-conversation-1");
     assert_eq!(input.name, "Warp importer");
@@ -186,7 +204,7 @@ fn metadata_uses_summary_usage_parent_and_invalidates_cache_signatures() {
         ..record
     };
     let mut content_changed = cached_signature.clone();
-    content_changed.source_fingerprint = warp_source_fingerprint(&changed, "wal:10");
+    content_changed.source_fingerprint = warp_source_fingerprint(&changed);
     assert!(!imported_cache::record_matches_cached_signature(
         &cached_signature,
         &content_changed

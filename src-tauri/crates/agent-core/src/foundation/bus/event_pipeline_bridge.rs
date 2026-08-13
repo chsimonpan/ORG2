@@ -23,6 +23,7 @@ use serde_json::Value;
 use tauri::AppHandle;
 
 use core_types::session_event::SessionEvent;
+use core_types::session_event::ShellReplayState;
 
 // ============================================================================
 // Slot signatures
@@ -50,6 +51,17 @@ pub type UpdateSpawningToolArgsFn = fn(
 /// Like [`UpdateSpawningToolArgsFn`] but matches by LLM-assigned `call_id`.
 pub type UpdateToolArgsByCallIdFn =
     fn(handle: &AppHandle, session_id: &str, call_id: &str, merge_args: Value) -> Option<String>;
+
+/// Update the canonical shell tool-call's bounded latest replay state by exact
+/// call identity. `seed_bookmark` inserts the immutable initial watermark only
+/// when that call has no bookmark on the event yet.
+pub type UpdateShellReplayByCallIdFn = fn(
+    handle: &AppHandle,
+    session_id: &str,
+    call_id: &str,
+    state: ShellReplayState,
+    seed_bookmark: bool,
+) -> Result<Option<String>, String>;
 
 /// Flip a still-running spawning tool_call (matched by `call_id`) to a
 /// terminal `display_status` and write-through to SQLite. Used when a
@@ -89,6 +101,9 @@ pub type PinSessionFn = fn(handle: &AppHandle, session_id: &str);
 /// Unpin `session_id`; the wire side also evicts any newly-stale stores from
 /// the in-memory map.
 pub type UnpinSessionFn = fn(handle: &AppHandle, session_id: &str);
+
+/// Immediately remove a deleted session from the EventStore LRU and store map.
+pub type EvictSessionFn = fn(handle: &AppHandle, session_id: &str);
 
 /// Snapshot the in-memory event list for `session_id`. Returns an empty
 /// vector when the session has no live store.
@@ -141,8 +156,7 @@ pub type PersistUserMessageEventFn = fn(
     images: Option<&[String]>,
     source: PersistedUserMessageSource,
     turn_intent_id: &str,
-    execution_turn_id: &str,
-);
+) -> Result<(), String>;
 
 // ============================================================================
 // Slots
@@ -152,6 +166,7 @@ static PUSH_EVENTS: OnceLock<PushEventsFn> = OnceLock::new();
 static SCHEDULE_NOTIFY: OnceLock<ScheduleNotifyFn> = OnceLock::new();
 static UPDATE_SPAWNING_TOOL_ARGS: OnceLock<UpdateSpawningToolArgsFn> = OnceLock::new();
 static UPDATE_TOOL_ARGS_BY_CALL_ID: OnceLock<UpdateToolArgsByCallIdFn> = OnceLock::new();
+static UPDATE_SHELL_REPLAY_BY_CALL_ID: OnceLock<UpdateShellReplayByCallIdFn> = OnceLock::new();
 static COMPLETE_TOOL_CALL_BY_CALL_ID: OnceLock<CompleteToolCallByCallIdFn> = OnceLock::new();
 static FINALIZE_STREAMING: OnceLock<FinalizeStreamingFn> = OnceLock::new();
 static SET_SESSION_STREAMING: OnceLock<SetSessionStreamingFn> = OnceLock::new();
@@ -159,6 +174,7 @@ static REPLACE_STREAMING_EVENT: OnceLock<ReplaceStreamingEventFn> = OnceLock::ne
 static REMOVE_EVENTS_BY_IDS: OnceLock<RemoveEventsByIdsFn> = OnceLock::new();
 static PIN_SESSION: OnceLock<PinSessionFn> = OnceLock::new();
 static UNPIN_SESSION: OnceLock<UnpinSessionFn> = OnceLock::new();
+static EVICT_SESSION: OnceLock<EvictSessionFn> = OnceLock::new();
 static READ_SESSION_EVENTS: OnceLock<ReadSessionEventsFn> = OnceLock::new();
 static FINALIZE_PLAN_REVISION_EVENTS: OnceLock<FinalizePlanRevisionEventsFn> = OnceLock::new();
 static PERSIST_EVENTS: OnceLock<PersistEventsFn> = OnceLock::new();
@@ -178,6 +194,7 @@ pub fn register(
     schedule_notify: ScheduleNotifyFn,
     update_spawning_tool_args: UpdateSpawningToolArgsFn,
     update_tool_args_by_call_id: UpdateToolArgsByCallIdFn,
+    update_shell_replay_by_call_id: UpdateShellReplayByCallIdFn,
     complete_tool_call_by_call_id: CompleteToolCallByCallIdFn,
     finalize_streaming: FinalizeStreamingFn,
     set_session_streaming: SetSessionStreamingFn,
@@ -185,6 +202,7 @@ pub fn register(
     remove_events_by_ids: RemoveEventsByIdsFn,
     pin_session: PinSessionFn,
     unpin_session: UnpinSessionFn,
+    evict_session: EvictSessionFn,
     read_session_events: ReadSessionEventsFn,
     finalize_plan_revision_events: FinalizePlanRevisionEventsFn,
     persist_events: PersistEventsFn,
@@ -195,6 +213,7 @@ pub fn register(
     let _ = SCHEDULE_NOTIFY.set(schedule_notify);
     let _ = UPDATE_SPAWNING_TOOL_ARGS.set(update_spawning_tool_args);
     let _ = UPDATE_TOOL_ARGS_BY_CALL_ID.set(update_tool_args_by_call_id);
+    let _ = UPDATE_SHELL_REPLAY_BY_CALL_ID.set(update_shell_replay_by_call_id);
     let _ = COMPLETE_TOOL_CALL_BY_CALL_ID.set(complete_tool_call_by_call_id);
     let _ = FINALIZE_STREAMING.set(finalize_streaming);
     let _ = SET_SESSION_STREAMING.set(set_session_streaming);
@@ -202,6 +221,7 @@ pub fn register(
     let _ = REMOVE_EVENTS_BY_IDS.set(remove_events_by_ids);
     let _ = PIN_SESSION.set(pin_session);
     let _ = UNPIN_SESSION.set(unpin_session);
+    let _ = EVICT_SESSION.set(evict_session);
     let _ = READ_SESSION_EVENTS.set(read_session_events);
     let _ = FINALIZE_PLAN_REVISION_EVENTS.set(finalize_plan_revision_events);
     let _ = PERSIST_EVENTS.set(persist_events);
@@ -241,6 +261,17 @@ pub fn schedule_notify(handle: &AppHandle, session_id: &str) {
     }
 }
 
+pub fn evict_session(handle: &AppHandle, session_id: &str) {
+    if let Some(f) = EVICT_SESSION.get() {
+        f(handle, session_id);
+    } else {
+        tracing::warn!(
+            "[event-pipeline-bridge] evict_session called before register for {}",
+            session_id
+        );
+    }
+}
+
 pub fn update_spawning_tool_args(
     handle: &AppHandle,
     session_id: &str,
@@ -273,6 +304,25 @@ pub fn update_tool_args_by_call_id(
                 session_id
             );
             None
+        }
+    }
+}
+
+pub fn update_shell_replay_by_call_id(
+    handle: &AppHandle,
+    session_id: &str,
+    call_id: &str,
+    state: ShellReplayState,
+    seed_bookmark: bool,
+) -> Result<Option<String>, String> {
+    match UPDATE_SHELL_REPLAY_BY_CALL_ID.get() {
+        Some(f) => f(handle, session_id, call_id, state, seed_bookmark),
+        None => {
+            tracing::warn!(
+                "[event-pipeline-bridge] update_shell_replay_by_call_id called before register for {}",
+                session_id
+            );
+            Ok(None)
         }
     }
 }
@@ -433,10 +483,9 @@ pub fn persist_user_message_event(
     images: Option<&[String]>,
     source: PersistedUserMessageSource,
     turn_intent_id: &str,
-    execution_turn_id: &str,
-) {
+) -> Result<(), String> {
     if let Some(f) = PERSIST_USER_MESSAGE_EVENT.get() {
-        f(
+        return f(
             handle,
             session_id,
             message_id,
@@ -445,12 +494,19 @@ pub fn persist_user_message_event(
             images,
             source,
             turn_intent_id,
-            execution_turn_id,
         );
+    }
+    tracing::warn!(
+        "[event-pipeline-bridge] persist_user_message_event called before register for {}",
+        session_id
+    );
+    if source.is_agent_org_inbox_transcript() {
+        Err(format!(
+            "event pipeline is not registered; refusing to acknowledge Agent Org Inbox transcript for session {session_id}"
+        ))
     } else {
-        tracing::warn!(
-            "[event-pipeline-bridge] persist_user_message_event called before register for {}",
-            session_id
-        );
+        // Preserve the legacy non-fatal behavior for ordinary user input in
+        // unit tests and minimal runtimes that intentionally omit the UI bus.
+        Ok(())
     }
 }

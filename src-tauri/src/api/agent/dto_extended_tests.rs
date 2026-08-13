@@ -2,6 +2,8 @@
 // Included from dto.rs via: #[cfg(test)] #[path = "dto_extended_tests.rs"] mod dto_extended_tests_ext;
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
+// DTO scenarios mutate only the configuration field relevant to each conversion.
 mod dto_extended_tests {
     // Use full paths since this module is included at the root level of dto.rs
     use crate::api::agent::dto::{
@@ -2621,9 +2623,9 @@ mod dto_extended_tests {
         let view = AgentLearningsView::from(&cfg);
         let json = serde_json::to_string(&view).expect("serialize");
         let back: AgentLearningsView = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(back.enabled, false);
-        assert_eq!(back.extract_memories_enabled, false);
-        assert_eq!(back.auto_dream_enabled, false);
+        assert!(!back.enabled);
+        assert!(!back.extract_memories_enabled);
+        assert!(!back.auto_dream_enabled);
     }
 
     #[test]
@@ -2660,17 +2662,21 @@ mod dto_extended_tests {
 
     #[test]
     fn integrations_view_version_constant_not_zero() {
-        assert!(
-            IntegrationsView::VERSION > 0,
-            "IntegrationsView::VERSION must be > 0"
-        );
+        const {
+            assert!(
+                IntegrationsView::VERSION > 0,
+                "IntegrationsView::VERSION must be > 0"
+            );
+        }
     }
 
     #[test]
     fn agent_runtime_view_version_constant_not_zero() {
-        assert!(
-            AgentRuntimeView::VERSION > 0,
-            "AgentRuntimeView::VERSION must be > 0"
-        );
+        const {
+            assert!(
+                AgentRuntimeView::VERSION > 0,
+                "AgentRuntimeView::VERSION must be > 0"
+            );
+        }
     }
 } // end dto_extended_tests

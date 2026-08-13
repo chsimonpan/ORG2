@@ -7,13 +7,13 @@
  * - Load keys from local credentials store
  * - Save, delete, validate, and refresh quotas per key
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
+  archiveCursorBillingUsageCache,
   deleteKey as deleteKeyRpc,
   getFullKey,
   getKey,
-  listKeys,
   refreshKeyQuota,
   saveKey as saveKeyRpc,
   updateKeyHealth,
@@ -25,7 +25,15 @@ import type {
   SaveKeyRequest,
 } from "@src/api/services/keyValidation";
 import { createLogger } from "@src/hooks/logger";
-import { replaceModelAliasesFromKeys } from "@src/hooks/models/modelAliasRegistry";
+
+import { runSharedQuotaRefresh } from "./quotaRefreshCoordinator";
+import {
+  getSharedLocalKeys,
+  loadSharedLocalKeys,
+  publishSharedLocalKeys,
+  subscribeSharedLocalKeys,
+  updateSharedLocalKeys,
+} from "./sharedLocalKeyStore";
 
 const log = createLogger("useLocalKeys");
 
@@ -48,6 +56,8 @@ export interface UseLocalKeysReturn {
   keysByAgentType: Map<ModelType, KeyInfo>;
   /** Loading state */
   loading: boolean;
+  /** Whether the initial key-store load has settled at least once. */
+  hasLoaded: boolean;
   /** Error message */
   error: string | null;
   /** Reload keys from the store */
@@ -66,89 +76,6 @@ export interface UseLocalKeysReturn {
   validateKey: (agentType: ModelType) => Promise<boolean>;
 }
 
-let sharedAllKeys: KeyInfo[] = [];
-const sharedAllKeysListeners = new Set<(keys: KeyInfo[]) => void>();
-
-function publishAllKeys(keys: KeyInfo[]) {
-  sharedAllKeys = keys;
-  for (const listener of sharedAllKeysListeners) {
-    listener(keys);
-  }
-}
-
-function updateSharedAllKeys(updater: (prev: KeyInfo[]) => KeyInfo[]) {
-  const next = updater(sharedAllKeys);
-  publishAllKeys(next);
-  return next;
-}
-
-/**
- * E2E / out-of-band writers (e.g. window.__e2e.configure → rpc.validation.saveKey)
- * bypass useLocalKeys.saveKey. Call these helpers so creator validation sees the
- * new account immediately instead of waiting for a later refreshAgents().
- */
-export function syncSharedLocalKeys(keys: KeyInfo[]): void {
-  publishAllKeys(keys);
-  replaceModelAliasesFromKeys(keys);
-}
-
-export function upsertSharedLocalKey(key: KeyInfo): void {
-  updateSharedAllKeys((prev) => {
-    const idx = prev.findIndex((entry) => entry.id === key.id);
-    const next = [...prev];
-    if (idx >= 0) {
-      next[idx] = key;
-    } else {
-      next.push(key);
-    }
-    replaceModelAliasesFromKeys(next);
-    return next;
-  });
-}
-
-/** Merge one model's runtime settings without replacing newer account data. */
-export function mergeSharedLocalKeyModelRuntimeSettings(
-  key: KeyInfo,
-  model: string,
-  changedField: "context_window_override" | "reasoning_effort_override"
-): void {
-  updateSharedAllKeys((prev) => {
-    const current = prev.find((entry) => entry.id === key.id);
-    if (!current) {
-      return [...prev, key];
-    }
-
-    const returnedVariant = key.model_variants?.find(
-      (variant) => variant.model === model
-    );
-    if (!returnedVariant) return prev;
-
-    const currentVariants = current.model_variants ?? [];
-    const variantIndex = currentVariants.findIndex(
-      (variant) => variant.model === model
-    );
-    const nextVariant = {
-      ...(variantIndex >= 0 ? currentVariants[variantIndex] : returnedVariant),
-    };
-    if (changedField === "context_window_override") {
-      nextVariant.context_window_override =
-        returnedVariant.context_window_override;
-    } else {
-      nextVariant.reasoning_effort_override =
-        returnedVariant.reasoning_effort_override;
-    }
-    const nextVariants = [...currentVariants];
-    if (variantIndex >= 0) nextVariants[variantIndex] = nextVariant;
-    else nextVariants.push(nextVariant);
-
-    const next = prev.map((entry) =>
-      entry.id === key.id ? { ...current, model_variants: nextVariants } : entry
-    );
-    replaceModelAliasesFromKeys(next);
-    return next;
-  });
-}
-
 // ============================================
 // Hook Implementation
 // ============================================
@@ -159,18 +86,15 @@ export function useLocalKeys(
   const { autoDetect: autoDetectOnMount = true } = options;
 
   // State
-  const [allKeys, setAllKeys] = useState<KeyInfo[]>(sharedAllKeys);
+  const [allKeys, setAllKeys] = useState<KeyInfo[]>(getSharedLocalKeys);
   const [loading, setLoading] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Track in-flight validations to prevent duplicates
-  const pendingValidations = useRef<Set<string>>(new Set());
-
   useEffect(() => {
-    sharedAllKeysListeners.add(setAllKeys);
-    return () => {
-      sharedAllKeysListeners.delete(setAllKeys);
-    };
+    const unsubscribe = subscribeSharedLocalKeys(setAllKeys);
+    setAllKeys(getSharedLocalKeys());
+    return unsubscribe;
   }, []);
 
   // Derive keys Map from allKeys (first match per agent type - legacy support)
@@ -188,19 +112,18 @@ export function useLocalKeys(
   // Core Methods
   // ============================================
 
-  const refreshAgents = useCallback(async (_force = false) => {
+  const refreshAgents = useCallback(async (force = false) => {
     setLoading(true);
     setError(null);
 
     try {
-      const keys = await listKeys();
-      publishAllKeys(keys);
-      replaceModelAliasesFromKeys(keys);
+      await loadSharedLocalKeys(force);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
       log.error("Failed to load keys:", err);
     } finally {
+      setHasLoaded(true);
       setLoading(false);
     }
   }, []);
@@ -243,7 +166,7 @@ export function useLocalKeys(
 
         const updated = await getKey(agentType, keyId);
         if (updated) {
-          updateSharedAllKeys((prev) => {
+          updateSharedLocalKeys((prev) => {
             const idx = prev.findIndex((k) => k.id === updated.id);
             if (idx >= 0) {
               const next = [...prev];
@@ -267,11 +190,11 @@ export function useLocalKeys(
    */
   const saveKeyFn = useCallback(
     async (request: SaveKeyRequest): Promise<KeyInfo | null> => {
-      const previousKeys = sharedAllKeys;
+      const previousKeys = getSharedLocalKeys();
       let appliedOptimisticUpdate = false;
 
       if (request.id) {
-        updateSharedAllKeys((prev) => {
+        updateSharedLocalKeys((prev) => {
           const idx = prev.findIndex((key) => key.id === request.id);
           if (idx < 0) return prev;
 
@@ -289,7 +212,6 @@ export function useLocalKeys(
             model_variants: request.model_variants ?? next[idx].model_variants,
             default_variants:
               request.default_variants ?? next[idx].default_variants,
-            model_slugs: request.model_slugs ?? next[idx].model_slugs,
             quota_info: request.quota_info ?? next[idx].quota_info,
             has_local_key: request.has_local_key ?? next[idx].has_local_key,
             is_listed: request.is_listed ?? next[idx].is_listed,
@@ -298,14 +220,13 @@ export function useLocalKeys(
             enabled: request.enabled ?? next[idx].enabled,
           };
           appliedOptimisticUpdate = true;
-          replaceModelAliasesFromKeys(next);
           return next;
         });
       }
 
       try {
         const saved = await saveKeyRpc(request);
-        updateSharedAllKeys((prev) => {
+        updateSharedLocalKeys((prev) => {
           const idx = prev.findIndex((k) => k.id === saved.id);
           const next = [...prev];
           if (idx >= 0) {
@@ -313,14 +234,12 @@ export function useLocalKeys(
           } else {
             next.push(saved);
           }
-          replaceModelAliasesFromKeys(next);
           return next;
         });
         return saved;
       } catch {
         if (appliedOptimisticUpdate) {
-          publishAllKeys(previousKeys);
-          replaceModelAliasesFromKeys(previousKeys);
+          publishSharedLocalKeys(previousKeys);
         }
         return null;
       }
@@ -339,11 +258,17 @@ export function useLocalKeys(
       try {
         const deleted = await deleteKeyRpc(agentType, keyId);
         if (deleted) {
-          updateSharedAllKeys((prev) => {
+          if (agentType === "cursor_cli" && keyId) {
+            try {
+              await archiveCursorBillingUsageCache(keyId);
+            } catch (err) {
+              log.warn("Failed to archive Cursor billing cache:", err);
+            }
+          }
+          updateSharedLocalKeys((prev) => {
             const next = keyId
               ? prev.filter((k) => k.id !== keyId)
               : prev.filter((k) => k.agent_type !== agentType);
-            replaceModelAliasesFromKeys(next);
             return next;
           });
           return true;
@@ -372,92 +297,86 @@ export function useLocalKeys(
     async (
       agentType: ModelType,
       keyId?: string,
-      _force?: boolean
+      force = false
     ): Promise<boolean> => {
       const validationKey = `${agentType}:${keyId || "default"}`;
 
-      if (pendingValidations.current.has(validationKey)) {
-        return false;
-      }
+      return runSharedQuotaRefresh(validationKey, force, async () => {
+        try {
+          if (keyId) {
+            const refreshed = await refreshKeyQuota(keyId, force);
+            if (!refreshed) {
+              return false;
+            }
 
-      pendingValidations.current.add(validationKey);
+            const updated = refreshed;
+            updateSharedLocalKeys((prev) => {
+              const idx = prev.findIndex((key) => key.id === updated.id);
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = updated;
+                return next;
+              }
+              return [...prev, updated];
+            });
+            return true;
+          }
 
-      try {
-        if (keyId) {
-          const refreshed = await refreshKeyQuota(keyId);
-          if (!refreshed) {
+          const fullKey = await getFullKey(agentType, keyId);
+          if (!fullKey) return false;
+
+          if (fullKey.api_key) {
+            const testModel =
+              fullKey.model_aliases && fullKey.model_aliases.length > 0
+                ? fullKey.model_aliases[0].alias
+                : undefined;
+
+            const result = await validateKeyRpc(
+              agentType,
+              fullKey.api_key,
+              fullKey.base_url ?? undefined,
+              undefined,
+              testModel,
+              fullKey.protocol ?? undefined
+            );
+
+            const modelsToSave =
+              result.models_available && result.models_available.length > 0
+                ? result.models_available
+                : undefined;
+
+            await updateKeyHealth(
+              fullKey.id,
+              result.valid ? "valid" : "invalid",
+              result.valid ? undefined : result.message,
+              modelsToSave,
+              undefined,
+              undefined,
+              result.model_context_lengths
+            );
+          } else {
             return false;
           }
 
-          const updated = (await getKey(agentType, keyId)) ?? refreshed;
-          updateSharedAllKeys((prev) => {
-            const idx = prev.findIndex((key) => key.id === updated.id);
-            if (idx >= 0) {
-              const next = [...prev];
-              next[idx] = updated;
-              return next;
-            }
-            return [...prev, updated];
-          });
+          const updated = await getKey(agentType, keyId);
+          if (updated) {
+            updateSharedLocalKeys((prev) => {
+              const idx = prev.findIndex((k) => k.id === updated.id);
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = updated;
+                return next;
+              }
+              return prev;
+            });
+          }
+
           return true;
+        } catch (err) {
+          log.error(`[Refresh] Error:`, err);
+          throw err;
         }
-
-        const fullKey = await getFullKey(agentType, keyId);
-        if (!fullKey) return false;
-
-        if (fullKey.api_key) {
-          const testModel =
-            fullKey.model_aliases && fullKey.model_aliases.length > 0
-              ? fullKey.model_aliases[0].alias
-              : undefined;
-
-          const result = await validateKeyRpc(
-            agentType,
-            fullKey.api_key,
-            fullKey.base_url ?? undefined,
-            undefined,
-            testModel,
-            fullKey.protocol ?? undefined
-          );
-
-          const modelsToSave =
-            result.models_available && result.models_available.length > 0
-              ? result.models_available
-              : undefined;
-
-          await updateKeyHealth(
-            fullKey.id,
-            result.valid ? "valid" : "invalid",
-            result.valid ? undefined : result.message,
-            modelsToSave,
-            undefined,
-            undefined,
-            result.model_context_lengths
-          );
-        } else {
-          return false;
-        }
-
-        const updated = await getKey(agentType, keyId);
-        if (updated) {
-          updateSharedAllKeys((prev) => {
-            const idx = prev.findIndex((k) => k.id === updated.id);
-            if (idx >= 0) {
-              const next = [...prev];
-              next[idx] = updated;
-              return next;
-            }
-            return prev;
-          });
-        }
-
-        return true;
-      } catch (err) {
-        log.error(`[Refresh] Error:`, err);
-        throw err;
-      } finally {
-        pendingValidations.current.delete(validationKey);
-      }
+      });
     },
     []
   );
@@ -480,6 +399,7 @@ export function useLocalKeys(
     allKeys,
     keysByAgentType,
     loading,
+    hasLoaded,
     error,
     refreshAgents,
     saveKey: saveKeyFn,

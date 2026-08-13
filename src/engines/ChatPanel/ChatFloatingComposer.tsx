@@ -1,17 +1,17 @@
-import { useAtomValue } from "jotai";
 import { ArrowDown } from "lucide-react";
 import React, { memo, useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AgentOrgMemberIntervention } from "@src/api/tauri/agent";
 import Button from "@src/components/Button";
+import { PILL_CONTROL_IDLE_SURFACE_CLASS } from "@src/components/CompoundPill/config";
+import { COMPOSER_BOTTOM_DOCK_PADDING_CLASS } from "@src/config/composerStackTokens";
 import { DETAIL_PANEL_TOKENS } from "@src/config/detailPanelTokens";
 import {
   ChatRetryBanner,
   toChatRetryKind,
 } from "@src/engines/ChatPanel/components/ChatStatusBanners";
 import type { PendingPlanApproval } from "@src/store/session/planApprovalAtom";
-import { chatStatusBarVisibleAtom } from "@src/store/ui/chatPanelAtom";
 
 import type { ScrollNavState } from "./ChatHistory";
 import InputArea from "./InputArea";
@@ -160,9 +160,6 @@ const ChatFloatingComposer: React.FC<ChatFloatingComposerProps> = memo(
     disableStopWhenEmpty = false,
   }) => {
     const { t } = useTranslation("sessions");
-    // When the chat status bar is shown, the composer sits flush against it —
-    // drop the bottom padding and the fade-out glow so they read as one unit.
-    const statusBarVisible = useAtomValue(chatStatusBarVisibleAtom);
     const [fileChangeStats, setFileChangeStatsState] =
       useState<FileChangeVisibleStats>({
         count: 0,
@@ -212,23 +209,19 @@ const ChatFloatingComposer: React.FC<ChatFloatingComposerProps> = memo(
         aria-label={t("common:chat.scrollToBottom")}
         title={t("common:chat.scrollToBottom")}
         onClick={scrollNav.onScrollToBottom}
-        className="shrink-0"
+        className={`shrink-0 ${PILL_CONTROL_IDLE_SURFACE_CLASS}`}
       />
     ) : null;
 
     return (
       <div
         ref={composerRef}
-        className={`absolute bottom-0 left-0 right-0 z-50 flex w-full flex-shrink-0 flex-col items-center px-2 pt-1 ${
-          statusBarVisible ? "pb-0" : "pb-2"
-        }`}
+        className={`absolute bottom-0 left-0 right-0 z-50 flex w-full flex-shrink-0 flex-col items-center px-2 pt-1 ${COMPOSER_BOTTOM_DOCK_PADDING_CLASS}`}
       >
-        {!statusBarVisible && (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 bottom-0 top-[-28px] bg-gradient-to-t from-chat-pane via-chat-pane/90 to-transparent"
-          />
-        )}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 bottom-0 top-[-28px] bg-gradient-to-t from-chat-pane via-chat-pane/90 to-transparent"
+        />
         <div
           className={`relative z-10 flex w-full flex-col gap-1.5 ${DETAIL_PANEL_TOKENS.contentMaxWidth}`}
         >

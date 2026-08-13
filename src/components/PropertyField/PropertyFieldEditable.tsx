@@ -10,6 +10,10 @@ import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import Button from "@src/components/Button";
+import {
+  type PillControlFocusTreatment,
+  pillControlStateClass,
+} from "@src/components/CompoundPill/config";
 import DropdownSearch from "@src/components/Dropdown/DropdownSearch";
 import DropdownSelectedCheck from "@src/components/Dropdown/DropdownSelectedCheck";
 import {
@@ -20,11 +24,14 @@ import {
 } from "@src/components/Dropdown/tokens";
 import { getViewportSize } from "@src/util/ui/window/viewport";
 
+import { usePropertyDropdownDirection } from "./PropertyDropdownDirection";
+
 // ============================================
 // FieldRow - Interactive row that opens dropdowns
 // ============================================
 
 export type FieldRowVariant = "row" | "pill";
+export type FieldRowIdleSurface = "background" | "fill";
 
 export interface FieldRowProps {
   icon: React.ReactNode;
@@ -39,7 +46,12 @@ export interface FieldRowProps {
   usePencil?: boolean;
   suffix?: React.ReactNode;
   variant?: FieldRowVariant;
+  compactPill?: boolean;
+  idleSurface?: FieldRowIdleSurface;
+  /** Border treatment while hovered/open. Defaults to the standard pill accent. */
+  focusTreatment?: PillControlFocusTreatment;
   borderless?: boolean;
+  disabled?: boolean;
   clearLabel?: string;
   onClear?: () => void;
   onClick: () => void;
@@ -52,12 +64,16 @@ export const FieldRow: React.FC<FieldRowProps> = ({
   value,
   valueClassName = "",
   isSelected,
-  isActive,
+  isActive = false,
   showChevron = true,
   usePencil = false,
   suffix,
   variant = "row",
+  compactPill = false,
+  idleSurface = "background",
+  focusTreatment = "accent",
   borderless = false,
+  disabled = false,
   onClick,
 }) => {
   const EditIcon = usePencil ? Pencil : ChevronDown;
@@ -81,15 +97,18 @@ export const FieldRow: React.FC<FieldRowProps> = ({
           shape="round"
           icon={iconContent}
           onClick={onClick}
-          className={`max-w-[220px] ${pillBorderClass} ${
-            isActive ? "!border-primary-6 !bg-fill-2 !text-primary-6" : ""
-          }`}
+          disabled={disabled}
+          className={`max-w-[220px] ${compactPill ? "!px-2" : ""} ${pillBorderClass} ${pillControlStateClass(isActive, idleSurface, focusTreatment)}`}
           data-field-row
         >
-          <span className={`min-w-0 truncate leading-[18px] ${valueClassName}`}>
-            {value}
+          <span className="inline-flex min-w-0 max-w-full items-center gap-1">
+            <span
+              className={`min-w-0 truncate leading-[18px] ${valueClassName}`}
+            >
+              {value}
+            </span>
+            {suffix}
           </span>
-          {suffix}
         </Button>
       </div>
     );
@@ -108,6 +127,7 @@ export const FieldRow: React.FC<FieldRowProps> = ({
           type="button"
           className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-none bg-transparent px-1.5 py-1.5 text-left outline-none"
           onClick={onClick}
+          disabled={disabled}
         >
           {iconContent}
           <span
@@ -122,6 +142,7 @@ export const FieldRow: React.FC<FieldRowProps> = ({
             type="button"
             aria-label="Open"
             onClick={onClick}
+            disabled={disabled}
             className={`mr-1 flex h-6 w-5 shrink-0 items-center justify-center rounded-md border-none bg-transparent text-text-3 ${isActive ? "flex" : "hidden group-hover/field:flex"}`}
           >
             <EditIcon size={DROPDOWN_ITEM.iconSize} />
@@ -216,22 +237,22 @@ export interface SearchableDropdownProps {
 
 export const SearchableDropdown: React.FC<SearchableDropdownProps> = ({
   children,
-  placeholder = "Search...",
+  placeholder,
   className = "",
   maxHeight = DROPDOWN_PANEL.maxHeight,
   widthMode = "match-parent",
   align = "left",
 }) => {
+  const dropdownDirection = usePropertyDropdownDirection();
   const [searchQuery, setSearchQuery] = useState("");
   const [portalPosition, setPortalPosition] = useState<{
     top: number;
     left?: number;
     right?: number;
+    width?: number;
   } | null>(null);
   const anchorRef = useRef<HTMLDivElement | null>(null);
   const { dropdownRef, resolvedAlign } = useResolvedDropdownAlign(align);
-  const shouldPortal = widthMode === "menu";
-
   const positionClass =
     widthMode === "menu"
       ? resolvedAlign === "right"
@@ -243,13 +264,20 @@ export const SearchableDropdown: React.FC<SearchableDropdownProps> = ({
   const widthClass = widthMode === "menu" ? DROPDOWN_WIDTHS.wideMenuClass : "";
 
   useLayoutEffect(() => {
-    if (!shouldPortal) return;
-
     const updatePosition = () => {
       const anchorElement = anchorRef.current;
       if (!anchorElement) return;
 
       const rect = anchorElement.getBoundingClientRect();
+      if (widthMode === "match-parent") {
+        setPortalPosition({
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+        });
+        return;
+      }
+
       const menuWidth = 200;
       const viewportPadding = 8;
       const { width: vw } = getViewportSize();
@@ -273,7 +301,7 @@ export const SearchableDropdown: React.FC<SearchableDropdownProps> = ({
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
-  }, [resolvedAlign, shouldPortal]);
+  }, [dropdownDirection, resolvedAlign, widthMode]);
 
   const dropdownContent = (
     <>
@@ -289,41 +317,33 @@ export const SearchableDropdown: React.FC<SearchableDropdownProps> = ({
     </>
   );
 
-  if (shouldPortal) {
-    return (
-      <>
-        <div
-          ref={anchorRef}
-          className={`absolute ${positionClass} top-full mt-1 h-0 w-0`}
-        />
-        {portalPosition &&
-          createPortal(
-            <div
-              ref={dropdownRef}
-              data-property-dropdown
-              className={`fixed flex flex-col ${widthClass} ${DROPDOWN_CLASSES.panelAnimated} ${className}`}
-              style={{
-                top: portalPosition.top,
-                left: portalPosition.left,
-                right: portalPosition.right,
-              }}
-            >
-              {dropdownContent}
-            </div>,
-            document.body
-          )}
-      </>
-    );
-  }
-
   return (
-    <div
-      ref={dropdownRef}
-      data-property-dropdown
-      className={`absolute ${positionClass} top-full mt-1 flex flex-col ${widthClass} ${DROPDOWN_CLASSES.panelAnimated} ${className}`}
-    >
-      {dropdownContent}
-    </div>
+    <>
+      <div
+        ref={anchorRef}
+        className={`absolute ${positionClass} ${
+          dropdownDirection === "up" ? "bottom-full mb-1" : "top-full mt-1"
+        } h-0 ${widthMode === "menu" ? "w-0" : ""}`}
+      />
+      {portalPosition &&
+        createPortal(
+          <div
+            ref={dropdownRef}
+            data-property-dropdown
+            className={`fixed flex flex-col ${widthClass} ${DROPDOWN_CLASSES.panelAnimated} ${className}`}
+            style={{
+              top: portalPosition.top,
+              left: portalPosition.left,
+              right: portalPosition.right,
+              width: portalPosition.width,
+              translate: dropdownDirection === "up" ? "0 -100%" : undefined,
+            }}
+          >
+            {dropdownContent}
+          </div>,
+          document.body
+        )}
+    </>
   );
 };
 
@@ -336,6 +356,7 @@ export interface OptionProps {
   iconColor?: string;
   label: string;
   isSelected?: boolean;
+  disabled?: boolean;
   onClick: () => void;
   children?: React.ReactNode;
   /** Stable selector for rendered UI tests. */
@@ -347,6 +368,7 @@ export const Option: React.FC<OptionProps> = ({
   iconColor,
   label,
   isSelected,
+  disabled = false,
   onClick,
   children,
   dataTestId,
@@ -356,13 +378,16 @@ export const Option: React.FC<OptionProps> = ({
     data-testid={dataTestId}
     className={[
       DROPDOWN_CLASSES.item,
-      DROPDOWN_CLASSES.itemHover,
+      !disabled && DROPDOWN_CLASSES.itemHover,
       "w-full justify-between text-left",
       isSelected && DROPDOWN_CLASSES.itemSelected,
+      disabled && DROPDOWN_CLASSES.itemDisabled,
     ]
       .filter(Boolean)
       .join(" ")}
     onClick={onClick}
+    disabled={disabled}
+    aria-disabled={disabled}
   >
     {children ? (
       <>

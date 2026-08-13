@@ -53,12 +53,10 @@ fn error_response(session_id: &str, error: String) -> HousekeeperContextCompacti
 
 async fn load_history(session_id: &str) -> Result<Vec<serde_json::Value>, String> {
     let session_id = session_id.to_string();
-    tokio::task::spawn_blocking(move || {
-        session_persistence::load_llm_history_for_active_journey(&session_id)
-    })
-    .await
-    .map_err(|err| format!("MiniCPM history task failed: {err}"))?
-    .map_err(|err| format!("MiniCPM history load failed: {err}"))
+    tokio::task::spawn_blocking(move || session_persistence::load_llm_history(&session_id))
+        .await
+        .map_err(|err| format!("MiniCPM history task failed: {err}"))?
+        .map_err(|err| format!("MiniCPM history load failed: {err}"))
 }
 
 pub(crate) async fn run_once(session_id: &str, mode: RunMode) -> HousekeeperContextCompactionState {
@@ -242,6 +240,7 @@ async fn enqueue_explicit(
             generation: 0,
             client_message_id: None,
             turn_intent_id: String::new(),
+            org_run_id: None,
             content: "[MiniCPM context maintenance]".to_string(),
             execute: Box::new(move || {
                 Box::pin(async move {

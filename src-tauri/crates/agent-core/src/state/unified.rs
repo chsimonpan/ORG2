@@ -152,9 +152,52 @@ impl AgentAppState {
             ),
         }
 
+        match crate::coordination::agent_org_runs::AgentOrgRunStore::requeue_abandoned_member_tasks_on_startup() {
+            Ok(0) => {}
+            Ok(n) => info!(
+                "[agent-state] Applied failure disposition to {} abandoned Agent Org task(s) on startup",
+                n
+            ),
+            Err(err) => warn!(
+                "[agent-state] Failed to recover abandoned Agent Org tasks on startup: {}",
+                err
+            ),
+        }
+
+        // Interventions cannot survive a process restart: their in-memory
+        // sessions were abandoned above. Clear them before finality checks so
+        // a fully-resolved run is not needlessly paused by an expired control
+        // lease from the previous process.
+        match crate::coordination::agent_member_interventions::AgentMemberInterventionStore::clear_all_active_on_startup() {
+            Ok(0) => {}
+            Ok(n) => info!(
+                "[agent-state] Cleared {} stale member intervention(s) on startup",
+                n
+            ),
+            Err(err) => warn!(
+                "[agent-state] Failed to clear stale member interventions on startup: {}",
+                err
+            ),
+        }
+
+        // Runs whose tasks were already resolved may have been kept open only
+        // by an orphaned queued intent. Close them through the normal atomic
+        // finality path before pausing genuinely unfinished work.
+        match crate::coordination::agent_org_runs::AgentOrgRunStore::reconcile_resolved_running_runs_on_startup() {
+            Ok(0) => {}
+            Ok(n) => info!(
+                "[agent-state] Completed {} fully-resolved Agent Org run(s) during startup recovery",
+                n
+            ),
+            Err(err) => warn!(
+                "[agent-state] Failed to reconcile resolved Agent Org runs on startup: {}",
+                err
+            ),
+        }
+
         // Transition any Agent Org runs that were `running` when the previous
         // process exited to `paused`. Their member sessions are now `abandoned`
-        // (see above), so `reconcile_if_terminal` would auto-terminate the run
+        // (see above), so `reconcile_run_finality` would auto-terminate the run
         // if it remained `running`. By moving to `paused` instead, the run stays
         // visible (non-terminal) and can be resumed from the UI.
         match crate::coordination::agent_org_runs::AgentOrgRunStore::mark_all_running_as_paused_on_startup() {
@@ -165,21 +208,6 @@ impl AgentAppState {
             ),
             Err(err) => warn!(
                 "[agent-state] Failed to pause interrupted Agent Org runs on startup: {}",
-                err
-            ),
-        }
-
-        // Clear all active member interventions: their sessions are now `abandoned`
-        // so the 3-minute TTL window is no longer meaningful. Clearing eagerly
-        // prevents the AgentOrgInterventionPinBar from reappearing after restart.
-        match crate::coordination::agent_member_interventions::AgentMemberInterventionStore::clear_all_active_on_startup() {
-            Ok(0) => {}
-            Ok(n) => info!(
-                "[agent-state] Cleared {} stale member intervention(s) on startup",
-                n
-            ),
-            Err(err) => warn!(
-                "[agent-state] Failed to clear stale member interventions on startup: {}",
                 err
             ),
         }
@@ -219,46 +247,58 @@ impl AgentAppState {
             loop {
                 ticker.tick().await;
 
-                let mut expired_ids = Vec::new();
-                {
+                let candidates: Vec<(String, Arc<AgentSession>)> = {
                     let guard = sessions.lock().await;
-                    for (id, session) in guard.iter() {
-                        if session.is_singleton() {
-                            continue;
-                        }
-                        // A session with an executing or queued turn is NOT idle,
-                        // even if the user hasn't sent a message in over an hour
-                        // (refresh_last_active only fires on send_message). Evicting
-                        // it mid-turn broadcasts session_evicted, which makes the
-                        // frontend downgrade a genuinely-working session to idle.
-                        if session.scheduler.is_processing()
-                            || session.scheduler.pending_count() > 0
-                        {
-                            continue;
-                        }
-                        let idle = session.idle_duration().await;
-                        if idle >= SESSION_IDLE_EVICTION_TIMEOUT {
-                            expired_ids.push(id.clone());
-                        }
+                    guard
+                        .iter()
+                        .filter(|(_, session)| {
+                            !session.is_singleton()
+                                && !session.scheduler.is_processing()
+                                && session.scheduler.pending_count() == 0
+                        })
+                        .map(|(id, session)| (id.clone(), Arc::clone(session)))
+                        .collect()
+                };
+
+                // Never await a per-session mutex while holding the global
+                // sessions registry. A slow/contended idle timestamp must not
+                // block session lookup, creation, or message dispatch.
+                let mut expired_ids = Vec::new();
+                for (id, session) in candidates {
+                    if session.idle_duration().await >= SESSION_IDLE_EVICTION_TIMEOUT {
+                        expired_ids.push((id, session));
                     }
                 }
 
                 if !expired_ids.is_empty() {
                     let mut guard = sessions.lock().await;
-                    for id in &expired_ids {
-                        guard.remove(id);
+                    let mut evicted_ids = Vec::new();
+                    for (id, candidate) in expired_ids {
+                        let still_idle = guard.get(&id).is_some_and(|current| {
+                            Arc::ptr_eq(current, &candidate)
+                                && !current.scheduler.is_processing()
+                                && current.scheduler.pending_count() == 0
+                        });
+                        if !still_idle {
+                            continue;
+                        }
+
+                        guard.remove(&id);
                         debug!("[agent-state] Evicted idle session: {}", id);
                         // Notify the frontend so it can clear any stale
                         // "running" status for this session.
                         crate::bus::broadcast_event(
                             "agent:session_evicted",
-                            serde_json::json!({ "sessionId": id }),
+                            serde_json::json!({ "sessionId": &id }),
+                        );
+                        evicted_ids.push(id);
+                    }
+                    if !evicted_ids.is_empty() {
+                        info!(
+                            "[agent-state] Cleanup task evicted {} idle session(s)",
+                            evicted_ids.len()
                         );
                     }
-                    info!(
-                        "[agent-state] Cleanup task evicted {} idle session(s)",
-                        expired_ids.len()
-                    );
                 }
             }
         });
@@ -302,6 +342,18 @@ impl AgentAppState {
         let mut sessions = self.sessions.lock().await;
         sessions.remove(session_id);
         info!("[agent-state] Removed session: {}", session_id);
+    }
+
+    /// Remove several sessions while holding the registry lock once.
+    ///
+    /// Used after an Agent Org hierarchy transaction commits so descendant
+    /// runtimes cannot remain retained after their durable rows are gone.
+    pub async fn remove_sessions(&self, session_ids: &[String]) {
+        let mut sessions = self.sessions.lock().await;
+        for session_id in session_ids {
+            sessions.remove(session_id);
+            info!("[agent-state] Removed session: {}", session_id);
+        }
     }
 
     /// Invalidate the runtime attached to a session, forcing re-initialization
@@ -420,6 +472,17 @@ impl AgentAppState {
                 reason.as_str()
             );
             true
+        } else if !reason.repairs_missing_session_as_failed() {
+            // Agent Org pause walks the durable roster, which includes lazy
+            // members that have no in-memory runtime yet. Their absence is
+            // expected and must not be rewritten to Failed merely because
+            // the user paused the group chat.
+            info!(
+                "[agent-state] Session not live during cancel; preserving durable status: {} (reason={})",
+                session_id,
+                reason.as_str()
+            );
+            false
         } else {
             // Neither the live session map nor the job registry knows about
             // this session. It may be an orphan DB row from a failed spawn

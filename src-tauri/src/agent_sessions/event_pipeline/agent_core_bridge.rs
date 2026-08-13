@@ -23,6 +23,7 @@ use super::types::{
 };
 
 use agent_core::bus::event_pipeline_bridge as bridge;
+use core_types::session_event::ShellReplayState;
 
 fn push_events_adapter(handle: &AppHandle, session_id: &str, events: Vec<SessionEvent>) {
     let state = handle.state::<EventStoreState>();
@@ -52,6 +53,89 @@ fn update_tool_args_by_call_id_adapter(
 ) -> Option<String> {
     let state = handle.state::<EventStoreState>();
     update_tool_args_by_call_id_with_persist(handle, &state, session_id, call_id, merge_args)
+}
+
+fn update_shell_replay_by_call_id_adapter(
+    handle: &AppHandle,
+    session_id: &str,
+    call_id: &str,
+    replay: ShellReplayState,
+    seed_bookmark: bool,
+) -> Result<Option<String>, String> {
+    let state = handle.state::<EventStoreState>();
+    let (found_id, patched): (Option<String>, Vec<SessionEvent>) =
+        state.with_store_mut(session_id, |store| {
+            let found_id =
+                store.update_shell_replay_by_call_id(call_id, replay.clone(), seed_bookmark);
+            let patched = if found_id.is_some() {
+                store
+                    .events()
+                    .iter()
+                    .filter(|event| {
+                        event.action_type == "tool_call"
+                            && event.call_id.as_deref() == Some(call_id)
+                    })
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            (found_id, patched)
+        });
+
+    let (found_id, patched) = if found_id.is_none() {
+        // LRU/cold-store fallback: resolve only the Rust-authoritative exact
+        // tool-call id. Never guess "last shell". Hydrate a temporary store
+        // so the same monotonic/bookmark rules apply, then repopulate the live
+        // cache and synchronously write the row back.
+        let event_id = format!("tool-call-{call_id}");
+        let cold =
+            session_persistence::get_event(session_id, &event_id).map_err(|err| err.to_string())?;
+        if let Some(cached) = cold {
+            let event = cached_event_to_session_event(&cached);
+            if event.session_id == session_id
+                && event.call_id.as_deref() == Some(call_id)
+                && event.action_type == "tool_call"
+            {
+                let mut temporary = super::store::EventStore::new();
+                temporary.set(vec![event]);
+                let cold_id =
+                    temporary.update_shell_replay_by_call_id(call_id, replay, seed_bookmark);
+                let cold_patched: Vec<_> = temporary.events().to_vec();
+                state.with_store_mut(session_id, |store| {
+                    if store.event_count() == 0 {
+                        store.set(cold_patched.clone());
+                    } else {
+                        store.merge_round_window_events(cold_patched.clone());
+                    }
+                });
+                (cold_id, cold_patched)
+            } else {
+                (None, Vec::new())
+            }
+        } else {
+            (None, Vec::new())
+        }
+    } else {
+        (found_id, patched)
+    };
+
+    if !patched.is_empty() {
+        schedule_notify(handle, &state, session_id);
+        let cached: Vec<_> = patched.iter().map(session_event_to_cached_event).collect();
+        // This bridge is part of the shell completion barrier: final replay
+        // state must be durable before `agent:shell_process_exited` can fire.
+        // Running-state calls use the same synchronous path for deterministic
+        // ordering; they are already throttled by the writer (64 KiB/50 ms).
+        save_events_retry(
+            "update_shell_replay_by_call_id",
+            session_id,
+            &cached,
+            BULK_WRITE_MAX_RETRIES,
+        )?;
+    }
+
+    Ok(found_id)
 }
 
 fn complete_tool_call_by_call_id_adapter(
@@ -196,6 +280,22 @@ fn unpin_session_adapter(handle: &AppHandle, session_id: &str) {
     }
 }
 
+fn evict_session_adapter(handle: &AppHandle, session_id: &str) {
+    let state = handle.state::<EventStoreState>();
+    {
+        let mut manager = state
+            .session_manager
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        manager.evict(session_id);
+    }
+    state
+        .stores
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .remove(session_id);
+}
+
 fn read_session_events_adapter(handle: &AppHandle, session_id: &str) -> Vec<SessionEvent> {
     let state = handle.state::<EventStoreState>();
     state
@@ -315,7 +415,11 @@ fn persist_events_async_adapter(
     });
 }
 
-fn build_persisted_user_message_event(
+#[allow(clippy::too_many_arguments)]
+// This adapter implements the persistence callback signature consumed by
+// agent-core, so its event fields must stay aligned with that boundary.
+fn persist_user_message_event_adapter(
+    handle: &AppHandle,
     session_id: &str,
     message_id: &str,
     content: &str,
@@ -323,9 +427,7 @@ fn build_persisted_user_message_event(
     images: Option<&[String]>,
     source: bridge::PersistedUserMessageSource,
     turn_intent_id: &str,
-    execution_turn_id: &str,
-    created_at: &str,
-) -> SessionEvent {
+) -> Result<(), String> {
     let mut result = serde_json::json!({
         "type": "user",
         "message": { "content": content, "role": "user" },
@@ -342,17 +444,6 @@ fn build_persisted_user_message_event(
             obj.insert(
                 "turnIntentId".to_string(),
                 serde_json::json!(turn_intent_id),
-            );
-        }
-    }
-    // `executionTurnId` is the DialogTurn id carried by assistant event
-    // args.turnId. It is deliberately separate from turnIntentId, which
-    // identifies the submitted user intent and lifecycle record.
-    if !execution_turn_id.is_empty() {
-        if let Some(obj) = result.as_object_mut() {
-            obj.insert(
-                "executionTurnId".to_string(),
-                serde_json::json!(execution_turn_id),
             );
         }
     }
@@ -379,11 +470,27 @@ fn build_persisted_user_message_event(
         .unwrap_or(content)
         .to_string();
 
+    let created_at = if source.is_agent_org_inbox_transcript() {
+        agent_core::session::persistence::message_created_at(session_id, message_id)
+            .map_err(|err| {
+                format!(
+                    "load durable Agent Org inbox transcript timestamp for {message_id} failed: {err}"
+                )
+            })?
+            .ok_or_else(|| {
+                format!(
+                    "durable Agent Org inbox transcript {message_id} disappeared before event persistence"
+                )
+            })?
+    } else {
+        Utc::now().to_rfc3339()
+    };
+
     let mut event = SessionEvent {
         id: format!("user-message-{message_id}"),
         chunk_id: Some(format!("user-message-{message_id}")),
         session_id: session_id.to_string(),
-        created_at: created_at.to_string(),
+        created_at,
         function_name: "user_message".to_string(),
         ui_canonical: "user_message".to_string(),
         action_type: "raw".to_string(),
@@ -404,88 +511,26 @@ fn build_persisted_user_message_event(
         repo_path: None,
         extracted: None,
         payload_refs: Vec::new(),
+        shell_replay: None,
+        shell_replay_bookmarks: None,
         last_extract_at: None,
     };
     event.recompute_extracted();
 
-    event
-}
-
-fn persist_user_message_event_adapter(
-    handle: &AppHandle,
-    session_id: &str,
-    message_id: &str,
-    content: &str,
-    display_text: Option<&str>,
-    images: Option<&[String]>,
-    source: bridge::PersistedUserMessageSource,
-    turn_intent_id: &str,
-    execution_turn_id: &str,
-) {
-    let created_at = Utc::now().to_rfc3339();
-    let event = build_persisted_user_message_event(
-        session_id,
-        message_id,
-        content,
-        display_text,
-        images,
-        source,
-        turn_intent_id,
-        execution_turn_id,
-        &created_at,
-    );
-
     let cached = session_event_to_cached_event(&event);
-    let state = handle.state::<EventStoreState>();
-    state.with_store_mut(session_id, |store| store.merge_events(vec![event]));
-    schedule_notify(handle, &state, session_id);
-    let _ = save_events_retry(
+    // Persist first. If SQLite fails, callers must not invoke the provider or
+    // acknowledge source Inbox rows; the next retry can ensure this same
+    // stable event without duplicating the transcript message.
+    save_events_retry(
         "persist_user_message_event",
         session_id,
         &[cached],
         BULK_WRITE_MAX_RETRIES,
-    );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn persisted_user_message_keeps_execution_turn_id_distinct_from_intent_id() {
-        let event = build_persisted_user_message_event(
-            "session-1",
-            "message-1",
-            "hello",
-            None,
-            None,
-            bridge::PersistedUserMessageSource::User,
-            "intent-1",
-            "execution-1",
-            "2026-08-03T00:00:00+00:00",
-        );
-
-        assert_eq!(event.result["turnIntentId"], "intent-1");
-        assert_eq!(event.result["executionTurnId"], "execution-1");
-    }
-
-    #[test]
-    fn persisted_user_message_omits_empty_execution_turn_id() {
-        let event = build_persisted_user_message_event(
-            "session-1",
-            "message-1",
-            "hello",
-            None,
-            None,
-            bridge::PersistedUserMessageSource::User,
-            "intent-1",
-            "",
-            "2026-08-03T00:00:00+00:00",
-        );
-
-        assert!(event.result.get("executionTurnId").is_none());
-        assert_eq!(event.result["turnIntentId"], "intent-1");
-    }
+    )?;
+    let state = handle.state::<EventStoreState>();
+    state.with_store_mut(session_id, |store| store.merge_events(vec![event]));
+    schedule_notify(handle, &state, session_id);
+    Ok(())
 }
 
 /// One-shot startup repair: finalize historically stranded `awaiting_user`
@@ -586,6 +631,7 @@ pub fn register() {
         schedule_notify_adapter,
         update_spawning_tool_args_adapter,
         update_tool_args_by_call_id_adapter,
+        update_shell_replay_by_call_id_adapter,
         complete_tool_call_by_call_id_adapter,
         finalize_streaming_adapter,
         set_session_streaming_adapter,
@@ -593,6 +639,7 @@ pub fn register() {
         remove_events_by_ids_adapter,
         pin_session_adapter,
         unpin_session_adapter,
+        evict_session_adapter,
         read_session_events_adapter,
         finalize_plan_revision_events_adapter,
         persist_events_adapter,

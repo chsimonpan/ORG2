@@ -17,12 +17,12 @@ use rusqlite::{params, OptionalExtension};
 
 use super::super::helpers::{conn, map_db};
 use super::super::projects::read_project_scoped;
-use super::crud::{read_all_work_items_scoped, read_work_item_scoped};
+use super::crud::{read_all_work_items_scoped_filtered, read_work_item_scoped};
 use crate::projects::io::labels::read_labels;
 use crate::projects::io::members::read_members;
 use crate::projects::types::{
-    EnrichedWorkItem, LabelEntry, MemberEntry, ResolvedLabel, ResolvedMilestone, ResolvedPerson,
-    ResolvedProject, WorkItemData, WorkItemPartialUpdate,
+    EnrichedWorkItem, LabelEntry, MemberEntry, ProjectData, ResolvedLabel, ResolvedMilestone,
+    ResolvedPerson, ResolvedProject, WorkItemData, WorkItemPartialUpdate, WorkItemReadBucket,
 };
 
 /// Default avatar/badge color when a member has no override. Mirrors
@@ -42,23 +42,33 @@ pub fn read_all_work_items_enriched_scoped(
     project_slug: &str,
     org_id: Option<&str>,
 ) -> Result<Vec<EnrichedWorkItem>, String> {
+    read_all_work_items_enriched_scoped_filtered(project_slug, org_id, None)
+}
+
+pub fn read_all_work_items_enriched_scoped_filtered(
+    project_slug: &str,
+    org_id: Option<&str>,
+    read_bucket: Option<WorkItemReadBucket>,
+) -> Result<Vec<EnrichedWorkItem>, String> {
     let project = read_project_scoped(project_slug, org_id)?;
-    let project_id = project.meta.id.clone();
-    let project_name = Some(project.meta.name);
+    let raw_items = read_all_work_items_scoped_filtered(project_slug, org_id, read_bucket)?;
+    enrich_work_items_for_project(&project, raw_items)
+}
 
-    let labels = read_labels(&project_id)?.labels;
-    let members = read_members(&project_id)?.members;
-
+pub(super) fn enrich_work_items_for_project(
+    project: &ProjectData,
+    raw_items: Vec<WorkItemData>,
+) -> Result<Vec<EnrichedWorkItem>, String> {
+    let labels = read_labels(&project.meta.id)?.labels;
+    let members = read_members(&project.meta.id)?.members;
     let label_map = build_label_map(&labels);
     let member_map = build_member_map(&members);
+    let project_name = Some(project.meta.name.clone());
 
-    let raw_items = read_all_work_items_scoped(project_slug, org_id)?;
-    let enriched = raw_items
+    Ok(raw_items
         .into_iter()
-        .map(|item| enrich_work_item(item, &label_map, &member_map, project_slug, &project_name))
-        .collect();
-
-    Ok(enriched)
+        .map(|item| enrich_work_item(item, &label_map, &member_map, &project.slug, &project_name))
+        .collect())
 }
 
 /// Apply a partial patch to a work item and return the enriched result
@@ -207,11 +217,13 @@ pub(super) fn enrich_work_item(
         updated_at: fm.updated_at.clone(),
         deleted_at: fm.deleted_at.clone(),
         created_by: fm.created_by.clone(),
+        origin_session: fm.origin_session.clone(),
         created_by_person,
 
         todos: fm.todos.clone(),
         comments: fm.comments.clone(),
         history: fm.history.clone(),
+        handoff: fm.handoff.clone(),
 
         linked_sessions: fm.linked_sessions.clone(),
         proof_of_work: fm.proof_of_work.clone(),
@@ -273,6 +285,8 @@ fn build_member_map(members: &[MemberEntry]) -> HashMap<String, &MemberEntry> {
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
+// Enrichment tests construct sparse updates incrementally for scenario readability.
 mod tests {
     use super::*;
     use crate::projects::io::labels::write_labels;
@@ -289,7 +303,6 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             org_id: "personal-org".to_string(),
-            workspace_id: None,
             status: "active".to_string(),
             priority: "none".to_string(),
             health: "no_updates".to_string(),
@@ -321,9 +334,11 @@ mod tests {
             labels: vec![],
             milestone: None,
             parent: None,
+            stage: None,
             start_date: None,
             target_date: None,
             created_by: None,
+            origin_session: None,
             created_at: String::new(),
             updated_at: String::new(),
             deleted_at: None,
@@ -333,6 +348,7 @@ mod tests {
             history: vec![],
             delegations: vec![],
             linked_sessions: vec![],
+            handoff: None,
             proof_of_work: None,
             orchestrator_config: None,
             orchestrator_state: None,

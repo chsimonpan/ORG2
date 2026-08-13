@@ -27,6 +27,7 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 
+import { loadAvailableAgents } from "@src/api/services/availableAgents";
 import { rpc } from "@src/api/tauri/rpc";
 import { Message } from "@src/components/Message";
 import { useKeyVault } from "@src/hooks/keyVault";
@@ -92,8 +93,8 @@ const AgentConfigInner: React.FC<AgentConfigInnerProps> = ({ data }) => {
   // ── CLI agents (only fetched when this tab hosts a CLI) ──
   const [cliAgents, setCliAgents] = useState<AvailableCliAgent[]>([]);
   const fetchCliAgents = useCallback(async () => {
-    const result = await rpc.agentOrgs.availableCliAgents();
-    return result.sort((agentA, agentB) =>
+    const result = await loadAvailableAgents();
+    return [...result].sort((agentA, agentB) =>
       agentA.displayName.localeCompare(agentB.displayName)
     );
   }, []);
@@ -126,7 +127,7 @@ const AgentConfigInner: React.FC<AgentConfigInnerProps> = ({ data }) => {
     }
 
     return (
-      <div className="flex min-w-0 items-center px-1">
+      <div className="flex min-w-0 items-center">
         <span className="truncate text-[13px] font-medium text-text-1">
           {headerDisplayName}
         </span>
@@ -333,7 +334,6 @@ const AgentConfigInner: React.FC<AgentConfigInnerProps> = ({ data }) => {
       <OrgDetailView
         selectedOrg={org}
         customAgents={customAgents}
-        cliAgents={cliAgents}
         onOrgSave={handleOrgSave}
         onOrgDelete={handleOrgDelete}
       />

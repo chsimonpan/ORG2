@@ -96,6 +96,14 @@ mod tests {
 /// Collect all image file paths referenced by messages in a session.
 fn collect_session_image_paths(prefix: &str, session_id: &str) -> SqliteResult<Vec<String>> {
     let conn = get_connection()?;
+    collect_session_image_paths_with_connection(&conn, prefix, session_id)
+}
+
+fn collect_session_image_paths_with_connection(
+    conn: &rusqlite::Connection,
+    prefix: &str,
+    session_id: &str,
+) -> SqliteResult<Vec<String>> {
     let sql = format!(
         "SELECT images FROM {prefix}_messages WHERE session_id = ?1 AND images IS NOT NULL"
     );
@@ -136,15 +144,73 @@ pub fn delete_session_cascade(session_id: &str, tables: &[&str]) -> SqliteResult
     }
 
     with_sessions_writer(|| {
-        let conn = get_connection()?;
-        for table in tables {
+        let mut conn = get_connection()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        delete_session_rows_with_connection(&tx, session_id, tables)?;
+        tx.commit()?;
+        Ok(())
+    })
+}
+
+/// Transaction-aware form of [`delete_session_cascade`].
+///
+/// The caller owns the transaction boundary. This is used when several Rust
+/// Agent Org sessions and their run-owned rows must commit or roll back as one
+/// hierarchy. Ordinary single-session deletion continues to use
+/// [`delete_session_cascade`] and therefore keeps its existing transaction
+/// behavior.
+pub(crate) fn delete_session_cascade_with_connection(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+    tables: &[&str],
+) -> SqliteResult<()> {
+    // Collect image file paths before deleting the rows. Infer the
+    // prefix from the first table that ends with "_messages".
+    let prefix = tables
+        .iter()
+        .find(|t| t.ends_with("_messages"))
+        .and_then(|t| t.strip_suffix("_messages"));
+
+    if let Some(prefix) = prefix {
+        let image_paths = collect_session_image_paths_with_connection(conn, prefix, session_id)?;
+        if !image_paths.is_empty() {
+            super::images::delete_image_files(&image_paths);
+        }
+    }
+
+    delete_session_rows_with_connection(conn, session_id, tables)
+}
+
+fn delete_session_rows_with_connection(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+    tables: &[&str],
+) -> SqliteResult<()> {
+    if tables.contains(&"agent_messages") {
+        let receipts_exist: bool = conn.query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM sqlite_master
+                 WHERE type='table' AND name='agent_inbox_materializations'
+             )",
+            [],
+            |row| row.get(0),
+        )?;
+        if receipts_exist {
+            // Keep the source Inbox rows unread while atomically removing
+            // receipts for transcript rows deleted by this cascade.
             conn.execute(
-                &format!("DELETE FROM {table} WHERE session_id = ?1"),
+                "DELETE FROM agent_inbox_materializations WHERE session_id=?1",
                 [session_id],
             )?;
         }
-        Ok(())
-    })
+    }
+    for table in tables {
+        conn.execute(
+            &format!("DELETE FROM {table} WHERE session_id = ?1"),
+            [session_id],
+        )?;
+    }
+    Ok(())
 }
 
 // ============================================
@@ -273,20 +339,57 @@ pub struct AgentResponse {
 /// concurrent `insert_message_retry` callers queue in Rust instead of
 /// racing for `SQLITE_BUSY`.
 /// Hot paths must call [`insert_message_retry`] or the typed `save_*` helpers.
-fn insert_message(prefix: &str, msg: &AgentMessageRow) -> SqliteResult<String> {
+#[derive(Clone, Copy)]
+enum MessageConflictPolicy {
+    /// Preserve the historical message helper behavior: a caller that reuses
+    /// an id replaces that row with the newly supplied message.
+    Replace,
+    /// At-least-once delivery behavior: if the stable id already exists,
+    /// return it without changing content, sequence, timestamps, or session.
+    PreserveExisting,
+}
+
+fn insert_message_with_policy(
+    prefix: &str,
+    msg: &AgentMessageRow,
+    conflict_policy: MessageConflictPolicy,
+) -> SqliteResult<(String, bool)> {
     with_sessions_writer(|| {
         let conn = get_connection()?;
 
         let seq_sql = format!("SELECT MAX(sequence) FROM {prefix}_messages WHERE session_id = ?1");
-        let insert_sql = format!(
-            "INSERT OR REPLACE INTO {prefix}_messages
+        let insert_sql = match conflict_policy {
+            MessageConflictPolicy::Replace => format!(
+                "INSERT OR REPLACE INTO {prefix}_messages
+                 (id, session_id, role, content, tool_name, tool_call_id, tool_input, tool_output, model, sequence, created_at, images, compact_from_sequence, compact_tokens_before, compact_tokens_after)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"
+            ),
+            MessageConflictPolicy::PreserveExisting => format!(
+                "INSERT INTO {prefix}_messages
              (id, session_id, role, content, tool_name, tool_call_id, tool_input, tool_output, model, sequence, created_at, images, compact_from_sequence, compact_tokens_before, compact_tokens_after)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"
-        );
+            ),
+        };
+        let exists_sql = format!("SELECT EXISTS(SELECT 1 FROM {prefix}_messages WHERE id = ?1)");
         let touch_sql =
             format!("UPDATE {prefix}_sessions SET updated_at = ?2 WHERE session_id = ?1");
 
         conn.execute_batch("BEGIN IMMEDIATE")?;
+
+        if matches!(conflict_policy, MessageConflictPolicy::PreserveExisting) {
+            let already_exists =
+                match conn.query_row(&exists_sql, [&msg.id], |row| row.get::<_, bool>(0)) {
+                    Ok(exists) => exists,
+                    Err(err) => {
+                        let _ = conn.execute_batch("ROLLBACK");
+                        return Err(err);
+                    }
+                };
+            if already_exists {
+                conn.execute_batch("COMMIT")?;
+                return Ok((msg.id.clone(), false));
+            }
+        }
 
         let max_seq: Option<i64> = conn
             .query_row(&seq_sql, [&msg.session_id], |row| row.get(0))
@@ -326,8 +429,16 @@ fn insert_message(prefix: &str, msg: &AgentMessageRow) -> SqliteResult<String> {
         }
 
         conn.execute_batch("COMMIT")?;
-        Ok(msg.id.clone())
+        Ok((msg.id.clone(), true))
     })
+}
+
+fn insert_message(prefix: &str, msg: &AgentMessageRow) -> SqliteResult<String> {
+    insert_message_with_policy(prefix, msg, MessageConflictPolicy::Replace).map(|(id, _)| id)
+}
+
+fn insert_message_if_absent(prefix: &str, msg: &AgentMessageRow) -> SqliteResult<(String, bool)> {
+    insert_message_with_policy(prefix, msg, MessageConflictPolicy::PreserveExisting)
 }
 
 /// Internal retry wrapper around [`insert_message`].
@@ -336,9 +447,24 @@ fn insert_message(prefix: &str, msg: &AgentMessageRow) -> SqliteResult<String> {
 /// pipeline. Public message-write hot paths should use the typed `save_*`
 /// helpers instead of constructing `AgentMessageRow` values directly.
 fn insert_message_retry(prefix: &str, msg: &AgentMessageRow) -> SqliteResult<String> {
+    insert_message_retry_with(prefix, msg, insert_message)
+}
+
+fn insert_message_if_absent_retry(
+    prefix: &str,
+    msg: &AgentMessageRow,
+) -> SqliteResult<(String, bool)> {
+    insert_message_retry_with(prefix, msg, insert_message_if_absent)
+}
+
+fn insert_message_retry_with<T>(
+    prefix: &str,
+    msg: &AgentMessageRow,
+    insert: fn(&str, &AgentMessageRow) -> SqliteResult<T>,
+) -> SqliteResult<T> {
     let mut last_err = rusqlite::Error::QueryReturnedNoRows; // placeholder
     for attempt in 0..MSG_RETRY_MAX {
-        match insert_message(prefix, msg) {
+        match insert(prefix, msg) {
             Ok(id) => return Ok(id),
             Err(err) => {
                 last_err = err;

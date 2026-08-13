@@ -142,7 +142,7 @@
     "timezoneAuto": "Otomatik (Tarayıcı)",
     "timezoneSearchPlaceholder": "En yakın şehirleri ara",
     "sendOnEnter": "Mesajları Enter ile gönder",
-    "sendOnEnterDesc": "Etkinleştirildiğinde Enter gönderir ve Shift+Enter yeni satır ekler. Devre dışıysa Ctrl/Cmd+Enter gönderir",
+    "sendOnEnterDesc": "Etkinleştirildiğinde Enter gönderir; Shift+Enter ve Ctrl/Cmd+Enter yeni satır ekler. Devre dışıysa Ctrl/Cmd+Enter gönderir",
     "language": "Dil",
     "languageSearchPlaceholder": "Dillerde ara...",
     "languageNames": {
@@ -227,7 +227,10 @@
     "presenceGuidanceOnlineDefault": "Klavyenin başındayım. İstediğin zaman netleştirici sorular sorabilir ve yıkıcı işlemleri çalıştırmadan önce bana onaylatabilirsin",
     "presenceGuidanceInvisibleDefault": "Yakındayım ama çevrimdışı görünüyorum. Varsayılan olarak otonom ilerle ve yalnızca yüksek riskli işlemler ya da önemli refaktörler için beni bilgilendir; diğer soruları tek tek sormak yerine tek bir özette topla",
     "presenceGuidanceAwayDefault": "Klavyeden uzaktayım. Beni bekleyip takılma; elindeki bilgilerle en iyi kararı ver, bitirebildiklerini bitir ve döndüğümde bakmam için olanları ve açık soruları kısa bir özet olarak bırak",
-    "followSystem": "Sistemi izle"
+    "followSystem": "Sistemi izle",
+    "preferences": "Tercihler",
+    "usePointerCursors": "İşaretçi imleçleri kullan",
+    "usePointerCursorsDesc": "Etkileşimli öğelerin üzerine gelindiğinde imleci işaretçiye dönüştürür"
   },
   "background": {
     "title": "Arka Plan",
@@ -703,8 +706,34 @@
     "test": {
       "sent": "Test bildirimi gönderildi",
       "permissionWarning": "Test bildirimi gönderilemedi. İzinleri kontrol edin.",
-      "sendFailed": "Test bildirimi gönderilemiyor. Bildirim izinlerinizi kontrol edip yeniden deneyin."
-    }
+      "sendFailed": "Test bildirimi gönderilemiyor. Bildirim izinlerinizi kontrol edip yeniden deneyin.",
+      "soundFailed": "Bildirim sesi çalınamıyor. Sistem ses düzeyini kontrol edin."
+    },
+    "teamInbox": "Ekip Gelen Kutusu",
+    "soundPreset": "Bildirim sesi",
+    "soundPresetDesc": "Sesli bildirimlerde çalınacak sesi seçin",
+    "previewSound": "Önizle",
+    "soundPresets": {
+      "classic": "Klasik",
+      "gentle": "Yumuşak",
+      "ascending": "Yükselen",
+      "bell": "Zil"
+    },
+    "criticalOnly": "Yalnızca kritik uyarılar",
+    "criticalOnlyDesc": "Yalnızca bir işlem onay gerektirdiğinde veya bir görev başarısız olduğunda bildir",
+    "quietHours": "Rahatsız etme programı",
+    "quietHoursDesc": "Günlük bir zaman aralığında rutin bildirimleri sessize al",
+    "quietHoursSchedule": "Sessiz saatler",
+    "quietHoursScheduleDesc": "Cihazınızın yerel saatini kullanır. Başlangıç ve bitiş saatleri aynıysa aralık devre dışı kalır.",
+    "quietHoursStart": "Başlangıç",
+    "quietHoursEnd": "Bitiş",
+    "allowCriticalDuringQuietHours": "Kritik uyarılara izin ver",
+    "allowCriticalDuringQuietHoursDesc": "Onay istekleri ve hatalar sistem bildirimi gösterebilir, ancak hiçbir zaman ses çalmaz",
+    "backgroundCompletionSummary": "Arka plan tamamlamalarını özetle",
+    "backgroundCompletionSummaryDesc": "Sessiz saatler bittiğinde tek bir birleşik uyarı gönder",
+    "mutedSessions": "Sessize alınan Session'lar",
+    "mutedSessionsDesc": "Bu cihazda {{count}} Session sessize alındı",
+    "clearMutedSessions": "Tümünü temizle"
   },
   "editor": {
     "tabEditor": "Editör",
@@ -923,7 +952,24 @@
     "diskCategory_screenshots": "Tarayıcı Ekran Görüntüleri",
     "diskCategory_agentWorktrees": "Agent Session Worktrees",
     "diskCategory_lspBin": "LSP Server İkili Dosyaları",
-    "loadZeroRows": "Click to load {{count}} more"
+    "loadZeroRows": "Click to load {{count}} more",
+    "appMemory": "App memory",
+    "appBackend": "ORG2 backend",
+    "appWebviewHelpers": "Owned WebView helpers",
+    "rssMappedDiagnostic": "RSS / mapped memory (diagnostic)",
+    "measurement": "Measurement",
+    "measurementKinds": {
+      "native": "Native effective memory",
+      "compatibility": "Compatibility metric",
+      "mixed": "Mixed native / fallback metrics",
+      "rss_fallback": "RSS fallback",
+      "unavailable": "Unavailable"
+    },
+    "toolProcessDiagnostics": "Terminal, CLI & tool processes (RSS diagnostic)",
+    "excludedFromAppMemory": "excluded from App memory",
+    "noToolProcesses": "No terminal, CLI, MCP, or tool processes detected",
+    "categoryAgentCli": "CLI agent",
+    "categoryMcpOrTool": "MCP / tool process"
   },
   "storage": {
     "dataDirectory": "Veri Dizini",
@@ -942,7 +988,13 @@
     "tableSize": "Boyut",
     "tablePercentage": "Yüzde",
     "scanFailed": "Disk kullanımı taranamadı",
-    "openFolderFailed": "Klasör açılamadı"
+    "openFolderFailed": "Klasör açılamadı",
+    "browserCache": "Tarayıcı önbelleği",
+    "browserCacheDesc": "{{used}} kullanılıyor · {{cleanable}} güvenle temizlenebilir",
+    "cleanBrowserCache": "Temizle",
+    "browserCacheCleaned": "{{size}} tarayıcı depolama alanı boşaltıldı",
+    "browserCacheAlreadyClean": "Tarayıcı önbelleği zaten temiz",
+    "browserCacheCleanFailed": "Tarayıcı önbelleği temizlenemedi"
   },
   "dependencies": {
     "systemDependencies": "Sistem Dependencies",
@@ -991,7 +1043,7 @@
     "decryptEffect": "Decrypt Efekti",
     "decryptEffectDesc": "Agent mesajları için Decrypt animasyonunu etkinleştir",
     "sendOnEnter": "Mesajları Enter ile gönder",
-    "sendOnEnterDesc": "Etkinleştirildiğinde Enter gönderir ve Shift+Enter yeni satır ekler. Devre dışıysa Ctrl/Cmd+Enter gönderir"
+    "sendOnEnterDesc": "Etkinleştirildiğinde Enter gönderir; Shift+Enter ve Ctrl/Cmd+Enter yeni satır ekler. Devre dışıysa Ctrl/Cmd+Enter gönderir"
   },
   "languageServers": {
     "languageServersDesc": "Otomatik tamamlama, tanılama ve kod zekası için LSP sunucularını yönet",

@@ -26,6 +26,7 @@ pub(super) mod member_idle;
 mod post_turn_dispatch;
 pub(super) mod prefetch;
 mod prompt;
+mod receipt_fallback;
 
 use serde_json::Value;
 use std::sync::atomic::Ordering;
@@ -34,7 +35,6 @@ use tracing::{debug, info, warn};
 
 use crate::core::session::prompt::cache::{RenderedSystemBlockScope, ORGII_SYSTEM_CACHE_SCOPE_KEY};
 use crate::core::session::types::DialogTurnState;
-use crate::session::context_import::{CacheLayoutStats, SessionEmbeddingState};
 
 use super::super::persistence as unified_persistence;
 use super::super::types::{AgentExecMode, IdeContext, ProcessingContext, ProcessingResult};
@@ -44,7 +44,7 @@ use crate::model_context::microcompact::ReplacementState;
 use crate::model_context::session_memory::{
     SessionMemoryCompactConfig, SessionMemoryConfig, SessionMemoryState,
 };
-use crate::providers::traits::LLMProvider;
+use crate::providers::traits::{LLMProvider, SideQueryExecution};
 use crate::tools::policy::ResolvedToolPolicy;
 use crate::turn_executor::{ContextUsageSnapshot, TurnResult};
 
@@ -62,6 +62,16 @@ fn scoped_system_message(text: String, scope: RenderedSystemBlockScope) -> Value
             (ORGII_SYSTEM_CACHE_SCOPE_KEY): scope.as_str(),
         }],
     })
+}
+
+fn reconcile_inbox_transcript_replay(
+    messages: &mut Vec<Value>,
+    message_count_before_inbox: usize,
+    transcript_inserted: bool,
+) {
+    if !transcript_inserted {
+        messages.truncate(message_count_before_inbox);
+    }
 }
 
 // ============================================
@@ -243,7 +253,9 @@ impl UnifiedMessageProcessor {
         }
     }
 
-    /// Tool policy actually used for this turn, including exec-mode overlays.
+    /// Tool policy actually used for this turn, including the exec-mode
+    /// overlay. Product mode is not a tool overlay: `org2-pm` enforces
+    /// it at the application boundary via the injected ORGII_MODE.
     fn effective_tool_policy(&self) -> Arc<ResolvedToolPolicy> {
         match self.agent_mode {
             Some(mode) => Arc::new(self.policy.with_exec_mode(mode)),
@@ -321,7 +333,7 @@ impl UnifiedMessageProcessor {
     }
 
     /// Records token usage for a turn.
-    fn record_token_usage(&self, session_id: &str, turn_id: &str, result: &TurnResult) {
+    fn record_token_usage(&self, session_id: &str, result: &TurnResult) {
         if result.total_tokens == 0 {
             return;
         }
@@ -354,74 +366,6 @@ impl UnifiedMessageProcessor {
             .and_then(|snapshot| serde_json::to_string(snapshot).ok());
 
         tokio::task::block_in_place(|| {
-            let stable_prefix_tokens = result
-                .context_usage_snapshot
-                .as_ref()
-                .map(|snapshot| {
-                    snapshot
-                        .sections
-                        .iter()
-                        .filter(|section| {
-                            matches!(
-                                section.category,
-                                crate::turn_executor::context_accounting::ContextUsageCategory::StablePrompt
-                                    | crate::turn_executor::context_accounting::ContextUsageCategory::Rules
-                                    | crate::turn_executor::context_accounting::ContextUsageCategory::Skills
-                                    | crate::turn_executor::context_accounting::ContextUsageCategory::Memory
-                            )
-                        })
-                        .map(|section| section.estimated_tokens)
-                        .sum::<i64>()
-                })
-                .unwrap_or(result.context_tokens);
-            let imported_context_count = unified_persistence::load_context_snapshots(session_id)
-                .map(|snapshots| snapshots.len() as i64)
-                .unwrap_or(0);
-            let cache_layout_stats = CacheLayoutStats::new(
-                stable_prefix_tokens,
-                result.context_tokens.saturating_sub(stable_prefix_tokens),
-                imported_context_count,
-                result.cache_read_tokens,
-                result.cache_write_tokens,
-            );
-            if let Err(err) = unified_persistence::save_turn_cache_layout_stats(
-                session_id,
-                turn_id,
-                &cache_layout_stats,
-            ) {
-                warn!(
-                    "[unified_processor] Failed to record cache layout stats: {}",
-                    err
-                );
-            }
-
-            match unified_persistence::latest_message_sequence(session_id) {
-                Ok(last_sequence) => {
-                    let work_item_id = unified_persistence::get_session(session_id)
-                        .ok()
-                        .flatten()
-                        .and_then(|record| record.work_item_id);
-                    let embedding_state = SessionEmbeddingState::for_session(
-                        session_id.to_string(),
-                        work_item_id,
-                        last_sequence,
-                        Some(self.runtime.model.clone()),
-                    );
-                    if let Err(err) =
-                        unified_persistence::save_session_embedding_state(&embedding_state)
-                    {
-                        warn!(
-                            "[unified_processor] Failed to record session embedding state: {}",
-                            err
-                        );
-                    }
-                }
-                Err(err) => warn!(
-                    "[unified_processor] Failed to read latest message sequence for embedding state: {}",
-                    err
-                ),
-            }
-
             use crate::foundation::session_bridge::{record_token_usage, TokenUsageRow};
             if let Err(err) = record_token_usage(TokenUsageRow {
                 session_id,
@@ -518,80 +462,36 @@ impl UnifiedMessageProcessor {
     }
 }
 
-fn side_query_model_cost_rank(model: &str) -> (u8, usize, String) {
-    let lower = model.to_ascii_lowercase();
-    let tier = if lower.contains("nano") || lower.contains("haiku") {
-        0
-    } else if lower.contains("mini") || lower.contains("flash") || lower.contains("small") {
-        1
-    } else {
-        2
-    };
-    (tier, lower.len(), lower)
-}
-
-pub(super) fn resolve_side_query_model(account_id: &str) -> Result<String, String> {
-    let account = key_vault::key_store::KEY_SERVICE
-        .get_key_by_id(account_id)
-        .ok_or_else(|| {
-            format!("Side query configuration error: account {account_id} no longer exists")
-        })?;
-    if !account.enabled {
-        return Err(format!(
-            "Side query configuration error: account {account_id} is disabled"
-        ));
-    }
-    let allowed: Vec<String> = if account.enabled_models.is_empty() {
-        account.available_models.clone()
-    } else {
-        account
-            .enabled_models
-            .iter()
-            .filter(|model| {
-                account.available_models.is_empty() || account.available_models.contains(model)
-            })
-            .cloned()
-            .collect()
-    };
-    if let Some(explicit) = account.side_query_model.as_deref() {
-        if !allowed.iter().any(|candidate| candidate == explicit) {
-            return Err(format!("Side query configuration error: model '{explicit}' is not enabled/available for account {account_id}"));
-        }
-        return Ok(explicit.to_string());
-    }
-    allowed.iter().min_by_key(|model| side_query_model_cost_rank(model)).cloned().ok_or_else(|| {
-        format!("Side query configuration error: account {account_id} has no enabled and available model; configure side_query_model")
-    })
-}
-
 impl UnifiedMessageProcessor {
     async fn side_query_provider(
         &self,
         session_id: &str,
         label: &str,
-    ) -> Result<(Arc<dyn LLMProvider>, String), String> {
-        let account_id = self.runtime.account_id.as_deref().ok_or_else(|| {
-            "Side query configuration error: the current session has no account/key id".to_string()
-        })?;
-        let model = resolve_side_query_model(account_id)?;
-
-        // Always instantiate against the exact current account. Side queries
-        // must never drift to another provider/key through a shared fallback.
-        let workspace = self.runtime.workspace_state.read().clone();
-        let side_query_session_id = format!("{session_id}:{label}");
-        let provider = crate::providers::factory::create_provider_with_native_harness_preflight(
-            &model,
-            Some(account_id),
-            &self.runtime.resolved.reliability,
-            self.runtime.native_harness_type,
-            Some(workspace),
-            Some(&side_query_session_id),
-        )
-        .await
-        .map_err(|err| format!("Failed to create side-query provider for account {account_id} model {model}: {err}"))?;
-        let provider: Arc<dyn LLMProvider> = Arc::from(provider);
-        provider.set_session_context(&side_query_session_id);
-        Ok((provider, model))
+    ) -> Result<Arc<dyn LLMProvider>, String> {
+        match self.runtime.provider.side_query_execution() {
+            SideQueryExecution::SharedSession => {
+                self.runtime.provider.set_session_context(session_id);
+                Ok(self.runtime.provider.clone())
+            }
+            SideQueryExecution::IsolatedSession => {
+                let workspace = self.runtime.workspace_state.read().clone();
+                let provider =
+                    crate::providers::factory::create_provider_with_native_harness_preflight(
+                        &self.runtime.model,
+                        self.runtime.account_id.as_deref(),
+                        &self.runtime.resolved.reliability,
+                        self.runtime.native_harness_type,
+                        Some(workspace),
+                    )
+                    .await
+                    .map_err(|err| {
+                        format!("Failed to create isolated side-query provider: {err}")
+                    })?;
+                let provider: Arc<dyn LLMProvider> = Arc::from(provider);
+                provider.set_session_context(&format!("{session_id}:{label}"));
+                Ok(provider)
+            }
+        }
     }
 
     pub async fn process(
@@ -606,6 +506,9 @@ impl UnifiedMessageProcessor {
             .turn_id
             .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        // Anchor for the receipt-fallback audit window: CLI writes during
+        // this turn carry occurred_at >= this instant.
+        let turn_started_at_ms = chrono::Utc::now().timestamp_millis();
 
         // 0b. Restore persisted SM state on first turn (lazy init)
         if self.sm_config.enabled {
@@ -644,16 +547,12 @@ impl UnifiedMessageProcessor {
         let should_save_user_msg = !(context.is_resume && content.is_empty());
         if should_save_user_msg {
             let message_id = tokio::task::block_in_place(|| {
-                unified_persistence::save_user_msg_and_assign_journey(
-                    session_id,
-                    content,
-                    context.images.as_deref(),
-                )
+                unified_persistence::save_user_msg(session_id, content, context.images.as_deref())
             })
             .map_err(|err| format!("Failed to save user message: {}", err))?;
 
             if let Some(handle) = self.app_handle.as_ref() {
-                tokio::task::block_in_place(|| {
+                if let Err(err) = tokio::task::block_in_place(|| {
                     crate::bus::event_pipeline_bridge::persist_user_message_event(
                         handle,
                         session_id,
@@ -663,19 +562,23 @@ impl UnifiedMessageProcessor {
                         context.images.as_deref(),
                         crate::bus::event_pipeline_bridge::PersistedUserMessageSource::User,
                         context.turn_intent_id.as_str(),
-                        context.turn_id.as_deref().unwrap_or_default(),
+                    )
+                }) {
+                    tracing::warn!(
+                        session_id,
+                        error = %err,
+                        "[unified_processor] failed to persist user-message UI event"
                     );
-                });
+                }
             }
         }
 
         // 2. Load history once, after the user message is persisted. The provider request
         // must see the same DB snapshot; load failures must fail the turn instead of
         // silently becoming an empty transcript.
-        let history = tokio::task::block_in_place(|| {
-            unified_persistence::load_llm_history_for_active_journey(session_id)
-        })
-        .map_err(|err| format!("Failed to load LLM history: {}", err))?;
+        let history =
+            tokio::task::block_in_place(|| unified_persistence::load_llm_history(session_id))
+                .map_err(|err| format!("Failed to load LLM history: {}", err))?;
 
         // 2b. Skill + memory relevance prefetch.
         //
@@ -696,14 +599,6 @@ impl UnifiedMessageProcessor {
         // 3. Build system prompt, split into the stable cacheable prefix and
         // the volatile per-turn body (environment/IDE/presence/mode suffix).
         let (system_prompt, volatile_prompt) = self.build_system_prompt(session_id).await;
-
-        // 3b. Build dynamic context (changes per-turn). Joined with the
-        // volatile prompt body and appended AFTER the history (step 6c) so
-        // the provider prompt-cache prefix — stable system + history — stays
-        // byte-identical across turns.
-        let dynamic_sections = self
-            .build_dynamic_sections(session_id, None, Some(content))
-            .await;
 
         // 4. Build provider messages from the already-loaded history.
         let mut messages: Vec<Value> = Vec::with_capacity(history.len() + 3);
@@ -799,6 +694,30 @@ impl UnifiedMessageProcessor {
         // Once that durable write succeeds, the inbox rows can be marked read;
         // if the LLM call fails, the next turn still sees the message through
         // normal history rather than silently losing it.
+        if context.is_resume && content.trim().is_empty() {
+            if let Some(org_context) = self.runtime.agent_org_context.as_ref() {
+                let running = matches!(
+                    crate::coordination::agent_org_runs::AgentOrgRunStore::get_run_status(
+                        &org_context.run_id
+                    ),
+                    Ok(Some(
+                        crate::coordination::agent_org_runs::AgentOrgRunStatus::Running
+                    ))
+                );
+                if !running {
+                    // Fail closed before inbox drain/provider invocation. The
+                    // unread rows stay durable for a later explicit resume.
+                    info!(run_id = %org_context.run_id, session_id = %session_id, "[unified_processor] queued Agent Org wake cancelled because run is no longer running");
+                    return Ok(ProcessingResult {
+                        turn_id,
+                        ..ProcessingResult::default()
+                    });
+                }
+            }
+        }
+
+        let message_count_before_inbox = messages.len();
+        let mut inbox_had_real_input = false;
         let mut inbox_guard = self.runtime.agent_org_context.as_ref().map(|org_context| {
             inbox_drain::drain_and_render_deferred(
                 org_context,
@@ -808,46 +727,83 @@ impl UnifiedMessageProcessor {
                 Some(self.session.as_ref()),
             )
         });
-        if let Some(guard) = inbox_guard.as_ref() {
+        if let Some(guard) = inbox_guard.as_mut() {
+            inbox_had_real_input = guard.has_pending_input();
             if let Some(transcript_content) = guard.transcript_content() {
                 if !transcript_content.trim().is_empty() {
-                    let message_id = tokio::task::block_in_place(|| {
-                        unified_persistence::save_user_msg_and_assign_journey(
+                    let (stable_message_id, stable_intent_id) = guard
+                        .transcript_identity(session_id)
+                        .expect("a non-empty drained transcript has stable source row ids");
+                    let (materialization, inserted) = tokio::task::block_in_place(|| {
+                        unified_persistence::materialize_agent_org_inbox_transcript(
                             session_id,
+                            guard.new_materialization_ids(),
+                            &stable_message_id,
+                            &stable_intent_id,
                             transcript_content,
-                            None,
                         )
                     })
-                    .map_err(|err| format!("Failed to save inbox transcript message: {}", err))?;
+                    .map_err(|err| {
+                        format!("Failed to materialize Agent Org inbox transcript: {err}")
+                    })?;
 
-                    if let Some(handle) = self.app_handle.as_ref() {
-                        // Inbox transcript is its own logical user intent
-                        // (an agent-org subagent delivered an answer to a
-                        // parent waiting on inbox_drain). Mint a dedicated
-                        // turn_intent_id with source `agent_org` so the
-                        // turn indexer can collapse this row with any
-                        // matching synthetic event without confusing it
-                        // with the parent user's submit.
-                        let transcript_intent_id = uuid::Uuid::new_v4().to_string();
-                        tokio::task::block_in_place(|| {
-                            crate::bus::event_pipeline_bridge::persist_user_message_event(
-                                handle,
-                                session_id,
-                                &message_id,
-                                transcript_content,
-                                None,
-                                None,
-                                crate::bus::event_pipeline_bridge::PersistedUserMessageSource::AgentOrgInboxTranscript,
-                                &transcript_intent_id,
-                                context.turn_id.as_deref().unwrap_or_default(),
-                            );
-                        });
+                    if !inserted {
+                        // The stable transcript row is already part of the
+                        // history loaded at the beginning of this turn. Drain
+                        // appended the same attachment once more in memory;
+                        // remove only that newly-rendered tail so the provider
+                        // sees one copy, while leaving the source inbox rows
+                        // unread until this replayed turn succeeds.
+                        reconcile_inbox_transcript_replay(
+                            &mut messages,
+                            message_count_before_inbox,
+                            inserted,
+                        );
                     }
+                    guard.remember_materialization(materialization);
+                }
+            }
+
+            if let Some(handle) = self.app_handle.as_ref() {
+                // Ensure every durable transcript has its matching stable UI
+                // event on both first delivery and replay. Persistence happens
+                // before the in-memory merge; failure leaves source rows unread
+                // and aborts the provider call so the next Wake can repair it.
+                for materialization in guard.materializations() {
+                    tokio::task::block_in_place(|| {
+                        crate::bus::event_pipeline_bridge::persist_user_message_event(
+                            handle,
+                            session_id,
+                            &materialization.message_id,
+                            &materialization.content,
+                            None,
+                            None,
+                            crate::bus::event_pipeline_bridge::PersistedUserMessageSource::AgentOrgInboxTranscript,
+                            &materialization.intent_id,
+                        )
+                    })
+                    .map_err(|err| {
+                        format!("Failed to persist Agent Org inbox transcript event: {err}")
+                    })?;
                 }
             }
         }
-        if let Some(guard) = inbox_guard.take() {
-            guard.commit();
+
+        // An Agent Org wake is only a doorbell. If another worker consumed the
+        // work before this turn started, do not manufacture an empty user
+        // nudge and spend a provider call. A later unread inbox row or
+        // explicit TaskAssigned delivery will trigger a fresh wake.
+        if context.is_resume
+            && content.trim().is_empty()
+            && self.runtime.agent_org_context.is_some()
+            && !inbox_had_real_input
+            && messages.len() == message_count_before_inbox
+        {
+            info!(session_id = %session_id, "[unified_processor] Agent Org wake had no durable work; returning WakeNoop");
+            return Ok(ProcessingResult {
+                turn_id,
+                ..ProcessingResult::default()
+            });
         }
 
         // 4d. Subagent-wake prefill safety net.
@@ -903,6 +859,15 @@ impl UnifiedMessageProcessor {
             ),
         }
 
+        // Build dynamic context only after every no-provider early return
+        // (terminal/paused wake, WakeNoop, compact-fork redirect). For a
+        // coordinator this stages the exact work revision rendered into the
+        // live task-board snapshot. A later successful provider turn may
+        // observe that revision; an empty wake must never consume it.
+        let (dynamic_sections, coordinator_presented_work_revision) = self
+            .build_dynamic_sections(session_id, None, Some(content))
+            .await;
+
         if super::super::recovery::ensure_tool_result_pairing(&mut messages) {
             info!(
                 "[unified_processor] Normalized tool_result pairing before provider request for session {}",
@@ -937,12 +902,18 @@ impl UnifiedMessageProcessor {
         // Reasoning trigger words are detected on the CURRENT user input
         // only (never history) so escalation stays per-turn.
         let reasoning_trigger = crate::providers::thinking_mode::detect_reasoning_trigger(content);
+        let projected_inbox_ids = inbox_guard
+            .as_ref()
+            .map(|guard| guard.pending_ids().to_vec())
+            .unwrap_or_default();
         let turn_result = self
             .execute_turn_with_reactive_retry(
                 session_id,
                 &turn_id,
                 &mut messages,
                 reasoning_trigger,
+                &context.turn_intent_id,
+                projected_inbox_ids,
             )
             .await;
         if let Some(prefetch_hook) = self.turn_prefetch_hook.lock().await.take() {
@@ -985,8 +956,7 @@ impl UnifiedMessageProcessor {
         // so the full say-then-tool-then-say transcript is preserved.
 
         // 8. Record token usage
-
-        self.record_token_usage(session_id, &turn_id, &result);
+        self.record_token_usage(session_id, &result);
         self.record_usage_telemetry(session_id, &turn_id, &result);
 
         let final_turn_state = if self
@@ -999,14 +969,48 @@ impl UnifiedMessageProcessor {
             DialogTurnState::Completed
         };
 
-        if final_turn_state == DialogTurnState::Completed {
-            if let Err(error) = tokio::task::block_in_place(|| {
-                unified_persistence::save_completed_turn_and_assign_journey(session_id, &turn_id)
-            }) {
-                warn!(
-                    "[unified_processor] Failed to persist Journey turn membership for {}: {}",
-                    session_id, error
-                );
+        // A successful provider response is not enough when the user pressed
+        // Stop concurrently. Only a genuinely Completed turn acknowledges
+        // Inbox input. On Cancelled, dropping the guard preserves unread rows;
+        // the durable transcript receipt makes the later retry idempotent.
+        if matches!(final_turn_state, DialogTurnState::Completed) {
+            if let Some(guard) = inbox_guard.take() {
+                guard.commit();
+            }
+        }
+
+        if matches!(final_turn_state, DialogTurnState::Completed) {
+            if let (Some(org_context), Some(presented_work_revision)) = (
+                self.runtime.agent_org_context.as_ref(),
+                coordinator_presented_work_revision,
+            ) {
+                if self.runtime.agent_org_current_member_id.as_deref()
+                    == Some(crate::coordination::agent_org_runs::COORDINATOR_MEMBER_ID)
+                {
+                    let run_id = org_context.run_id.clone();
+                    match tokio::task::spawn_blocking(move || {
+                        crate::coordination::agent_org_runs::AgentOrgRunStore::mark_coordinator_observed_work_revision(
+                            &run_id,
+                            presented_work_revision,
+                        )
+                    })
+                    .await
+                    {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(error)) => warn!(
+                            run_id = %org_context.run_id,
+                            presented_work_revision,
+                            error = %error,
+                            "[unified_processor] failed to record Agent Org work revision observed by coordinator provider turn"
+                        ),
+                        Err(error) => warn!(
+                            run_id = %org_context.run_id,
+                            presented_work_revision,
+                            error = %error,
+                            "[unified_processor] coordinator work-revision observation task failed"
+                        ),
+                    }
+                }
             }
         }
 
@@ -1025,6 +1029,7 @@ impl UnifiedMessageProcessor {
             result: &result,
             tool_calls_count,
             final_turn_state,
+            turn_started_at_ms,
         })
         .await;
 
@@ -1047,20 +1052,39 @@ impl UnifiedMessageProcessor {
             }
             _ => crate::coordination::agent_inbox::MemberIdleReason::Available,
         };
-        member_idle::maybe_emit_member_idle(
+        let unfinished_task_ids = match self
+            .runtime
+            .agent_org_context
+            .as_ref()
+            .zip(self.runtime.agent_org_current_member_id.as_deref())
+        {
+            Some((org_context, member_id)) => {
+                match member_idle::unfinished_build_task_ids_for_member(
+                    &org_context.run_id,
+                    member_id,
+                ) {
+                    Ok(task_ids) => task_ids,
+                    Err(error) => {
+                        warn!(
+                            run_id = %org_context.run_id,
+                            member_id = %member_id,
+                            error = %error,
+                            "failed to inspect unfinished Agent Org tasks before MemberIdle"
+                        );
+                        Vec::new()
+                    }
+                }
+            }
+            None => Vec::new(),
+        };
+        member_idle::maybe_emit_member_idle_with_details(
             self.runtime.agent_org_context.as_ref(),
-            &self.agent_id,
             self.runtime.agent_org_current_member_id.as_deref(),
             idle_reason,
             self.agent_mode,
-        );
-
-        let cache_layout = CacheLayoutStats::new(
-            result.context_tokens,
-            result.prompt_tokens.saturating_sub(result.context_tokens),
-            0,
-            result.cache_read_tokens,
-            result.cache_write_tokens,
+            None,
+            None,
+            unfinished_task_ids,
         );
 
         Ok(ProcessingResult {
@@ -1069,12 +1093,6 @@ impl UnifiedMessageProcessor {
             total_tokens: result.total_tokens,
             prompt_tokens: result.prompt_tokens,
             completion_tokens: result.completion_tokens,
-            context_tokens: result.context_tokens,
-            stable_prefix_tokens: cache_layout.stable_prefix_tokens,
-            volatile_context_tokens: cache_layout.volatile_context_tokens,
-            imported_context_count: cache_layout.imported_context_count,
-            cache_read_tokens: cache_layout.cache_read_tokens,
-            cache_write_tokens: cache_layout.cache_write_tokens,
             tool_calls_count,
             truncated: false,
             turn_summary: None,
@@ -1164,5 +1182,23 @@ mod post_turn_work_tests {
             false,
             DialogTurnState::Cancelled
         ));
+    }
+
+    #[test]
+    fn persisted_unread_inbox_replay_keeps_one_prompt_copy() {
+        let durable_transcript = serde_json::json!({
+            "role": "user",
+            "content": "<agent-org-inbox>durable transcript</agent-org-inbox>",
+        });
+        let mut messages = vec![durable_transcript.clone()];
+        let before_inbox = messages.len();
+
+        // `drain_and_render_deferred` re-renders the still-unread source row,
+        // but the stable transcript insert reports that this exact delivery
+        // was already persisted during the crashed attempt.
+        messages.push(durable_transcript.clone());
+        reconcile_inbox_transcript_replay(&mut messages, before_inbox, false);
+
+        assert_eq!(messages, vec![durable_transcript]);
     }
 }

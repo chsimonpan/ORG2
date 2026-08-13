@@ -14,7 +14,7 @@ const fn home_config(
     CliConfigFileEntry {
         id,
         label,
-        path_kind: CliConfigPathKind::HomeRelative,
+        path_kind: CliConfigPathKind::Home,
         relative_path,
         format,
         secret_bearing,
@@ -31,7 +31,7 @@ const fn xdg_config(
     CliConfigFileEntry {
         id,
         label,
-        path_kind: CliConfigPathKind::XdgConfigRelative,
+        path_kind: CliConfigPathKind::XdgConfig,
         relative_path,
         format,
         secret_bearing,
@@ -48,7 +48,7 @@ const fn app_data_config(
     CliConfigFileEntry {
         id,
         label,
-        path_kind: CliConfigPathKind::AppDataRelative,
+        path_kind: CliConfigPathKind::AppData,
         relative_path,
         format,
         secret_bearing,
@@ -102,6 +102,7 @@ pub(crate) fn cli_agent_registry() -> Vec<CliAgentEntry> {
             has_subscription_plan: true,
             compatible_api_providers: &[
                 "anthropic_api",
+                "atlascloud_api",
                 "moonshot_api",
                 "zenmux_api",
                 "longcat_api",
@@ -124,19 +125,11 @@ pub(crate) fn cli_agent_registry() -> Vec<CliAgentEntry> {
             brand_color: "#10A37F",
             docs_url: "https://developers.openai.com/codex/config-basic",
             has_subscription_plan: true,
-            compatible_api_providers: &[
-                "openai_api",
-                "openrouter_api",
-                "azure_openai_api",
-                "deepseek_api",
-                "groq_api",
-                "xai_api",
-                "dashscope_api",
-                "moonshot_api",
-                "zenmux_api",
-                "longcat_api",
-                "vllm_api",
-            ],
+            // Codex requires the Responses wire API. Generic OpenAI Chat
+            // compatibility is insufficient; keep this list limited to
+            // providers whose `/responses` route is explicitly supported or
+            // has been verified by ORGII.
+            compatible_api_providers: &["openai_api", "zenmux_api"],
             config_files: vec![home_config("config", "Config", ".codex/config.toml", CliConfigFormat::Toml, false)],
             is_complex_setup: false,
             default_setup_method: None,
@@ -221,6 +214,7 @@ pub(crate) fn cli_agent_registry() -> Vec<CliAgentEntry> {
             compatible_api_providers: &[
                 "anthropic_api",
                 "openai_api",
+                "atlascloud_api",
                 "gemini_api",
                 "openrouter_api",
                 "groq_api",
@@ -751,6 +745,56 @@ pub(crate) fn cli_agent_registry() -> Vec<CliAgentEntry> {
             acp_support: AcpSupport::Native,
             supports_gui: false,
         },
+        CliAgentEntry {
+            name: "qoder_cli",
+            display_name: "Qoder CLI",
+            binary: "qodercli",
+            description: "Qoder's interactive terminal coding agent",
+            brand_color: "#7C3AED",
+            docs_url: "https://docs.qoder.com/en/cli/quick-start",
+            has_subscription_plan: true,
+            compatible_api_providers: &[],
+            config_files: vec![home_config(
+                "settings",
+                "Settings",
+                ".qoder/settings.json",
+                CliConfigFormat::Json,
+                false,
+            )],
+            is_complex_setup: false,
+            default_setup_method: None,
+            popular: false,
+            icon_provider: "qoder",
+            paired_api_provider: None,
+            supports_rust_agents: false,
+            acp_support: AcpSupport::Unavailable,
+            supports_gui: false,
+        },
+        CliAgentEntry {
+            name: "trae_cli",
+            display_name: "Trae Agent",
+            binary: "trae-cli",
+            description: "ByteDance's open-source interactive coding agent",
+            brand_color: "#2563EB",
+            docs_url: "https://github.com/bytedance/trae-agent",
+            has_subscription_plan: false,
+            compatible_api_providers: &[
+                "openai_api",
+                "anthropic_api",
+                "gemini_api",
+                "openrouter_api",
+                "deepseek_api",
+            ],
+            config_files: vec![],
+            is_complex_setup: true,
+            default_setup_method: None,
+            popular: false,
+            icon_provider: "trae",
+            paired_api_provider: None,
+            supports_rust_agents: false,
+            acp_support: AcpSupport::Unavailable,
+            supports_gui: false,
+        },
     ]
 }
 
@@ -782,5 +826,23 @@ mod tests {
                 ".gemini/config/mcp_config.json",
             ]
         );
+    }
+
+    #[test]
+    fn qoder_and_trae_are_pure_tui_agents() {
+        let agents = cli_agent_registry();
+        let qoder = agents
+            .iter()
+            .find(|entry| entry.name == "qoder_cli")
+            .expect("Qoder CLI registry entry");
+        let trae = agents
+            .iter()
+            .find(|entry| entry.name == "trae_cli")
+            .expect("Trae CLI registry entry");
+
+        assert_eq!(qoder.binary, "qodercli");
+        assert_eq!(trae.binary, "trae-cli");
+        assert!(!qoder.supports_gui);
+        assert!(!trae.supports_gui);
     }
 }

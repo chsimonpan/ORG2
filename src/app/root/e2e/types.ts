@@ -224,12 +224,6 @@ export interface E2EHelpers {
     folderPath: string,
     folderName?: string
   ) => Promise<Result<{ folderId: string; path: string }>>;
-  getCodeMapStatusForPath: (
-    workspacePath: string
-  ) => Promise<Result<{ status: Json }>>;
-  startCodeMapIndexForPath: (
-    workspacePath: string
-  ) => Promise<Result<{ status: Json }>>;
   readSessionPromptEnvironmentBlock: (
     sessionId: string
   ) => Promise<Result<{ result: Json }>>;
@@ -264,7 +258,10 @@ export interface E2EHelpers {
     body: string
   ) => Promise<{ ok: true } | Err>;
   allocateStandaloneWorkItemId: () => Promise<Result<{ shortId: string }>>;
-  readStandaloneWorkItems: () => Promise<Result<{ items: Json[] }>>;
+  readStandaloneWorkItems: (
+    orgId?: string
+  ) => Promise<Result<{ items: Json[] }>>;
+  readProjectOrgs: () => Promise<Result<{ orgs: Json[] }>>;
   readStandaloneWorkItem: (shortId: string) => Promise<Result<{ item: Json }>>;
   writeStandaloneWorkItem: (
     shortId: string,
@@ -314,6 +311,11 @@ export interface E2EHelpers {
   agentOrgSessionRunView: (
     sessionId: string
   ) => Promise<Result<{ view: Json | null }>>;
+  agentOrgGroupChatHistoryPage: (
+    sessionId: string,
+    beforeId?: number | null,
+    limit?: number
+  ) => Promise<Result<{ page: Json }>>;
   agentOrgSessionInterventionState: (
     sessionId: string
   ) => Promise<Result<{ state: Json }>>;
@@ -336,18 +338,17 @@ export interface E2EHelpers {
   ) => Promise<Result<{ transitioned: boolean }>>;
   agentOrgSimulateAppRestart: () => Promise<
     Result<{
+      intentsReconciled: number;
+      terminalSessionsReconciled: number;
       sessionsAbandoned: number;
+      tasksRequeued: number;
+      runsCompleted: number;
       runsPaused: number;
       interventionsCleared: number;
     }>
   >;
   getDesktopConfig: () => Promise<Result<{ config: Json }>>;
   setDesktopConfig: (config: Json) => Promise<{ ok: true } | Err>;
-  listAutomationRules: () => Promise<Result<{ rules: Json[] }>>;
-  addAutomationRule: (ruleJson: string) => Promise<Result<{ ruleId: string }>>;
-  removeAutomationRule: (
-    ruleId: string
-  ) => Promise<Result<{ removed: boolean }>>;
   listPolicies: (
     workspacePath?: string
   ) => Promise<Result<{ policies: Json[] }>>;
@@ -503,9 +504,6 @@ export interface E2EHelpers {
   debugSessionToolsSnapshot: (
     sessionId: string
   ) => Promise<Result<{ snapshot: Json }>>;
-  debugSessionContextCacheSnapshot: (
-    sessionId: string
-  ) => Promise<Result<{ snapshot: Json }>>;
   listEffectiveToolsForSession: (
     sessionId: string,
     agentExecMode?: string | null
@@ -529,6 +527,13 @@ export interface E2EHelpers {
     content: string
   ) => Promise<Result<{ result: Json }>>;
   launchSession: (params: Json) => Promise<Result<{ result: Json }>>;
+  reloadSessionList: () => Promise<
+    Result<{ count: number; sessionIds: string[] }>
+  >;
+  primeSidebarEntityCache: () => Promise<Result<{ count: number }>>;
+  inspectSidebarPagination: (
+    sessionIds?: string[]
+  ) => Promise<Result<{ pagination: Json; sessions: Json[] }>>;
   getSessionAggregateRow: (
     sessionId: string
   ) => Promise<Result<{ session: Json | null }>>;
@@ -590,8 +595,8 @@ export interface E2EHelpers {
   seedShellProcess: (input: {
     sessionId: string;
     pid: number;
+    callId?: string;
     command: string;
-    logPath?: string;
     status?: "running" | "background";
   }) => Promise<Result<{ sessionId: string; pid: number }>>;
   seedSubagentJob: (input: {
@@ -630,6 +635,14 @@ export interface E2EHelpers {
     status: string;
     createdAt: string;
     updatedAt: string;
+  }) => Promise<Result<{ sessionId: string }>>;
+  debugSeedSidebarCodingSessionWire: (input: {
+    sessionId: string;
+    name: string;
+    status: string;
+    createdAt: string;
+    updatedAt: string;
+    pinned?: boolean;
   }) => Promise<Result<{ sessionId: string }>>;
   debugSeedPendingPlanWire: (input: {
     sessionId: string;
@@ -858,6 +871,12 @@ export interface E2EHelpers {
     orgs: Array<{ orgId: string; name: string; role: string }>;
   }) => Promise<Result<{ count: number }>>;
   cloudListOrgs: () => Promise<Result<{ orgs: Json[] }>>;
+  cloudInspectMemberRoster: (opts: { orgId: string }) => Promise<
+    Result<{
+      rosterVersion: number;
+      members: Json[] | null;
+    }>
+  >;
   cloudInspectRosterState: () => Promise<
     Result<{
       orgs: Json[];

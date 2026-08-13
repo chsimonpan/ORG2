@@ -4,9 +4,18 @@
  * Tab factories for the project manager using defineTabFactory.
  */
 import { PROJECT_ORG_SYNC_PROVIDER } from "@src/api/http/project";
+import {
+  PROJECT_ORG_SURFACE_VIEW,
+  type ProjectOrgSurfaceView,
+} from "@src/types/ui/projectOrg";
 
 import { defineTabFactory } from "../tabFactory";
 import type { WorkStationTab } from "../types";
+
+export {
+  PROJECT_ORG_SURFACE_VIEW,
+  type ProjectOrgSurfaceView,
+} from "@src/types/ui/projectOrg";
 
 export const STORY_MANAGER_PROJECT_TAB_ICON = "Box";
 export const STORY_WORK_ITEMS_TAB_ICON = "ChartNoAxesGantt";
@@ -20,15 +29,6 @@ export const STORY_ORG_SCOPE = {
 
 export const STORY_PERSONAL_ORG_FILTER_ID = "personal-org";
 export const STORY_PERSONAL_ORG_NAME = "Personal Org";
-
-export const PROJECT_ORG_SURFACE_VIEW = {
-  PROJECTS: "projects",
-  WORK_ITEMS: "work-items",
-  SETTINGS: "settings",
-} as const;
-
-export type ProjectOrgSurfaceView =
-  (typeof PROJECT_ORG_SURFACE_VIEW)[keyof typeof PROJECT_ORG_SURFACE_VIEW];
 
 export type ProjectOrgScope =
   (typeof STORY_ORG_SCOPE)[keyof typeof STORY_ORG_SCOPE];
@@ -96,21 +96,6 @@ export function resolveProjectManagerTabTitle(
     const orgName =
       (tab.data.orgName as string | undefined) ?? STORY_PERSONAL_ORG_NAME;
     return `${orgName} ${workItemsLabel}`;
-  }
-
-  if (tab.type === "project-tree") {
-    return translate("projects:workspace.projectTree");
-  }
-
-  if (tab.type === "project-journey") {
-    const name = tab.data.projectName as string | undefined;
-    const journeyLabel = translate("projects:workspace.projectJourney");
-    return name ? `${name} ${journeyLabel}` : journeyLabel;
-  }
-
-  if (tab.type === "session-journey") {
-    const name = tab.data.sessionName as string | undefined;
-    return name ? `${name} Journey` : "Session Journey";
   }
 
   if (
@@ -458,8 +443,10 @@ export interface WorkItemDetailTabData {
   projectId?: string;
   projectName?: string;
   projectSlug?: string;
+  orgId?: string;
   workItemId: string;
   workItemName: string;
+  workItemStatus?: string;
   pendingUpdates?: Record<string, unknown>;
   returnTabId?: string;
 }
@@ -474,7 +461,8 @@ export const workItemDetailTabFactory = defineTabFactory<WorkItemDetailTabData>(
     idStrategy: {
       type: "keyed",
       prefix: "workItem-detail",
-      getKey: (data) => data.workItemId,
+      getKey: (data) =>
+        `${data.orgId ?? "personal-org"}:${data.projectId || "standalone"}:${data.workItemId}`,
     },
     getTitle: (data) => getWorkItemDetailTabTitle(data.workItemName),
     icon: WORK_ITEM_DETAIL_TAB_ICON,
@@ -502,87 +490,20 @@ export function createWorkItemDetailTab(
   workItemName: string,
   projectSlug?: string,
   pendingUpdates?: Record<string, unknown>,
-  returnTabId?: string
+  returnTabId?: string,
+  workItemStatus?: string,
+  orgId?: string
 ): WorkStationTab {
   return workItemDetailTabFactory({
     projectId,
     projectName,
     projectSlug,
+    orgId,
     workItemId,
     workItemName,
+    ...(workItemStatus && { workItemStatus }),
     ...(pendingUpdates &&
       Object.keys(pendingUpdates).length > 0 && { pendingUpdates }),
     ...(returnTabId && { returnTabId }),
   });
-}
-
-// ============================================
-// Project Tree + Journey
-// ============================================
-
-export interface ProjectJourneyTabData {
-  projectId?: string;
-  projectSlug?: string;
-  projectName?: string;
-  forceDemo?: boolean;
-}
-
-export const projectTreeTabFactory = defineTabFactory<Record<string, never>>({
-  tabType: "project-tree",
-  idStrategy: { type: "singleton", id: "project-tree:main" },
-  getTitle: () => "Project Tree",
-  icon: "FolderTree",
-});
-
-export function createProjectTreeTab(): WorkStationTab {
-  return projectTreeTabFactory({});
-}
-
-export const projectJourneyTabFactory = defineTabFactory<ProjectJourneyTabData>(
-  {
-    tabType: "project-journey",
-    idStrategy: {
-      type: "keyed",
-      prefix: "project-journey",
-      getKey: (data) => data.projectId || data.projectSlug || "main",
-    },
-    getTitle: (data) =>
-      data.projectName ? `${data.projectName} Journey` : "Project Journey",
-    icon: "GitFork",
-  }
-);
-
-export function createProjectJourneyTab(
-  data: ProjectJourneyTabData = {}
-): WorkStationTab {
-  return projectJourneyTabFactory(data);
-}
-
-export interface SessionJourneyTabData {
-  sessionId: string;
-  sessionName?: string;
-  selectedTaskId?: string;
-  selectedForkId?: string;
-  /** Exact durable anchor of the selected fork; never a sequence approximation. */
-  selectedAnchorMessageId?: string;
-}
-
-export const sessionJourneyTabFactory = defineTabFactory<SessionJourneyTabData>(
-  {
-    tabType: "session-journey",
-    idStrategy: {
-      type: "keyed",
-      prefix: "session-journey",
-      getKey: (data) => data.sessionId,
-    },
-    getTitle: (data) =>
-      data.sessionName ? `${data.sessionName} Journey` : "Session Journey",
-    icon: "GitFork",
-  }
-);
-
-export function createSessionJourneyTab(
-  data: SessionJourneyTabData
-): WorkStationTab {
-  return sessionJourneyTabFactory(data);
 }

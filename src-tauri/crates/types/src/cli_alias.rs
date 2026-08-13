@@ -569,6 +569,10 @@ static CLI_ALIAS_MAP: LazyLock<HashMap<&'static str, AliasEntry>> = LazyLock::ne
     // same chat semantics as await_output, even though its payload uses
     // cell_id/yield_time_ms instead of handles/block_until_ms.
     m.insert("wait", AliasEntry::await_output());
+    // Newer Codex runtimes use empty write_stdin calls to await more output
+    // from a yielded exec session. Importers special-case non-empty input so
+    // interrupts and terminal interaction stay on the originating shell.
+    m.insert("write_stdin", AliasEntry::await_output());
     m.insert("awaitToolCall", AliasEntry::await_output());
     m.insert("AwaitToolCall", AliasEntry::await_output());
 
@@ -759,6 +763,7 @@ static CLI_ALIAS_MAP: LazyLock<HashMap<&'static str, AliasEntry>> = LazyLock::ne
     m.insert("session", AliasEntry::subagent("subagent"));
     m.insert("manage_session", AliasEntry::subagent("subagent"));
     m.insert("spawn", AliasEntry::subagent("subagent"));
+    m.insert("spawn_agent", AliasEntry::subagent("subagent"));
     m.insert("spawn_sub_agent", AliasEntry::subagent("subagent"));
     m.insert("delegate", AliasEntry::subagent("subagent"));
     m.insert("manage_agent_def", AliasEntry::subagent("subagent"));
@@ -951,7 +956,7 @@ static CLI_ALIAS_MAP: LazyLock<HashMap<&'static str, AliasEntry>> = LazyLock::ne
 
     // NOTE: Built-in tool names (manage_workspace, query_lsp, manage_lsp,
     // setup_repo, manage_nodes, control_orgii,
-    // query_knowledge, manage_project, manage_work_item) are intentionally
+    // query_knowledge) are intentionally
     // NOT aliased here. The old entries collapsed their identity to
     // `UiCanonical::ToolCall` ("tool_call"), which masked the per-tool
     // `label_running/done/failed` and `chat_block` declared in
@@ -1130,6 +1135,10 @@ mod tests {
             Some((tool_names::AWAIT_OUTPUT, tool_names::AWAIT_OUTPUT))
         );
         assert_eq!(
+            resolve_cli_alias("write_stdin"),
+            Some((tool_names::AWAIT_OUTPUT, tool_names::AWAIT_OUTPUT))
+        );
+        assert_eq!(
             get_ui_canonical_enum("Await"),
             Some(UiCanonical::AwaitOutput)
         );
@@ -1212,6 +1221,18 @@ mod tests {
         assert_eq!(
             get_ui_canonical_enum("assistant"),
             Some(UiCanonical::AgentMessage)
+        );
+    }
+
+    #[test]
+    fn test_codex_spawn_agent_alias() {
+        assert_eq!(
+            resolve_cli_alias("spawn_agent"),
+            Some(("subagent", "subagent"))
+        );
+        assert_eq!(
+            get_ui_canonical_enum("spawn_agent"),
+            Some(UiCanonical::Subagent)
         );
     }
 }

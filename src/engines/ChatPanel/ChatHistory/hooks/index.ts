@@ -11,6 +11,14 @@ export type {
   UseChatHistoryStateReturn,
 } from "./useChatHistoryState";
 
+export { useChatHistoryProjectionModel } from "./useChatHistoryProjectionModel";
+export { useChatHistoryItemActions } from "./useChatHistoryItemActions";
+export {
+  resolveConversationHistoryPageIndex,
+  useChatNavigationController,
+} from "./useChatNavigationController";
+export { useChatViewportController } from "./useChatViewportController";
+
 export { isTurnCollapseEligible, useChatGroups } from "./useChatGroups";
 export type { ChatGroupMeta, UseChatGroupsReturn } from "./useChatGroups";
 
@@ -67,6 +75,11 @@ export type {
 export { useGroupHeaderRenderer } from "./useGroupHeaderRenderer";
 
 export { useReloadSession } from "./useReloadSession";
+export {
+  findTailTurnId,
+  TAIL_TURN_COLLAPSE_IDLE_MS,
+  useTailTurnCollapse,
+} from "./useTailTurnCollapse";
 export {
   useTurnPageNavigation,
   useTurnPageSelectionState,

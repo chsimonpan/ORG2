@@ -10,7 +10,9 @@ const GitCommitDetailContent = React.lazy(
   () =>
     import("@src/modules/WorkStation/CodeEditor/Panels/EditorMainPane/content/GitCommitDetailContent")
 );
-const ChatView = React.lazy(() => import("@src/engines/ChatPanel/ChatView"));
+const SessionContentView = React.lazy(
+  () => import("@src/engines/ChatPanel/SessionContentView")
+);
 
 export const STORY_MANAGER_SUSPENSE_LOADING_FALLBACK = (
   <Placeholder variant="loading" placement="detail-panel" fillParentHeight />
@@ -96,7 +98,7 @@ interface RenderActiveContentOptions {
   projectQuickActions: ProjectManagerContentRouterProps["projectQuickActions"];
 }
 
-export function renderActiveContent({
+function renderActiveContent({
   repoPath,
   activeTab,
   hasNoTabs,
@@ -132,13 +134,7 @@ export function renderActiveContent({
               "linear-gradient(180deg, var(--color-bg-1) 0%, var(--color-fill-1) 100%)",
           }}
         >
-          <ChatView
-            sessionId={chatSessionId}
-            initialMessageId={
-              activeTab.data.initialMessageId as string | undefined
-            }
-            secondary
-          />
+          <SessionContentView sessionId={chatSessionId} secondary />
         </div>
       </Suspense>
     );
@@ -172,9 +168,6 @@ export function renderActiveContent({
     case "project-org":
     case "project-org-settings":
     case "project-settings":
-    case "project-tree":
-    case "project-journey":
-    case "session-journey":
     case "workItem-detail":
       return <UnifiedTabContent tab={activeTab} paneId="main" isActive />;
 

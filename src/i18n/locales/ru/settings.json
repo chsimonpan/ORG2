@@ -142,7 +142,7 @@
     "timezoneAuto": "Авто (браузер)",
     "timezoneSearchPlaceholder": "Поиск ближайших городов",
     "sendOnEnter": "Отправлять сообщения клавишей Enter",
-    "sendOnEnterDesc": "Если включено, Enter отправляет, а Shift+Enter вставляет новую строку. Если выключено, отправка выполняется Ctrl/Cmd+Enter",
+    "sendOnEnterDesc": "Если включено, Enter отправляет, а Shift+Enter и Ctrl/Cmd+Enter вставляют новую строку. Если выключено, отправка выполняется Ctrl/Cmd+Enter",
     "language": "Язык",
     "languageSearchPlaceholder": "Поиск языков...",
     "languageNames": {
@@ -227,7 +227,10 @@
     "presenceGuidanceOnlineDefault": "Я у клавиатуры. Можешь в любой момент задавать уточняющие вопросы и согласовывать со мной разрушительные действия перед запуском",
     "presenceGuidanceInvisibleDefault": "Я рядом, но отображаюсь офлайн. По умолчанию действуй автономно и уведомляй меня только о действиях с высоким риском или значительном рефакторинге; остальные вопросы собирай в одно резюме, а не задавай по одному",
     "presenceGuidanceAwayDefault": "Я отошёл от клавиатуры. Не жди моего ответа; прими лучшее решение по имеющейся информации, заверши всё возможное и оставь краткое резюме произошедшего и открытые вопросы к моему возвращению",
-    "followSystem": "Следовать системе"
+    "followSystem": "Следовать системе",
+    "preferences": "Предпочтения",
+    "usePointerCursors": "Использовать курсор-указатель",
+    "usePointerCursorsDesc": "Менять курсор на указатель при наведении на интерактивные элементы"
   },
   "background": {
     "title": "Фон",
@@ -703,8 +706,34 @@
     "test": {
       "sent": "Тестовое уведомление отправлено",
       "permissionWarning": "Не удалось отправить тестовое уведомление. Проверьте разрешения.",
-      "sendFailed": "Не удалось отправить тестовое уведомление. Проверьте разрешения на уведомления и повторите попытку."
-    }
+      "sendFailed": "Не удалось отправить тестовое уведомление. Проверьте разрешения на уведомления и повторите попытку.",
+      "soundFailed": "Не удалось воспроизвести звук уведомления. Проверьте системную громкость."
+    },
+    "teamInbox": "Командные входящие",
+    "soundPreset": "Звук уведомления",
+    "soundPresetDesc": "Выберите звук для слышимых уведомлений",
+    "previewSound": "Прослушать",
+    "soundPresets": {
+      "classic": "Классический",
+      "gentle": "Мягкий",
+      "ascending": "Восходящий",
+      "bell": "Колокольчик"
+    },
+    "criticalOnly": "Только важные оповещения",
+    "criticalOnlyDesc": "Уведомлять только когда действие требует подтверждения или задача завершилась ошибкой",
+    "quietHours": "Расписание «Не беспокоить»",
+    "quietHoursDesc": "Отключать обычные уведомления в заданном ежедневном интервале",
+    "quietHoursSchedule": "Тихие часы",
+    "quietHoursScheduleDesc": "Используется местное время устройства. Одинаковое время начала и окончания отключает интервал.",
+    "quietHoursStart": "С",
+    "quietHoursEnd": "До",
+    "allowCriticalDuringQuietHours": "Разрешить важные оповещения",
+    "allowCriticalDuringQuietHoursDesc": "Запросы подтверждения и ошибки могут показывать системное уведомление, но никогда не воспроизводят звук",
+    "backgroundCompletionSummary": "Сводка о завершении фоновых задач",
+    "backgroundCompletionSummaryDesc": "Отправлять одно сводное уведомление после окончания тихих часов",
+    "mutedSessions": "Session без уведомлений",
+    "mutedSessionsDesc": "На этом устройстве уведомления отключены для {{count}} Session",
+    "clearMutedSessions": "Очистить все"
   },
   "editor": {
     "tabEditor": "Редактор",
@@ -923,7 +952,24 @@
     "diskCategory_screenshots": "Скриншоты браузера",
     "diskCategory_agentWorktrees": "Worktree Session Agent",
     "diskCategory_lspBin": "Бинарники LSP Server",
-    "loadZeroRows": "Click to load {{count}} more"
+    "loadZeroRows": "Click to load {{count}} more",
+    "appMemory": "App memory",
+    "appBackend": "ORG2 backend",
+    "appWebviewHelpers": "Owned WebView helpers",
+    "rssMappedDiagnostic": "RSS / mapped memory (diagnostic)",
+    "measurement": "Measurement",
+    "measurementKinds": {
+      "native": "Native effective memory",
+      "compatibility": "Compatibility metric",
+      "mixed": "Mixed native / fallback metrics",
+      "rss_fallback": "RSS fallback",
+      "unavailable": "Unavailable"
+    },
+    "toolProcessDiagnostics": "Terminal, CLI & tool processes (RSS diagnostic)",
+    "excludedFromAppMemory": "excluded from App memory",
+    "noToolProcesses": "No terminal, CLI, MCP, or tool processes detected",
+    "categoryAgentCli": "CLI agent",
+    "categoryMcpOrTool": "MCP / tool process"
   },
   "dependencies": {
     "systemDependencies": "Системные Dependencies",
@@ -977,7 +1023,13 @@
     "tableSize": "Размер",
     "tablePercentage": "Проц.",
     "scanFailed": "Не удалось проверить использование диска",
-    "openFolderFailed": "Не удалось открыть папку"
+    "openFolderFailed": "Не удалось открыть папку",
+    "browserCache": "Кэш браузера",
+    "browserCacheDesc": "Использовано {{used}} · {{cleanable}} можно безопасно очистить",
+    "cleanBrowserCache": "Очистить",
+    "browserCacheCleaned": "Освобождено {{size}} хранилища браузера",
+    "browserCacheAlreadyClean": "Кэш браузера уже очищен",
+    "browserCacheCleanFailed": "Не удалось очистить кэш браузера"
   },
   "agentSessions": {
     "title": "Agent Session",
@@ -991,7 +1043,7 @@
     "decryptEffect": "Эффект Decrypt",
     "decryptEffectDesc": "Включить Decrypt анимацию для сообщений Agent",
     "sendOnEnter": "Отправлять сообщения клавишей Enter",
-    "sendOnEnterDesc": "Если включено, Enter отправляет, а Shift+Enter вставляет новую строку. Если выключено, отправка выполняется Ctrl/Cmd+Enter"
+    "sendOnEnterDesc": "Если включено, Enter отправляет, а Shift+Enter и Ctrl/Cmd+Enter вставляют новую строку. Если выключено, отправка выполняется Ctrl/Cmd+Enter"
   },
   "languageServers": {
     "languageServersDesc": "Управление LSP серверами для автодополнения, диагностики и интеллекта кода",

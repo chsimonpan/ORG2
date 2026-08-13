@@ -273,7 +273,7 @@ pub async fn agent_list_tools(
     let active_runtime = {
         let sessions = state.sessions.lock().await;
         let mut found = None;
-        for (_id, session) in sessions.iter() {
+        for session in sessions.values() {
             found = session.get_runtime().await;
             if found.is_some() {
                 break;
