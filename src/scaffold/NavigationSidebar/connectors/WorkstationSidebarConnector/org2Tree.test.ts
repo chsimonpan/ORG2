@@ -6,7 +6,7 @@ import { buildOrg2TreeItems } from "./index";
 import { buildSessionRowActions } from "./sessionRowActions";
 
 describe("buildOrg2TreeItems", () => {
-  it("按 workspace→project→work item/task→session 归组且拒绝 slug 推断", () => {
+  it("按 workspace→project→session 归组，work item 仅作为元数据且拒绝 slug 推断", () => {
     const tree = buildOrg2TreeItems([
       {
         session_id: "s1",
@@ -31,18 +31,22 @@ describe("buildOrg2TreeItems", () => {
     );
     expect(unlinked).toBeTruthy();
     expect(unlinked?.children?.map((item) => item.label)).toEqual([
-      "T-1",
-      "T-2",
-      "未绑定 Work Item / Task",
+      "S1",
+      "S2",
+      "S3",
     ]);
-    expect(unlinked?.children?.[0]?.children?.[0]?.label).toBe("S1");
+    expect(unlinked?.children?.map((item) => item.shortcut)).toEqual([
+      "工作项：T-1",
+      "工作项：T-2",
+      "session",
+    ]);
   });
 
   it("树内 session 行复用普通 session 行动作：时间 + 置顶/标记 + 更多操作", () => {
     const [workspace] = buildOrg2TreeItems([
       { session_id: "s1", name: "S1", updated_at: "2026-07-06T10:00:00Z" },
     ] as never);
-    const sessionItem = workspace.children?.[0]?.children?.[0]
+    const sessionItem = workspace.children?.[0]
       ?.children?.[0] as NavigationMenuItem | undefined;
     expect(sessionItem?.shortcut).toBeTruthy();
 

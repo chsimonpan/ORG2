@@ -1343,23 +1343,22 @@ function createOrg2TreeBadge(level: Org2TreeLevel): React.ReactNode {
 export function buildOrg2TreeItems(
   sessions: readonly import("@src/store/session").Session[]
 ): NavigationMenuItem[] {
-  const projects = new Map<string, Map<string, NavigationMenuItem[]>>();
+  const projects = new Map<string, NavigationMenuItem[]>();
   for (const session of sessions) {
     // projectId is the only authoritative Journey binding. A slug/path/cwd is
     // display metadata and must never be used to infer project ownership.
     const projectKey = session.projectId || "Unlinked";
-    const taskKey = session.workItemId || "Unlinked task";
-    const projectBucket =
-      projects.get(projectKey) ?? new Map<string, NavigationMenuItem[]>();
-    const taskBucket = projectBucket.get(taskKey) ?? [];
-    taskBucket.push({
+    const projectBucket = projects.get(projectKey) ?? [];
+    projectBucket.push({
+      // Reuse the ordinary session id so opening, hover actions, and context
+      // menus keep the exact same production behavior as the session list.
       id: session.session_id,
       key: `org2-tree-session-${session.session_id}`,
       label: session.name || session.user_input || session.session_id,
-      shortcut: "session",
+      // Work Item / Task is metadata on a Session, never its containment parent.
+      shortcut: session.workItemId ? `工作项：${session.workItemId}` : "session",
       iconElement: createOrg2TreeBadge("session"),
     });
-    projectBucket.set(taskKey, taskBucket);
     projects.set(projectKey, projectBucket);
   }
   return [
@@ -1369,36 +1368,24 @@ export function buildOrg2TreeItems(
       label: "工作区层级",
       shortcut: "工作区",
       iconElement: createOrg2TreeBadge("workspace"),
-      // Authoritative hierarchy: workspace → explicitly-bound project →
-      // work item/task → session. Unbound records remain visible, but are
-      // never guessed into a project from slug/path/remote/cwd.
-      children: Array.from(projects.entries()).map(([projectId, tasks]) => {
-        const isUnlinkedProject = projectId === "Unlinked";
-        return {
-          id: `org2-tree-project-${projectId}`,
-          key: `org2-tree-project-${projectId}`,
-          label: isUnlinkedProject ? "未绑定项目（拒绝推断）" : projectId,
-          shortcut: isUnlinkedProject ? "Unlinked" : "journey project_id",
-          iconElement: createOrg2TreeBadge(
-            isUnlinkedProject ? "unlinked" : "project"
-          ),
-          children: Array.from(tasks.entries()).map(
-            ([taskId, sessionItems]) => {
-              const isUnlinkedTask = taskId === "Unlinked task";
-              return {
-                id: `org2-tree-task-${projectId}-${taskId}`,
-                key: `org2-tree-task-${projectId}-${taskId}`,
-                label: isUnlinkedTask ? "未绑定 Work Item / Task" : taskId,
-                shortcut: isUnlinkedTask ? "Unlinked" : "task",
-                iconElement: createOrg2TreeBadge(
-                  isUnlinkedTask ? "unlinked" : "task"
-                ),
-                children: sessionItems,
-              };
-            }
-          ),
-        };
-      }),
+      // Authoritative hierarchy: Workspace → Project → Session → Task/Fork.
+      // Task/Fork children are projected by the Session Journey surface after
+      // the session opens; Work Item remains optional session metadata here.
+      children: Array.from(projects.entries()).map(
+        ([projectId, sessionItems]) => {
+          const isUnlinkedProject = projectId === "Unlinked";
+          return {
+            id: `org2-tree-project-${projectId}`,
+            key: `org2-tree-project-${projectId}`,
+            label: isUnlinkedProject ? "未绑定项目（拒绝推断）" : projectId,
+            shortcut: isUnlinkedProject ? "Unlinked" : "journey project_id",
+            iconElement: createOrg2TreeBadge(
+              isUnlinkedProject ? "unlinked" : "project"
+            ),
+            children: sessionItems,
+          };
+        }
+      ),
     },
   ];
 }
