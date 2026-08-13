@@ -288,21 +288,27 @@ impl AwaitTool {
         if handles.len() == 1 {
             let snap = &snapshots[0];
             if snap.status == AWAIT_STATUS_RUNNING {
-                // For subagents: tell the agent to stop polling and proceed.
-                // For shells with pattern: suggest continuing to wait.
                 let is_subagent = matches!(snap.kind, registry::JobKind::Subagent { .. });
                 if is_subagent {
                     response.push_str(
                         "\nThe subagent is still working. Do NOT call await_output again to poll — \
                          proceed with other tasks. You will be notified automatically when it finishes.",
                     );
-                } else if let Some(pat) = pattern_str {
-                    if snap.pattern_matched == Some(false) {
-                        response.push_str(&format!(
-                            "\nPattern \"{}\" not matched yet. The process is still running.",
-                            pat,
-                        ));
+                } else {
+                    if let Some(pat) = pattern_str {
+                        if snap.pattern_matched == Some(false) {
+                            response.push_str(&format!(
+                                "\nPattern \"{}\" not matched yet. The process is still running.",
+                                pat,
+                            ));
+                        }
                     }
+                    response.push_str(
+                        "\nThe process is still running. Do NOT keep re-issuing the same wait — \
+                         if you have other work, continue with it; if this job's result is all \
+                         that remains, end your turn now. The session resumes automatically when \
+                         the process exits, with its output in the Background Jobs reminder.",
+                    );
                 }
             }
         }

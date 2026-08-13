@@ -870,10 +870,13 @@ fn handle_backgrounded(
     let log_info = if log_path.is_some() {
         format!(
             "\nComplete output: Session Replay\n\n\
-             To wait for output: await_output(command=\"wait_for\", handles=[\"{pid}\"], pattern=\"your_regex\", block_until_ms=30000)\n\
-             To check status:    await_output(command=\"monitor\", handles=[\"{pid}\"])\n\
-             To read tail:       await_output(command=\"monitor\", handles=[\"{pid}\"], tail_lines=100)\n\
-             To kill:            run_shell(kill_handle=\"{pid}\")"
+             To wait for completion: await_output(command=\"wait_for\", handles=[\"{pid}\"], block_until_ms=60000)\n\
+             To wait for a pattern:  await_output(command=\"wait_for\", handles=[\"{pid}\"], pattern=\"your_regex\", block_until_ms=60000)\n\
+             To check status:        await_output(command=\"monitor\", handles=[\"{pid}\"])\n\
+             To read tail:           await_output(command=\"monitor\", handles=[\"{pid}\"], tail_lines=100)\n\
+             To kill:                run_shell(kill_handle=\"{pid}\")\n\
+             If it is still running after a wait or two, STOP waiting: continue with other work or end your turn — \
+             the session resumes automatically when the process exits."
         )
     } else {
         format!("\nTo kill: run_shell(kill_handle=\"{pid}\")")
@@ -935,6 +938,7 @@ fn handle_backgrounded(
                     &format!("[background shell replay writer failed: {writer_err}]"),
                 );
                 broadcast_process_exited(&identity, pid, exit_code, killed, app_handle.as_ref());
+                finish_background_job(pid, &identity.session_id).await;
                 return;
             }
         };
@@ -974,13 +978,32 @@ fn handle_backgrounded(
             );
         }
         broadcast_process_exited(&identity, pid, exit_code, killed, app_handle.as_ref());
-        if pid != 0 {
-            tokio::time::sleep(Duration::from_secs(60)).await;
-            registry::remove(&pid.to_string());
-        }
+        finish_background_job(pid, &identity.session_id).await;
     });
 
     Ok(bounded_background_result(preview, &header, &log_info))
+}
+
+/// Shared completion tail for a backgrounded shell: push a job-completion
+/// wake to the owning session (the shell counterpart of the subagent
+/// completion push — the coordinator claims exactly-once and no-ops for
+/// killed shells or a still-running owner), then retain the registry entry
+/// until the output is acknowledged so the Background Jobs reminder of the
+/// resumed turn can still see it. The old flat 60s eviction raced exactly
+/// that window: a session idle for longer than a minute lost the entry
+/// before any turn could read it.
+async fn finish_background_job(pid: u32, session_id: &str) {
+    if pid == 0 {
+        return;
+    }
+    crate::tools::impls::orchestration::job_wake::current_job_completion_wake_hook()
+        .wake_owner(session_id);
+    registry::retain_until_acknowledged_then_remove(
+        &pid.to_string(),
+        Duration::from_secs(30 * 60),
+        "subprocess",
+    )
+    .await;
 }
 
 #[cfg(test)]
