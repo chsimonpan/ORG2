@@ -6,9 +6,6 @@ function itemContainsEventId(
   eventId: string
 ): boolean {
   if (item.event?.id === eventId) return true;
-  if (item.consolidatedEvents?.some((event) => event.id === eventId)) {
-    return true;
-  }
   if (item.readFileEvents?.some((event) => event.id === eventId)) return true;
   if (
     item.actionSummaryEntries?.some((entry) =>

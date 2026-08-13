@@ -88,6 +88,9 @@ export function useIntegrationsPage() {
     initialDevToolsTab
   );
   const [databasesActiveTab, setDatabasesActiveTab] = useState("databases");
+  const [rulesActiveTab, setRulesActiveTab] = useState<
+    "rules" | "memory" | "evolution"
+  >("rules");
   const [selectedDbClient, setSelectedDbClient] =
     useState<DependencyStatus | null>(null);
   const [accountListSearch, setAccountListSearch] = useState("");
@@ -415,6 +418,8 @@ export function useIntegrationsPage() {
     handleAddAction,
     modelsActiveTab: initialModelsTab,
     handleModelsTabChange,
+    rulesActiveTab,
+    handleRulesTabChange: setRulesActiveTab,
   });
 
   const { t: tIntegrations } = useTranslation("integrations");

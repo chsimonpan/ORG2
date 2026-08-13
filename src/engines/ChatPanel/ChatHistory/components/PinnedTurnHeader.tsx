@@ -20,6 +20,7 @@ interface PinnedTurnHeaderProps {
   turnCollapseInteractionAtRef: React.MutableRefObject<number>;
   onEditSubmit: GroupHeaderRendererProps["onEditSubmit"];
   onRestoreCheckpoint: GroupHeaderRendererProps["onRestoreCheckpoint"];
+  exactHistoryTarget?: boolean;
 }
 
 function samePinnedHeader(

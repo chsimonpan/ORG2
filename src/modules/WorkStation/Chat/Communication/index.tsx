@@ -14,6 +14,7 @@ import {
 } from "@src/engines/SessionCore/derived/planDisplayEvents";
 import { AppType } from "@src/engines/Simulator/types/appTypes";
 import { matchesCanvasEvent } from "@src/modules/WorkStation/Canvas/config";
+import { SessionJourneyControls } from "@src/modules/WorkStation/Chat/Journey/SessionJourneyControls";
 import {
   TextSelectionDropdown,
   useTextSelectionDropdown,
@@ -277,7 +278,16 @@ const SimulatorMessagesComponent: React.FC<SimulatorMessagesProps> = ({
               ? () => handlePreviewModeChange(!effectivePreviewMode)
               : undefined
           }
-          extraActions={planHeaderActions}
+          extraActions={
+            <>
+              {planHeaderActions}
+              <SessionJourneyControls
+                sessionId={sessionId}
+                messageId={state.currentEventId}
+                onJumpToMessage={handleMessageClick}
+              />
+            </>
+          }
         />
         <div className="flex min-h-0 flex-1">
           <WorkStationShell

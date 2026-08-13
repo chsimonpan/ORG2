@@ -126,6 +126,14 @@ export const RemoteTeammateSessionMetadataSchema = z.object({
     .nullish()
     .transform((value) => value ?? undefined)
     .optional(),
+  addressesComment: z
+    .object({
+      commentId: z.string(),
+      sourceSessionId: z.string(),
+    })
+    .nullish()
+    .transform((value) => value ?? undefined)
+    .optional(),
   // Trailing .optional() keeps the inferred key optional (`deletedAt?:`) so
   // the persisted-atom storage type stays assignable to the interface.
   deletedAt: z
@@ -142,6 +150,16 @@ export const RemoteTeammateSessionMetadataSchema = z.object({
     .transform((value) => value ?? undefined)
     .optional(),
   unresolvedCommentCount: z
+    .number()
+    .nullish()
+    .transform((value) => value ?? undefined)
+    .optional(),
+  openAgentTaskCount: z
+    .number()
+    .nullish()
+    .transform((value) => value ?? undefined)
+    .optional(),
+  activeAgentTaskCount: z
     .number()
     .nullish()
     .transform((value) => value ?? undefined)

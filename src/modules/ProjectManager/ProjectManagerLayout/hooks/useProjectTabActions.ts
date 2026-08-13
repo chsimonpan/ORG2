@@ -40,6 +40,8 @@ import {
   createProjectLinearWorkItemsTab,
   createProjectOrgTab,
   createProjectSettingsTab,
+  createProjectTreeTab,
+  createProjectJourneyTab,
   createProjectWorkItemsIndexTab,
   createProjectWorkItemsTab,
   createWorkItemDetailTab,
@@ -346,6 +348,19 @@ export function useProjectTabActions({
     [navigateWorkspaceTab]
   );
 
+  const handleOpenProjectTree = useCallback(() => {
+    navigateWorkspaceTab(createProjectTreeTab());
+  }, [navigateWorkspaceTab]);
+
+  const handleOpenProjectJourney = useCallback(
+    (projectId?: string, projectName?: string, projectSlug?: string) => {
+      navigateWorkspaceTab(
+        createProjectJourneyTab({ projectId, projectName, projectSlug })
+      );
+    },
+    [navigateWorkspaceTab]
+  );
+
   const handleOpenRepoSettings = useCallback(
     (section?: string) => {
       navigateWorkspaceTab(createProjectSettingsTab(section));
@@ -448,6 +463,8 @@ export function useProjectTabActions({
     handleCreateWorkItem,
     handleOpenProjects,
     handleOpenWorkItems,
+    handleOpenProjectTree,
+    handleOpenProjectJourney,
     handleOpenPersonalOrg,
     handleOpenProjectOrg,
     handleOpenPersonalOrgProjects,

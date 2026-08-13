@@ -33,6 +33,16 @@ import {
 } from "./hooks";
 import "./index.scss";
 
+export {
+  ChatMinimap,
+  buildChatMinimapItems,
+  buildChatMinimapItemsFromSession,
+  buildChatMinimapJumpRequest,
+  resolveChatMinimapActiveMarkerIndex,
+} from "./chatMinimap";
+export type { ChatMinimapItem, ChatMinimapProps } from "./chatMinimap";
+
+
 export type {
   BrowserAddToConversationNavState,
   ChatHistoryProps,

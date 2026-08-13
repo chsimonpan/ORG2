@@ -115,7 +115,7 @@ export const sessionSendMessage = defineZodAction(
     examples: ["send a message to a session", "continue a session"],
   },
   async (params) => {
-    await SessionService.sendMessage(params);
+    await SessionService.sendMessage({ ...params, turnIntentSource: "user_submit" });
     return { success: true, message: `Sent message to ${params.sessionId}` };
   }
 );

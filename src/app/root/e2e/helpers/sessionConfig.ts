@@ -43,7 +43,6 @@ import type {
   PinSessionOptions,
   Result,
 } from "../types";
-import { upsertSharedLocalKey } from "@src/hooks/keyVault/useLocalKeys";
 import { addAccount } from "./accounts";
 
 const logger = createLogger("E2EBootstrap");
@@ -266,9 +265,7 @@ export function createSessionConfigHelpers({ store }: SessionConfigDeps) {
             enabled: true,
           },
         });
-        upsertSharedLocalKey(match);
       }
-      upsertSharedLocalKey(match);
       const enabled = match.enabled_models ?? [];
       if (enabled.length === 0) {
         return {

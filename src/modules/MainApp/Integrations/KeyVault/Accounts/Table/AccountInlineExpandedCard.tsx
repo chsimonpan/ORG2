@@ -65,6 +65,11 @@ interface AccountInlineExpandedCardProps {
     baseModel: string,
     model: string
   ) => void;
+  onUpdateAccountModelSlug?: (
+    accountId: string,
+    model: string,
+    slug: string
+  ) => void;
   onRefresh?: () => Promise<void>;
   onRevalidateAccount?: (accountId: string) => Promise<void>;
   refreshing?: boolean;
@@ -90,6 +95,7 @@ const AccountInlineExpandedCard: React.FC<AccountInlineExpandedCardProps> = ({
   onToggleModel,
   onUpdateAccountEnabledModels,
   onUpdateAccountDefaultVariant,
+  onUpdateAccountModelSlug,
   onRefresh,
   onRevalidateAccount,
   refreshing = false,
@@ -356,6 +362,7 @@ const AccountInlineExpandedCard: React.FC<AccountInlineExpandedCardProps> = ({
                   : () => {}
               }
               onUpdateAccountDefaultVariant={onUpdateAccountDefaultVariant}
+              onUpdateAccountModelSlug={onUpdateAccountModelSlug}
             />
           </>
         );

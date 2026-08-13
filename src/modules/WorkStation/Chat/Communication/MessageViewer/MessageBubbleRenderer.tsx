@@ -8,7 +8,8 @@ import {
   OrgTaskEventBubble,
   isOrgTaskEvent,
 } from "../AgentEventBubbles";
-import { ChatBubble, TodoBubble, UnloadedTurnBubble } from "../ChatBubble";
+import { UnloadedTurnBubble } from "../ChatBubble/index";
+import { ChatBubble, TodoBubble } from "../ChatBubble";
 import { EmailMessageBubble, isEmailBubbleEvent } from "../EmailMessageBubble";
 import { ThinkBubble } from "../ThinkBubble";
 import type { MessageEntry, MessageViewMode } from "../types";

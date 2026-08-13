@@ -181,14 +181,6 @@ export function usePropertiesPanel({
     [project.linkedRepos, onUpdate]
   );
 
-  const handleWorkspaceChange = useCallback(
-    (workspaceId: string | undefined) => {
-      onUpdate?.({ workspaceId });
-      setOpenPicker(null);
-    },
-    [onUpdate]
-  );
-
   const handleDateChange = useCallback(
     (field: "startDate" | "targetDate", date: Date | null) => {
       onUpdate?.({ [field]: date?.toISOString() || undefined });
@@ -227,7 +219,6 @@ export function usePropertiesPanel({
     handleTeamToggle,
     handleLabelToggle,
     handleLinkedRepoToggle,
-    handleWorkspaceChange,
     handleDateChange,
     formatDate,
   };

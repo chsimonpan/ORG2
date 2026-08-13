@@ -58,6 +58,12 @@ export const agentSession = {
     .input(schemas.agentSession.SessionIdInput)
     .output(schemas.agentSession.DeleteSessionReceiptSchema)
     .build(),
+  unlinkSessionFromWorkItem: defineProcedure(
+    "agent_unlink_session_from_work_item"
+  )
+    .input(schemas.agentSession.SessionIdInput)
+    .output(z.boolean())
+    .build(),
   clearMessages: defineProcedure("agent_clear_messages")
     .input(schemas.agentSession.SessionIdInput)
     .output(z.number())

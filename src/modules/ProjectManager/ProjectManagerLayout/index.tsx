@@ -244,14 +244,6 @@ export const ProjectManagerLayout: React.FC<ProjectManagerLayoutProps> = memo(
       setStationChatVisible("my-station", true);
     }, [openCreateTargetInStartPage, setStationChatVisible, setStationMode]);
 
-    const handleImportGithubIssuesProject = useCallback(() => {
-      navigateChatPanel({
-        kind: CHAT_PANEL_SURFACE_KIND.NEW_GITHUB_ISSUES_PROJECT,
-      });
-      setStationMode("my-station");
-      setStationChatVisible("my-station", true);
-    }, [navigateChatPanel, setStationChatVisible, setStationMode]);
-
     const { activePrimarySidebarConfig } = useProjectManagerSidebarConfig({
       repoPath,
       repoName,

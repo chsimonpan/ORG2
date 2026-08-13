@@ -162,6 +162,12 @@ export interface RemoteSessionForkLineage {
   forkedAt?: string;
 }
 
+/** Provenance for an agent fork addressing a cloud comment thread. */
+export interface RemoteSessionAddressesComment {
+  commentId: string;
+  sourceSessionId: string;
+}
+
 export interface RemoteTeammateSessionMetadata {
   id: string;
   orgId: string;
@@ -225,6 +231,8 @@ export interface RemoteTeammateSessionMetadata {
    * pushed by pre-lineage clients.
    */
   forkedFrom?: RemoteSessionForkLineage;
+  /** Present when this fork addresses a cloud comment thread. */
+  addressesComment?: RemoteSessionAddressesComment;
   deletedAt?: string;
   /**
    * Session-comment counters (cloud migration 0014): live comments /
@@ -234,4 +242,6 @@ export interface RemoteTeammateSessionMetadata {
    */
   commentCount?: number;
   unresolvedCommentCount?: number;
+  openAgentTaskCount?: number;
+  activeAgentTaskCount?: number;
 }

@@ -50,7 +50,6 @@ import {
   parseAgentMessageCard,
   parseAwaitListingResult,
   parseCommandResult,
-  parseContextImportCardResult,
   parseFileCardResult,
   parseManageLspResult,
   parseManageWorkspaceResult,
@@ -61,6 +60,7 @@ import {
   parseWebsiteCardResult,
   parseWorkItemCardResult,
 } from "./helpers";
+import { parseContextImportCardResult } from "./helpers/cardParsers";
 import type { ToolCallBlockProps } from "./types";
 
 export type { ToolCallBlockProps } from "./types";

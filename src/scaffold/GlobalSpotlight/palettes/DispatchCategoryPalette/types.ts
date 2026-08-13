@@ -52,10 +52,6 @@ export interface DispatchCategoryPaletteProps extends BasePaletteProps {
   /** Include the Human-session document target in session-creation pickers. */
   includeHumanSession?: boolean;
   /**
-   * When true only CLI agent entries are shown. Used by CLI-only picker surfaces.
-   */
-  cliOnly?: boolean;
-  /**
    * Optional context pill rendered above the input — used by callers that
    * pre-select a target (e.g. an org member row clicking its agent pill)
    * so the palette title reflects what is being chosen for.

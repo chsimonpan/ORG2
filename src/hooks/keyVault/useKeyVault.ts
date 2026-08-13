@@ -91,7 +91,6 @@ export function useKeyVault(
           baseUrl: keyInfo.base_url,
           availableModels: keyInfo.available_models,
           enabledModels: keyInfo.enabled_models,
-          sideQueryModel: keyInfo.side_query_model ?? undefined,
           modelVariants: keyInfo.model_variants,
           defaultVariants: keyInfo.default_variants,
           modelSlugs: keyInfo.model_slugs,

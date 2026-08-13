@@ -265,6 +265,9 @@ export function getWorkstationTabOwnership(
     case "project-org":
     case "project-org-settings":
     case "project-git-sync-review":
+    case "project-tree":
+    case "project-journey":
+    case "session-journey":
     case "project-workitems":
     case "workItem-detail":
     case "chat-session":

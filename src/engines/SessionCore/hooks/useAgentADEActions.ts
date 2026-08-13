@@ -53,11 +53,6 @@ import {
   resolveTrustedDispatchParams,
 } from "./adeReplyBinding";
 
-import {
-  extractInvokingSessionId,
-  resolveTrustedDispatchParams,
-} from "./adeReplyBinding";
-
 /**
  * Pending session proposal — set by `session.propose` handler,
  * consumed by `AdeAwareSessionCreatorSlot` in AppLayout when the

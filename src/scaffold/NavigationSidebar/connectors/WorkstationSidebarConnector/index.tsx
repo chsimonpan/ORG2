@@ -99,6 +99,37 @@ const logger = createLogger("WorkstationSidebarGuide");
  * result. `cloudSessionsSection.tsx` supplies the cloud "Team sessions"
  * data consumed here via `sidebarConnector.cloudMenuData`.
  */
+
+export function buildOrg2TreeItems(
+  sessions: readonly import("@src/store/session").Session[]
+): NavigationMenuItem[] {
+  const projects = new Map<string, NavigationMenuItem[]>();
+  for (const session of sessions) {
+    const projectId = session.projectId || "Unlinked";
+    const rows = projects.get(projectId) ?? [];
+    rows.push({
+      id: session.session_id,
+      key: `org2-tree-session-${session.session_id}`,
+      label: session.name || session.user_input || session.session_id,
+      shortcut: session.workItemId ? `工作项：${session.workItemId}` : "session",
+    });
+    projects.set(projectId, rows);
+  }
+  return [{
+    id: "org2-tree-workspace",
+    key: "org2-tree-workspace",
+    label: "工作区层级",
+    shortcut: "工作区",
+    children: Array.from(projects.entries()).map(([projectId, rows]) => ({
+      id: `org2-tree-project-${projectId}`,
+      key: `org2-tree-project-${projectId}`,
+      label: projectId === "Unlinked" ? "未绑定项目（拒绝推断）" : projectId,
+      shortcut: projectId === "Unlinked" ? "Unlinked" : "project",
+      children: rows,
+    })),
+  }];
+}
+
 export const WorkstationSidebarConnector: React.FC = () => {
   const { t } = useTranslation("navigation");
   const { t: tProjects } = useTranslation("projects");
@@ -772,7 +803,11 @@ export const WorkstationSidebarConnector: React.FC = () => {
         items={[]}
         activeKey={activeSidebarKey}
         onChange={() => undefined}
-        menuItems={sidebarMenuItems}
+        menuItems={
+          activeViewKey === "sessions"
+            ? [...buildOrg2TreeItems(sessions), ...sidebarMenuItems]
+            : sidebarMenuItems
+        }
         pinnedMenuItems={pinnedMenuItems}
         selectedKey={resolvedSelectedMenuItemId}
         onMenuItemClick={resolvedMenuItemClick}

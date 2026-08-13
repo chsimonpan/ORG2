@@ -98,7 +98,7 @@ interface RenderActiveContentOptions {
   projectQuickActions: ProjectManagerContentRouterProps["projectQuickActions"];
 }
 
-function renderActiveContent({
+export function renderActiveContent({
   repoPath,
   activeTab,
   hasNoTabs,

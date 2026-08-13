@@ -416,7 +416,7 @@ const TurnPaginationControls: React.FC<TurnPaginationControlsProps> = memo(
               )}
             </>
           )}
-          <SessionViewersIndicator />
+          <SessionViewersIndicator sessionId={null} />
         </div>
         {turnPaginationEnabled && (
           <div className="flex shrink-0 items-center gap-1.5">
