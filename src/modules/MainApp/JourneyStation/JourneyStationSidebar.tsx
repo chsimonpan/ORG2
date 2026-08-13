@@ -23,10 +23,28 @@ import {
 } from "@src/store/ui/journeyStationAtom";
 import { getSessionListDisplayName } from "@src/util/session/sessionSidebarRow";
 
+const SESSION_LIST_LIMIT = 30;
+
+export function projectJourneySelection(
+  project: ProjectLike
+): JourneyStationSelection | null {
+  const projectId = project.id.trim();
+  return projectId
+    ? { kind: "project", id: projectId, name: project.name }
+    : null;
+}
+
+export function sessionJourneySelection(
+  sessionId: string,
+  name: string
+): JourneyStationSelection {
+  return { kind: "session", id: sessionId, name };
+}
 interface JourneyRowProps {
   icon: React.ReactNode;
   label: string;
   selected: boolean;
+  disabled?: boolean;
   onClick: () => void;
   testId?: string;
 }
@@ -35,17 +53,19 @@ const JourneyRow: React.FC<JourneyRowProps> = ({
   icon,
   label,
   selected,
+  disabled = false,
   onClick,
   testId,
 }) => (
   <button
     type="button"
     data-testid={testId}
+    disabled={disabled}
     className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
       selected
         ? "bg-fill-3 text-text-1"
         : "text-text-2 hover:bg-fill-2 hover:text-text-1"
-    }`}
+    } ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
     onClick={onClick}
   >
     <span className="shrink-0">{icon}</span>
@@ -136,7 +156,9 @@ const JourneyStationSidebar: React.FC = () => {
           </div>
         )}
         {projects.map((project) => {
+          const projectSelection = projectJourneySelection(project);
           const identity = project.id || project.slug || "";
+          const isSelectable = projectSelection !== null;
           const projectSessions = [
             ...(sessionsByProject.get(project.id) ?? []),
             ...(project.slug && project.slug !== project.id
@@ -154,11 +176,19 @@ const JourneyStationSidebar: React.FC = () => {
                 icon={<Box size={13} className="text-primary-6" />}
                 label={project.name}
                 selected={
-                  selection?.kind === "project" && selection.id === identity
+                  isSelectable &&
+                  selection?.kind === "project" &&
+                  selection.id === identity
                 }
-                onClick={() =>
-                  select({ kind: "project", id: identity, name: project.name })
-                }
+                disabled={!isSelectable}
+                onClick={() => {
+                  if (isSelectable)
+                    select({
+                      kind: "project",
+                      id: identity,
+                      name: project.name,
+                    });
+                }}
                 testId="journey-station-project-row"
               />
               <div className="ml-4 border-l border-border-2 pl-1">
@@ -214,11 +244,7 @@ const JourneyStationSidebar: React.FC = () => {
                 selection.id === session.session_id
               }
               onClick={() =>
-                select({
-                  kind: "session",
-                  id: session.session_id,
-                  name: label,
-                })
+                select(sessionJourneySelection(session.session_id, label))
               }
               testId="journey-station-session-row"
             />

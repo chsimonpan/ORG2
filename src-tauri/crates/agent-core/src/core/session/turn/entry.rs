@@ -36,6 +36,10 @@ fn extract_screenshot_store(
         .unwrap_or_else(|| Arc::new(shared_state::ScreenshotStore::new()))
 }
 
+fn resolve_turn_id(turn_id: Option<String>) -> String {
+    turn_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+}
+
 // ============================================
 // Skill Slash Command Expansion
 // ============================================
@@ -101,7 +105,27 @@ fn expand_skill_slash_command(content: &str, workspace: Option<&std::path::Path>
 
 #[cfg(test)]
 mod tests {
-    use super::expand_skill_slash_command;
+    use super::{expand_skill_slash_command, resolve_turn_id};
+
+    #[test]
+    fn resolve_turn_id_preserves_explicit_id() {
+        assert_eq!(
+            resolve_turn_id(Some("direct-channel-turn-42".to_string())),
+            "direct-channel-turn-42"
+        );
+    }
+
+    #[test]
+    fn resolve_turn_id_mints_distinct_nonempty_uuid_values_when_absent() {
+        let first = resolve_turn_id(None);
+        let second = resolve_turn_id(None);
+
+        assert!(!first.is_empty());
+        assert!(!second.is_empty());
+        assert_ne!(first, second);
+        assert!(uuid::Uuid::parse_str(&first).is_ok());
+        assert!(uuid::Uuid::parse_str(&second).is_ok());
+    }
 
     #[test]
     fn skill_slash_command_accepts_newline_after_name() {
@@ -181,14 +205,25 @@ pub async fn process_message(
         plan_approval_manager.set_app_handle(app_handle.clone());
     }
 
+    let resolved_turn_id = resolve_turn_id(input.turn_id.clone());
+    // Only scheduler-backed callers (which supply an explicit id from
+    // `AgentSession::begin_turn`) have an active-generation fence. Direct
+    // gateway/channel callers intentionally do not create a DialogTurn;
+    // keeping that fence absent preserves their existing event persistence
+    // while still binding their user and assistant events to one execution id.
+    let active_turn_generation = input
+        .turn_id
+        .as_ref()
+        .map(|_| Arc::clone(&session.active_turn_generation));
+
     let event_handler_config = EventHandlerConfig {
         workspace_path: Some(workspace_path.clone()),
         lsp_manager,
         app_handle: app_handle.clone(),
         hook_executor: Some(hook_executor),
-        turn_id: input.turn_id.clone(),
+        turn_id: Some(resolved_turn_id.clone()),
         cancel_flag: Some(Arc::clone(&session.cancel_flag)),
-        active_turn_generation: Some(Arc::clone(&session.active_turn_generation)),
+        active_turn_generation,
         active_repo_path: input
             .ide_context
             .as_ref()
@@ -214,7 +249,7 @@ pub async fn process_message(
         images: input.images,
         is_resume: input.is_resume,
         display_text: input.display_text,
-        turn_id: input.turn_id,
+        turn_id: Some(resolved_turn_id),
         turn_intent_id: input.turn_intent_id,
     };
 

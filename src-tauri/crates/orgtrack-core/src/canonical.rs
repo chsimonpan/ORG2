@@ -8,6 +8,7 @@ pub use orgtrack_protocol::{
     SessionActorLifecycleEnvelopeV1, SessionActorLifecyclePhase, SessionActorRecord,
     RESOURCE_INTERACTION_SCHEMA_VERSION, SESSION_ACTOR_SCHEMA_VERSION,
 };
+use core_types::session::ParentSessionRelation;
 
 pub const SOURCE_ORGII_RUST_AGENTS: &str = "orgii_rust_agents";
 pub const SOURCE_ORGII_CLI_SESSIONS: &str = "orgii_cli_sessions";
@@ -44,6 +45,10 @@ pub struct AgentMetadata {
     pub key_source: Option<String>,
     pub origin: Option<String>,
     pub display_name: Option<String>,
+    /// Explicit evidence for the semantics of `SessionRecord.parent_session_id`.
+    /// `None` is deliberately not inferred from the raw ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_relation: Option<ParentSessionRelation>,
     pub parsed_categories: BTreeMap<String, String>,
 }
 

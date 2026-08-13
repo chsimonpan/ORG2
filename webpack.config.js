@@ -41,6 +41,20 @@ module.exports = (env, argv) => {
   // depth for speed. Intended for local fast .app builds, not release builds.
   const useFastProd = isProduction && process.env.FAST_PROD === "true";
 
+  // Release builders may cap Terser worker count to avoid a worker-per-core
+  // memory spike on workstations. Omitted means preserve the normal parallel
+  // behaviour; a positive integer keeps the same Terser pipeline with bounded
+  // concurrency.
+  const terserParallel = (() => {
+    const raw = process.env.WEBPACK_TERSER_PARALLEL;
+    if (raw === undefined || raw === "") return true;
+    const value = Number.parseInt(raw, 10);
+    if (!Number.isInteger(value) || value < 1) {
+      throw new Error("WEBPACK_TERSER_PARALLEL must be a positive integer");
+    }
+    return value;
+  })();
+
   const isE2E = process.env.ORGII_E2E === "1";
   const devServerPort = Number.parseInt(
     process.env.WEBPACK_DEV_SERVER_PORT ?? process.env.PORT ?? "1998",
@@ -381,7 +395,7 @@ module.exports = (env, argv) => {
             ]
           : [
               new TerserPlugin({
-                parallel: true,
+                parallel: terserParallel,
                 terserOptions: {
                   compress: {
                     drop_console: true,

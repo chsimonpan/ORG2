@@ -10,7 +10,11 @@ export interface ProjectJourneyPageProps {
   forceDemo?: boolean;
 }
 
-/** Read-only project wrapper over the shared Journey graph container. */
+/** Read-only project wrapper over the shared Journey graph container.
+ *
+ * A Journey scope is a canonical project id, never a display slug. Slugs can
+ * be renamed and are only retained for tab chrome/backward compatibility.
+ */
 const ProjectJourneyPage: React.FC<ProjectJourneyPageProps> = ({
   projectId,
   projectName,

@@ -827,6 +827,7 @@ impl TurnEventHandler for UnifiedEventHandler {
                 None,
                 crate::bus::event_pipeline_bridge::PersistedUserMessageSource::User,
                 &injection.turn_intent_id,
+                self.config.turn_id.as_deref().unwrap_or_default(),
             );
         }
         crate::foundation::session_bridge::update_turn_intent_status(

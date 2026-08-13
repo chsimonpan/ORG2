@@ -23,9 +23,11 @@ const TURN_STATUS_FAILED: &str = "failed";
 /// v6: materialize the per-round modified-file list (`modified_files_json`).
 /// v7: include patch-text fallback line stats in `modified_files_json`.
 /// v8: include content fallback line stats for create/write-style tools.
-/// v9: materialize exact per-round commits and pull requests.
+/// v9: materialize exact per-round commits and pull requests, and persist the
+/// optional submitted turn-intent id for lifecycle joins.
 /// v10: project provider-neutral read/search/write resource interactions via
-/// Orgtrack instead of interpreting ORG2 tool names in this host crate.
+/// Orgtrack instead of interpreting ORG2 tool names in this host crate, and
+/// persist the execution/DialogTurn id for exact assistant-result joins.
 const TURN_INDEX_VERSION: i64 = 10;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +35,16 @@ const TURN_INDEX_VERSION: i64 = 10;
 pub struct CachedTurnSummary {
     pub session_id: String,
     pub turn_id: String,
+    /// Submitted user-intent id from user_message.result_json.turnIntentId.
+    /// Used for lifecycle/status facts, not assistant-result matching.
+    #[serde(default)]
+    pub turn_intent_id: Option<String>,
+    /// DialogTurn id from user_message.result_json.executionTurnId. This is
+    /// intentionally distinct from both turn_id (user event) and
+    /// turn_intent_id (submitted intent), and exactly matches assistant
+    /// event args.turnId when the source persisted it.
+    #[serde(default)]
+    pub execution_turn_id: Option<String>,
     pub start_sequence: i64,
     pub end_sequence: Option<i64>,
     pub next_turn_id: Option<String>,
@@ -85,10 +97,13 @@ struct TurnDraft {
     body_event_count: i64,
     /// Canonical user-intent id for this turn, if the source rows carried
     /// one. Used by `build_turn_drafts` to collapse a synthetic + backend
-    /// pair into a single draft.
+    /// pair into a single draft and overlay lifecycle state.
     turn_intent_id: Option<String>,
     /// Provider-neutral Orgtrack metadata accumulated from body events.
     metadata_accumulator: TurnMetadataAccumulator,
+    /// DialogTurn id that owns assistant events for this user message. It is
+    /// only present when the persisted user event explicitly carried it.
+    execution_turn_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +170,21 @@ fn turn_intent_id_for_row(row: &IndexEventRow) -> Option<String> {
         .and_then(|result| {
             result
                 .get("turnIntentId")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+                .filter(|id| !id.is_empty())
+        })
+}
+
+/// Extract the DialogTurn id written alongside a user message. Assistant
+/// event `args.turnId` uses this identity, whereas `turnIntentId` names the
+/// submit/lifecycle request. Never substitute one for the other.
+fn execution_turn_id_for_row(row: &IndexEventRow) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(&row.result_json)
+        .ok()
+        .and_then(|result| {
+            result
+                .get("executionTurnId")
                 .and_then(|value| value.as_str())
                 .map(str::to_string)
                 .filter(|id| !id.is_empty())
@@ -402,6 +432,7 @@ fn build_turn_drafts(rows: &[IndexEventRow], stale_intent_ids: &StaleIntentIds) 
     for row in rows {
         if is_user_message(row) {
             let row_intent_id = turn_intent_id_for_row(row);
+            let row_execution_id = execution_turn_id_for_row(row);
 
             // Lifecycle-pre-durable terminal: this intent will never yield
             // a durable round (Stale = invalidated). Drop the row entirely
@@ -419,6 +450,9 @@ fn build_turn_drafts(rows: &[IndexEventRow], stale_intent_ids: &StaleIntentIds) 
             // but does not open a new round.
             if let (Some(intent_id), Some(turn)) = (row_intent_id.as_ref(), current.as_mut()) {
                 if turn.turn_intent_id.as_ref() == Some(intent_id) {
+                    if turn.execution_turn_id.is_none() {
+                        turn.execution_turn_id = row_execution_id;
+                    }
                     turn.user_event_ids.push(row.id.clone());
                     turn.event_count += 1;
                     turn.ended_at = Some(max_timestamp(&turn.started_at, &row.created_at));
@@ -445,6 +479,7 @@ fn build_turn_drafts(rows: &[IndexEventRow], stale_intent_ids: &StaleIntentIds) 
                 body_event_count: 0,
                 turn_intent_id: row_intent_id,
                 metadata_accumulator: TurnMetadataAccumulator::new(),
+                execution_turn_id: row_execution_id,
             });
             continue;
         }
@@ -485,31 +520,33 @@ fn materialized_turn_drafts(drafts: Vec<TurnDraft>) -> Vec<TurnDraft> {
 }
 
 fn turn_summary_from_row(row: &rusqlite::Row<'_>) -> SqliteResult<CachedTurnSummary> {
-    let user_event_ids_json: String = row.get(8)?;
+    let user_event_ids_json: String = row.get(10)?;
     let user_event_ids = serde_json::from_str(&user_event_ids_json).unwrap_or_else(|_| Vec::new());
-    let interrupted_int: i64 = row.get(13)?;
-    let modified_files_json: String = row.get(14)?;
+    let interrupted_int: i64 = row.get(15)?;
+    let modified_files_json: String = row.get(16)?;
     let modified_files = serde_json::from_str(&modified_files_json).unwrap_or_else(|_| Vec::new());
-    let resource_interactions_json: String = row.get(15)?;
+    let resource_interactions_json: String = row.get(17)?;
     let resource_interactions =
         serde_json::from_str(&resource_interactions_json).unwrap_or_else(|_| Vec::new());
-    let git_artifacts_json: String = row.get(16)?;
+    let git_artifacts_json: String = row.get(18)?;
     let git_artifacts = serde_json::from_str(&git_artifacts_json).unwrap_or_else(|_| Vec::new());
 
     Ok(CachedTurnSummary {
         session_id: row.get(0)?,
         turn_id: row.get(1)?,
-        start_sequence: row.get(2)?,
-        end_sequence: row.get(3)?,
-        next_turn_id: row.get(4)?,
-        started_at: row.get(5)?,
-        ended_at: row.get(6)?,
-        duration_ms: row.get(7)?,
+        turn_intent_id: row.get(2)?,
+        execution_turn_id: row.get(3)?,
+        start_sequence: row.get(4)?,
+        end_sequence: row.get(5)?,
+        next_turn_id: row.get(6)?,
+        started_at: row.get(7)?,
+        ended_at: row.get(8)?,
+        duration_ms: row.get(9)?,
         user_event_ids,
-        user_preview: row.get(9)?,
-        event_count: row.get(10)?,
-        body_event_count: row.get(11)?,
-        status: row.get(12)?,
+        user_preview: row.get(11)?,
+        event_count: row.get(12)?,
+        body_event_count: row.get(13)?,
+        status: row.get(14)?,
         interrupted: interrupted_int != 0,
         modified_files,
         resource_interactions,
@@ -545,11 +582,11 @@ fn rebuild_turn_index_inner(session_id: &str) -> SqliteResult<Vec<CachedTurnSumm
     {
         let mut stmt = tx.prepare_cached(
             "INSERT INTO session_turns
-             (session_id, turn_id, start_sequence, end_sequence, next_turn_id, started_at, ended_at,
+             (session_id, turn_id, turn_intent_id, execution_turn_id, start_sequence, end_sequence, next_turn_id, started_at, ended_at,
               duration_ms, user_event_ids_json, user_preview, event_count, body_event_count,
               status, interrupted, updated_at, modified_files_json, resource_interactions_json,
               git_artifacts_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
         )?;
 
         for draft in &drafts {
@@ -591,6 +628,8 @@ fn rebuild_turn_index_inner(session_id: &str) -> SqliteResult<Vec<CachedTurnSumm
             stmt.execute(params![
                 session_id,
                 draft.turn_id,
+                draft.turn_intent_id,
+                draft.execution_turn_id,
                 draft.start_sequence,
                 draft.end_sequence,
                 draft.next_turn_id,
@@ -686,7 +725,7 @@ pub fn load_turn_index(session_id: &str) -> SqliteResult<Vec<CachedTurnSummary>>
     ensure_turn_index_fresh(session_id)?;
     let conn = get_connection()?;
     let mut stmt = conn.prepare_cached(
-        "SELECT session_id, turn_id, start_sequence, end_sequence, next_turn_id, started_at, ended_at,
+        "SELECT session_id, turn_id, turn_intent_id, execution_turn_id, start_sequence, end_sequence, next_turn_id, started_at, ended_at,
                 duration_ms, user_event_ids_json, user_preview, event_count, body_event_count,
                 status, interrupted, modified_files_json, resource_interactions_json,
                 git_artifacts_json
@@ -713,7 +752,7 @@ pub fn load_turn_summaries(
     let conn = get_connection()?;
     let mut summaries = Vec::with_capacity(turn_ids.len());
     let mut statement = conn.prepare_cached(
-        "SELECT session_id, turn_id, start_sequence, end_sequence, next_turn_id, started_at, ended_at,
+        "SELECT session_id, turn_id, turn_intent_id, execution_turn_id, start_sequence, end_sequence, next_turn_id, started_at, ended_at,
                 duration_ms, user_event_ids_json, user_preview, event_count, body_event_count,
                 status, interrupted, modified_files_json, resource_interactions_json,
                 git_artifacts_json
@@ -737,7 +776,7 @@ pub fn get_turn_summary(
     turn_id: &str,
 ) -> SqliteResult<Option<CachedTurnSummary>> {
     conn.query_row(
-        "SELECT session_id, turn_id, start_sequence, end_sequence, next_turn_id, started_at, ended_at,
+        "SELECT session_id, turn_id, turn_intent_id, execution_turn_id, start_sequence, end_sequence, next_turn_id, started_at, ended_at,
                 duration_ms, user_event_ids_json, user_preview, event_count, body_event_count,
                 status, interrupted, modified_files_json, resource_interactions_json,
                 git_artifacts_json
@@ -867,6 +906,52 @@ mod tests {
     }
 
     #[test]
+    fn cached_summary_preserves_distinct_optional_turn_identities() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::schema::init_session_tables(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO session_turns
+             (session_id, turn_id, turn_intent_id, execution_turn_id, start_sequence, end_sequence,
+              next_turn_id, started_at, ended_at, duration_ms, user_event_ids_json, user_preview,
+              event_count, body_event_count, status, interrupted, updated_at, modified_files_json,
+              resource_interactions_json, git_artifacts_json)
+             VALUES (?1, ?2, ?3, ?4, 1, NULL, NULL, ?5, NULL, NULL, '[]', 'inspect Journey',
+                     1, 0, 'pending', 0, ?5, '[]', '[]', '[]')",
+            params![
+                "session-1",
+                "user-message-7",
+                "submitted-intent-8",
+                "execution-turn-9",
+                "2026-05-27T00:00:00Z",
+            ],
+        )
+        .unwrap();
+
+        let summary = conn
+            .query_row(
+                "SELECT session_id, turn_id, turn_intent_id, execution_turn_id, start_sequence,
+                        end_sequence, next_turn_id, started_at, ended_at, duration_ms,
+                        user_event_ids_json, user_preview, event_count, body_event_count, status,
+                        interrupted, modified_files_json, resource_interactions_json,
+                        git_artifacts_json
+                 FROM session_turns WHERE session_id = ?1",
+                ["session-1"],
+                turn_summary_from_row,
+            )
+            .unwrap();
+
+        assert_eq!(summary.turn_id, "user-message-7");
+        assert_eq!(
+            summary.turn_intent_id.as_deref(),
+            Some("submitted-intent-8")
+        );
+        assert_eq!(
+            summary.execution_turn_id.as_deref(),
+            Some("execution-turn-9")
+        );
+    }
+
+    #[test]
     fn synthetic_user_input_does_not_start_turn() {
         let rows = vec![
             row(
@@ -940,7 +1025,7 @@ mod tests {
         // persist two user_message rows under the same intent (inbox
         // transcript followed by main submit). The indexer must collapse
         // them into a single round so the user sees one bubble, not two.
-        let intent = r#"{"backendPersisted":true,"turnIntentId":"intent-A"}"#;
+        let intent = r#"{"backendPersisted":true,"turnIntentId":"intent-A","executionTurnId":"execution-A"}"#;
         let rows = vec![
             row("user-message-1", Some(USER_MESSAGE_FUNCTION), intent, 1),
             row("user-message-2", Some(USER_MESSAGE_FUNCTION), intent, 2),
@@ -953,6 +1038,8 @@ mod tests {
         // The first user_message that opened the round wins as turn_id;
         // both user event ids are tracked.
         assert_eq!(drafts[0].turn_id, "user-message-1");
+        assert_eq!(drafts[0].turn_intent_id.as_deref(), Some("intent-A"));
+        assert_eq!(drafts[0].execution_turn_id.as_deref(), Some("execution-A"));
         assert_eq!(
             drafts[0].user_event_ids,
             vec!["user-message-1".to_string(), "user-message-2".to_string()]

@@ -1295,7 +1295,12 @@ export const WorkstationSidebarConnector: React.FC = () => {
   );
 };
 
-export type Org2TreeLevel = "workspace" | "project" | "session" | "unlinked";
+export type Org2TreeLevel =
+  | "workspace"
+  | "project"
+  | "task"
+  | "session"
+  | "unlinked";
 
 const ORG2_TREE_LEVEL_BADGES: Record<
   Org2TreeLevel,

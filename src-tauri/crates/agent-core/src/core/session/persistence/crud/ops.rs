@@ -67,11 +67,11 @@ INSERT INTO agent_sessions (
     workspace_path, org_id, project_id, project_name,
     work_item_id, agent_role, worktree_path,
     worktree_branch, base_branch, merge_status,
-    project_slug, agent_definition_id, org_member_id, parent_session_id, parent_event_id,
+    project_slug, agent_definition_id, org_member_id, parent_session_id, parent_session_relation, parent_event_id,
     workspace_additional_json, key_source, agent_exec_mode, native_harness_type,
     draft_text, reply_target_event_id, pinned
 )
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)
 ON CONFLICT(session_id) DO UPDATE SET
     name                       = excluded.name,
     status                     = excluded.status,
@@ -96,6 +96,7 @@ ON CONFLICT(session_id) DO UPDATE SET
     agent_definition_id        = COALESCE(excluded.agent_definition_id, agent_sessions.agent_definition_id),
     org_member_id              = COALESCE(excluded.org_member_id, agent_sessions.org_member_id),
     parent_session_id          = COALESCE(excluded.parent_session_id, agent_sessions.parent_session_id),
+    parent_session_relation    = COALESCE(excluded.parent_session_relation, agent_sessions.parent_session_relation),
     parent_event_id            = COALESCE(excluded.parent_event_id, agent_sessions.parent_event_id),
     -- Preserve existing workspace JSON unless the caller
     -- explicitly wrote a non-default value. This stops
@@ -172,6 +173,7 @@ pub fn upsert_session(record: &UnifiedSessionRecord) -> SqliteResult<()> {
                 record.agent_definition_id,
                 record.org_member_id,
                 record.parent_session_id,
+                record.parent_session_relation.map(|relation| relation.as_str()),
                 record.parent_event_id,
                 record.workspace_additional_json,
                 key_source_str,
@@ -865,6 +867,7 @@ pub fn get_parent_session(session_id: &str) -> SqliteResult<Option<UnifiedSessio
 mod tests {
     use super::*;
     use core_types::key_source::KeySource;
+    use core_types::session::ParentSessionRelation;
 
     /// Mirror the production `agent_sessions` schema columns referenced by
     /// [`UPSERT_SESSION_SQL`] and [`UNIFIED_SESSION_SELECT`]. Kept in this
@@ -898,6 +901,7 @@ mod tests {
             agent_definition_id TEXT,
             org_member_id TEXT,
             parent_session_id TEXT,
+            parent_session_relation TEXT,
             parent_event_id TEXT,
             workspace_additional_json TEXT NOT NULL DEFAULT '{}',
             key_source TEXT NOT NULL DEFAULT 'own_key',
@@ -989,6 +993,7 @@ mod tests {
                 record.agent_definition_id,
                 record.org_member_id,
                 record.parent_session_id,
+                record.parent_session_relation.map(|relation| relation.as_str()),
                 record.parent_event_id,
                 record.workspace_additional_json,
                 key_source_str,
@@ -1028,6 +1033,30 @@ mod tests {
         assert_eq!(market_back.key_source, KeySource::HostedKey);
         let own_back = select_one(&conn, "sid-own");
         assert_eq!(own_back.key_source, KeySource::OwnKey);
+    }
+
+    #[test]
+    fn parent_session_relation_round_trips_as_exact_wire_value() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(TEST_SCHEMA).unwrap();
+        let record = UnifiedSessionRecord {
+            parent_session_id: Some("archived-parent".to_string()),
+            parent_session_relation: Some(ParentSessionRelation::CompactContinuation),
+            ..make_record("compact-child", KeySource::OwnKey)
+        };
+        upsert_into(&conn, &record);
+        let saved: String = conn
+            .query_row(
+                "SELECT parent_session_relation FROM agent_sessions WHERE session_id = 'compact-child'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(saved, "compact_continuation");
+        assert_eq!(
+            select_one(&conn, "compact-child").parent_session_relation,
+            Some(ParentSessionRelation::CompactContinuation)
+        );
     }
 
     #[test]

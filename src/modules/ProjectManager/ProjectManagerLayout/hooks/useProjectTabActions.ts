@@ -255,6 +255,13 @@ export function useProjectTabActions({
 
   const handleOpenProjectJourney = useCallback(
     (projectId?: string, projectSlug?: string, projectName?: string) => {
+      // The workspace/sidebar entry is not tied to one selected project. Do
+      // not mint a malformed `project/` scope: open the project tree, where a
+      // concrete canonical project id is available for the Journey action.
+      if (!projectId) {
+        navigateWorkspaceTab(createProjectTreeTab());
+        return;
+      }
       navigateWorkspaceTab(
         createProjectJourneyTab({
           projectId,

@@ -25,6 +25,9 @@ fn input() -> CanonicalJourneyInput {
                 forked_from: None,
                 source_ref: "session-parent".into(),
                 display_timestamp: Some("2026-01-01".into()),
+                title: Some("Parent session".into()),
+                lifecycle_status: Some("completed".into()),
+                branch: Some("main".into()),
             },
             CanonicalSession {
                 id: "child".into(),
@@ -38,6 +41,9 @@ fn input() -> CanonicalJourneyInput {
                 }),
                 source_ref: "session-child".into(),
                 display_timestamp: Some("2099-01-01".into()),
+                title: Some("Child session".into()),
+                lifecycle_status: Some("running".into()),
+                branch: Some("feature/journey".into()),
             },
         ],
         turns: vec![
@@ -46,12 +52,18 @@ fn input() -> CanonicalJourneyInput {
                 sequence: 1,
                 source_ref: "turn-1".into(),
                 display_timestamp: None,
+                summary: Some("Inspect canonical Journey data".into()),
+                result_summary: Some("Journey canonical records inspected".into()),
+                lifecycle_status: Some("completed".into()),
             },
             CanonicalTurn {
                 session_id: "child".into(),
                 sequence: 2,
                 source_ref: "turn-2".into(),
                 display_timestamp: None,
+                summary: None,
+                result_summary: None,
+                lifecycle_status: Some("interrupted".into()),
             },
         ],
         artifacts: vec![CanonicalArtifact {
@@ -65,6 +77,34 @@ fn input() -> CanonicalJourneyInput {
         }],
         commits: vec![],
     }
+}
+
+#[test]
+fn projector_preserves_sourced_turn_summary_and_lifecycle_metadata() {
+    let graph = project_canonical_journey(&input()).unwrap();
+    let turn = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == "turn/child/1")
+        .unwrap();
+    assert_eq!(
+        turn.display_title.as_deref(),
+        Some("Inspect canonical Journey data")
+    );
+    assert_eq!(
+        turn.result_summary.as_deref(),
+        Some("Journey canonical records inspected")
+    );
+    assert_eq!(turn.lifecycle_status.as_deref(), Some("completed"));
+    assert_eq!(turn.branch, None);
+    let session = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == "session/child")
+        .unwrap();
+    assert_eq!(session.display_title.as_deref(), Some("Child session"));
+    assert_eq!(session.lifecycle_status.as_deref(), Some("running"));
+    assert_eq!(session.branch.as_deref(), Some("feature/journey"));
 }
 
 #[test]

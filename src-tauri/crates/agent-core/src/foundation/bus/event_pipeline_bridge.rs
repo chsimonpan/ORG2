@@ -141,6 +141,7 @@ pub type PersistUserMessageEventFn = fn(
     images: Option<&[String]>,
     source: PersistedUserMessageSource,
     turn_intent_id: &str,
+    execution_turn_id: &str,
 );
 
 // ============================================================================
@@ -432,6 +433,7 @@ pub fn persist_user_message_event(
     images: Option<&[String]>,
     source: PersistedUserMessageSource,
     turn_intent_id: &str,
+    execution_turn_id: &str,
 ) {
     if let Some(f) = PERSIST_USER_MESSAGE_EVENT.get() {
         f(
@@ -443,6 +445,7 @@ pub fn persist_user_message_event(
             images,
             source,
             turn_intent_id,
+            execution_turn_id,
         );
     } else {
         tracing::warn!(

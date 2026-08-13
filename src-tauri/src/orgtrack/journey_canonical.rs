@@ -127,6 +127,9 @@ pub fn build_journey_graph(
             forked_from: None,
             source_ref: format!("orgtrack:session:{}", session.session_id),
             display_timestamp: session.created_at.clone(),
+            title: (!session.title.trim().is_empty()).then(|| session.title.clone()),
+            lifecycle_status: session.status.clone(),
+            branch: session.branch.clone(),
         });
     }
 
@@ -149,6 +152,9 @@ pub fn build_journey_graph(
                 sequence,
                 source_ref: format!("orgtrack:artifact:{}", artifact.record_id),
                 display_timestamp: artifact.timestamp.clone(),
+                summary: None,
+                result_summary: None,
+                lifecycle_status: None,
             });
         }
     }

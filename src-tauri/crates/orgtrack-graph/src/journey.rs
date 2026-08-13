@@ -62,6 +62,20 @@ pub struct JourneyNode {
     pub evidence_class: EvidenceClass,
     pub source_ref: String,
     pub display_timestamp: Option<String>,
+    /// A sourced, human-readable label. It is never inferred by the graph
+    /// projector; absent source text remains absent rather than fabricated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_title: Option<String>,
+    /// Source-backed result/summary for a turn, when it exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_summary: Option<String>,
+    /// Explicit lifecycle state from the canonical session/turn store.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lifecycle_status: Option<String>,
+    /// Explicit source-system branch label, if supplied by the canonical
+    /// session. It is display metadata, not a synthetic lineage edge.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -128,6 +142,9 @@ pub struct CanonicalSession {
     pub forked_from: Option<SessionParent>,
     pub source_ref: String,
     pub display_timestamp: Option<String>,
+    pub title: Option<String>,
+    pub lifecycle_status: Option<String>,
+    pub branch: Option<String>,
 }
 #[derive(Debug, Clone)]
 pub struct SessionParent {
@@ -140,6 +157,11 @@ pub struct CanonicalTurn {
     pub sequence: u64,
     pub source_ref: String,
     pub display_timestamp: Option<String>,
+    /// Source-backed user prompt/intent for the turn.
+    pub summary: Option<String>,
+    /// Source-backed terminal assistant result/summary for the turn.
+    pub result_summary: Option<String>,
+    pub lifecycle_status: Option<String>,
 }
 #[derive(Debug, Clone)]
 pub struct CanonicalArtifact {
@@ -178,6 +200,10 @@ fn node(
         evidence_class: EvidenceClass::Canonical,
         source_ref,
         display_timestamp,
+        display_title: None,
+        result_summary: None,
+        lifecycle_status: None,
+        branch: None,
     }
 }
 fn edge(from: String, to: String, kind: JourneyEdgeKind, source_ref: String) -> JourneyEdge {
@@ -260,12 +286,17 @@ pub fn project_canonical_journey(input: &CanonicalJourneyInput) -> Result<Journe
             &mut graph,
             &mut ids,
             &mut coverage,
-            node(
-                sid.clone(),
-                JourneyNodeKind::Session,
-                s.source_ref.clone(),
-                s.display_timestamp.clone(),
-            ),
+            JourneyNode {
+                display_title: s.title.clone(),
+                lifecycle_status: s.lifecycle_status.clone(),
+                branch: s.branch.clone(),
+                ..node(
+                    sid.clone(),
+                    JourneyNodeKind::Session,
+                    s.source_ref.clone(),
+                    s.display_timestamp.clone(),
+                )
+            },
         )?;
         graph.edges.push(edge(
             format!("project/{}", s.project_id),
@@ -309,12 +340,17 @@ pub fn project_canonical_journey(input: &CanonicalJourneyInput) -> Result<Journe
             &mut graph,
             &mut ids,
             &mut coverage,
-            node(
-                tid.clone(),
-                JourneyNodeKind::Turn,
-                t.source_ref.clone(),
-                t.display_timestamp.clone(),
-            ),
+            JourneyNode {
+                display_title: t.summary.clone(),
+                result_summary: t.result_summary.clone(),
+                lifecycle_status: t.lifecycle_status.clone(),
+                ..node(
+                    tid.clone(),
+                    JourneyNodeKind::Turn,
+                    t.source_ref.clone(),
+                    t.display_timestamp.clone(),
+                )
+            },
         )?;
         let sid = format!("session/{}", t.session_id);
         graph.edges.push(edge(

@@ -75,6 +75,8 @@ mod tests {
             modified_files: files,
             resource_interactions: vec![],
             git_artifacts: vec![],
+            turn_intent_id: None,
+            execution_turn_id: None,
         }
     }
 

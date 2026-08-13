@@ -315,8 +315,7 @@ fn persist_events_async_adapter(
     });
 }
 
-fn persist_user_message_event_adapter(
-    handle: &AppHandle,
+fn build_persisted_user_message_event(
     session_id: &str,
     message_id: &str,
     content: &str,
@@ -324,7 +323,9 @@ fn persist_user_message_event_adapter(
     images: Option<&[String]>,
     source: bridge::PersistedUserMessageSource,
     turn_intent_id: &str,
-) {
+    execution_turn_id: &str,
+    created_at: &str,
+) -> SessionEvent {
     let mut result = serde_json::json!({
         "type": "user",
         "message": { "content": content, "role": "user" },
@@ -341,6 +342,17 @@ fn persist_user_message_event_adapter(
             obj.insert(
                 "turnIntentId".to_string(),
                 serde_json::json!(turn_intent_id),
+            );
+        }
+    }
+    // `executionTurnId` is the DialogTurn id carried by assistant event
+    // args.turnId. It is deliberately separate from turnIntentId, which
+    // identifies the submitted user intent and lifecycle record.
+    if !execution_turn_id.is_empty() {
+        if let Some(obj) = result.as_object_mut() {
+            obj.insert(
+                "executionTurnId".to_string(),
+                serde_json::json!(execution_turn_id),
             );
         }
     }
@@ -371,7 +383,7 @@ fn persist_user_message_event_adapter(
         id: format!("user-message-{message_id}"),
         chunk_id: Some(format!("user-message-{message_id}")),
         session_id: session_id.to_string(),
-        created_at: Utc::now().to_rfc3339(),
+        created_at: created_at.to_string(),
         function_name: "user_message".to_string(),
         ui_canonical: "user_message".to_string(),
         action_type: "raw".to_string(),
@@ -396,6 +408,33 @@ fn persist_user_message_event_adapter(
     };
     event.recompute_extracted();
 
+    event
+}
+
+fn persist_user_message_event_adapter(
+    handle: &AppHandle,
+    session_id: &str,
+    message_id: &str,
+    content: &str,
+    display_text: Option<&str>,
+    images: Option<&[String]>,
+    source: bridge::PersistedUserMessageSource,
+    turn_intent_id: &str,
+    execution_turn_id: &str,
+) {
+    let created_at = Utc::now().to_rfc3339();
+    let event = build_persisted_user_message_event(
+        session_id,
+        message_id,
+        content,
+        display_text,
+        images,
+        source,
+        turn_intent_id,
+        execution_turn_id,
+        &created_at,
+    );
+
     let cached = session_event_to_cached_event(&event);
     let state = handle.state::<EventStoreState>();
     state.with_store_mut(session_id, |store| store.merge_events(vec![event]));
@@ -406,6 +445,47 @@ fn persist_user_message_event_adapter(
         &[cached],
         BULK_WRITE_MAX_RETRIES,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persisted_user_message_keeps_execution_turn_id_distinct_from_intent_id() {
+        let event = build_persisted_user_message_event(
+            "session-1",
+            "message-1",
+            "hello",
+            None,
+            None,
+            bridge::PersistedUserMessageSource::User,
+            "intent-1",
+            "execution-1",
+            "2026-08-03T00:00:00+00:00",
+        );
+
+        assert_eq!(event.result["turnIntentId"], "intent-1");
+        assert_eq!(event.result["executionTurnId"], "execution-1");
+    }
+
+    #[test]
+    fn persisted_user_message_omits_empty_execution_turn_id() {
+        let event = build_persisted_user_message_event(
+            "session-1",
+            "message-1",
+            "hello",
+            None,
+            None,
+            bridge::PersistedUserMessageSource::User,
+            "intent-1",
+            "",
+            "2026-08-03T00:00:00+00:00",
+        );
+
+        assert!(event.result.get("executionTurnId").is_none());
+        assert_eq!(event.result["turnIntentId"], "intent-1");
+    }
 }
 
 /// One-shot startup repair: finalize historically stranded `awaiting_user`

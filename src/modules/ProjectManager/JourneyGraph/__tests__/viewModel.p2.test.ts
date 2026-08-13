@@ -17,11 +17,9 @@ const payload: JourneyGraphPayload = {
       evidenceClass: "canonical",
       sourceRef: "session:z",
       displayTimestamp: "2026-07-30T10:00:00.000Z",
-      metadata: {
-        agentIdentity: "agent-z",
-        agentBand: "review",
-        topicTags: ["explicit"],
-      },
+      displayTitle: "Active implementation",
+      lifecycleStatus: "running",
+      branch: "feature/journey",
     },
     {
       id: "session/a",
@@ -29,7 +27,8 @@ const payload: JourneyGraphPayload = {
       evidenceClass: "canonical",
       sourceRef: "session:a",
       displayTimestamp: "2026-07-30T08:00:00.000Z",
-      metadata: { agentIdentity: "agent-a", agentBand: "build", topicTags: [] },
+      displayTitle: "Initial investigation",
+      lifecycleStatus: "interrupted",
     },
     {
       id: "turn/a/2",
@@ -37,6 +36,8 @@ const payload: JourneyGraphPayload = {
       evidenceClass: "canonical",
       sourceRef: "turn:a:2",
       displayTimestamp: "2026-07-30T08:30:00.000Z",
+      displayTitle: "Pause the investigation",
+      lifecycleStatus: "interrupted",
     },
     {
       id: "turn/a/1",
@@ -44,6 +45,9 @@ const payload: JourneyGraphPayload = {
       evidenceClass: "canonical",
       sourceRef: "turn:a:1",
       displayTimestamp: "2026-07-30T08:00:00.000Z",
+      displayTitle: "Inspect failure scope",
+      resultSummary: "Scope recorded",
+      lifecycleStatus: "completed",
     },
     {
       id: "artifact/orgtrack/a",
@@ -87,11 +91,11 @@ const payload: JourneyGraphPayload = {
       sourceRef: "fork:z:a",
     },
     {
-      from: "session/a",
-      to: "session/z",
+      from: "session/z",
+      to: "session/a",
       kind: "resumedFrom",
       evidenceClass: "canonical",
-      sourceRef: "resume:a:z",
+      sourceRef: "resume:z:a",
     },
     {
       from: "artifact/orgtrack/a",
@@ -118,7 +122,10 @@ const payload: JourneyGraphPayload = {
 describe("P2 Journey view models", () => {
   it("creates explicit idle compression and stable session lanes", () => {
     const view = graphToStorylineViewModel(payload, 10 * 60 * 1000);
-    expect(view.lanes.map((lane) => lane.id)).toEqual(["build", "review"]);
+    expect(view.lanes.map((lane) => lane.id)).toEqual([
+      "session/a",
+      "session/z",
+    ]);
     expect(view.lanes[0].milestones.map((milestone) => milestone.id)).toEqual([
       "session/a",
       "turn/a/1",
@@ -136,7 +143,42 @@ describe("P2 Journey view models", () => {
       "artifact/orgtrack/a"
     );
     expect(view.lanes[0].milestones[0].topicTags).toEqual([]);
-    expect(view.lanes[0].milestones[1].sequence).toBeNull();
+  });
+
+  it("uses sourced turn summaries and factual lineage to distinguish the active trunk from a paused branch", () => {
+    const view = graphToStorylineViewModel(payload);
+    const parent = view.lanes.find((lane) => lane.id === "session/a");
+    const child = view.lanes.find((lane) => lane.id === "session/z");
+    expect(parent?.state).toBe("paused");
+    expect(parent?.isActiveTrunk).toBe(false);
+    expect(child?.parentLaneId).toBe("session/a");
+    expect(child?.state).toBe("active");
+    expect(child?.isActiveTrunk).toBe(true);
+    const turn = parent?.milestones.find((item) => item.id === "turn/a/1");
+    expect(turn?.title).toBe("Inspect failure scope");
+    expect(turn?.resultSummary).toBe("Scope recorded");
+  });
+
+  it("does not invent a trunk when lifecycle and factual lineage are absent", () => {
+    const graph: JourneyGraphPayload = {
+      ...payload,
+      nodes: payload.nodes.map(
+        ({
+          lifecycleStatus: _lifecycleStatus,
+          displayTitle: _displayTitle,
+          branch: _branch,
+          ...node
+        }) => node
+      ),
+      edges: payload.edges.filter(
+        (edge) => edge.kind !== "forkedFrom" && edge.kind !== "resumedFrom"
+      ),
+    };
+    expect(
+      graphToStorylineViewModel(graph).lanes.every(
+        (lane) => !lane.isActiveTrunk
+      )
+    ).toBe(true);
   });
 
   it("uses actual branch edges only, never timestamp proximity", () => {
@@ -149,65 +191,7 @@ describe("P2 Journey view models", () => {
     expect(graphToBranchesViewModel(graph).links).toEqual([]);
     expect(
       graphToBranchesViewModel(payload).links.map((link) => link.kind)
-    ).toEqual(["resumedFrom", "forkedFrom"]);
-  });
-
-  it("keeps absent agent and topic metadata unknown instead of deriving it from ids", () => {
-    const graph: JourneyGraphPayload = {
-      ...payload,
-      nodes: [
-        {
-          id: "session/sdeagent-review",
-          kind: "session",
-          evidenceClass: "canonical",
-          sourceRef: "session:s",
-          displayTimestamp: "2026-07-30T08:00:00.000Z",
-        },
-      ],
-      edges: [],
-    };
-    const view = graphToStorylineViewModel(graph);
-    expect(view.lanes).toHaveLength(1);
-    expect(view.lanes[0].id).toBe("unknown-agent");
-    expect(view.lanes[0].milestones[0].topicTags).toEqual([]);
-  });
-
-  it("uses the explicit session node kind instead of a session-id prefix", () => {
-    const graph: JourneyGraphPayload = {
-      ...payload,
-      nodes: [
-        {
-          id: "opaque-owner",
-          kind: "session",
-          evidenceClass: "canonical",
-          sourceRef: "session:opaque",
-          displayTimestamp: "2026-07-30T08:00:00.000Z",
-          metadata: {
-            agentIdentity: "agent-a",
-            agentBand: "build",
-            topicTags: [],
-          },
-        },
-        {
-          id: "opaque-turn",
-          kind: "turn",
-          evidenceClass: "canonical",
-          sourceRef: "turn:opaque",
-          displayTimestamp: "2026-07-30T08:01:00.000Z",
-        },
-      ],
-      edges: [
-        {
-          from: "opaque-owner",
-          to: "opaque-turn",
-          kind: "contains",
-          evidenceClass: "canonical",
-          sourceRef: "turn:opaque",
-        },
-      ],
-    };
-
-    expect(graphToStorylineViewModel(graph).lanes[0].id).toBe("build");
+    ).toEqual(["forkedFrom", "resumedFrom"]);
   });
 
   it("includes only produced or modified edges connected to factual file nodes", () => {

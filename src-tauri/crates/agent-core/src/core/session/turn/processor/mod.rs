@@ -663,6 +663,7 @@ impl UnifiedMessageProcessor {
                         context.images.as_deref(),
                         crate::bus::event_pipeline_bridge::PersistedUserMessageSource::User,
                         context.turn_intent_id.as_str(),
+                        context.turn_id.as_deref().unwrap_or_default(),
                     );
                 });
             }
@@ -838,6 +839,7 @@ impl UnifiedMessageProcessor {
                                 None,
                                 crate::bus::event_pipeline_bridge::PersistedUserMessageSource::AgentOrgInboxTranscript,
                                 &transcript_intent_id,
+                                context.turn_id.as_deref().unwrap_or_default(),
                             );
                         });
                     }

@@ -10,12 +10,13 @@ import { atom } from "jotai";
 
 export interface JourneyStationSelection {
   kind: "project" | "session";
-  /** Project id/slug or session id, matching `JourneyScope` identity. */
+  /** Canonical project id or session id, matching `JourneyScope` identity. */
   id: string;
   /** Display name for the Journey header (optional). */
   name?: string;
 }
 
-export const journeyStationSelectionAtom =
-  atom<JourneyStationSelection | null>(null);
+export const journeyStationSelectionAtom = atom<JourneyStationSelection | null>(
+  null
+);
 journeyStationSelectionAtom.debugLabel = "journeyStationSelectionAtom";

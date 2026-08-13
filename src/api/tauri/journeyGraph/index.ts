@@ -18,6 +18,14 @@ export interface JourneyGraphNode {
   sourceRef: string;
   displayTimestamp?: string | null;
   metadata?: JourneyNodeMetadata;
+  /** Sourced canonical label/turn summary; never inferred by the client. */
+  displayTitle?: string | null;
+  /** Source-backed terminal assistant result/summary for a turn. */
+  resultSummary?: string | null;
+  /** Explicit session/turn lifecycle state from the canonical store. */
+  lifecycleStatus?: string | null;
+  /** Explicit source-system branch label on a session, if available. */
+  branch?: string | null;
 }
 export interface JourneyGraphEdge {
   from: string;

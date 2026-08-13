@@ -847,6 +847,7 @@ pub(crate) fn runtime_artifact_session_record(session_id: &str) -> Result<Sessio
             key_source: Some(record.key_source.to_string()),
             origin: Some(SOURCE_ORGII_RUST_AGENTS.to_string()),
             display_name: Some(record.name),
+            parent_session_relation: record.parent_session_relation,
             ..AgentMetadata::default()
         },
         journey: Default::default(),

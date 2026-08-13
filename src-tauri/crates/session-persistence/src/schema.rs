@@ -72,6 +72,8 @@ pub fn init_session_tables(conn: &Connection) -> SqliteResult<()> {
         "CREATE TABLE IF NOT EXISTS session_turns (
             session_id TEXT NOT NULL,
             turn_id TEXT NOT NULL,
+            turn_intent_id TEXT,
+            execution_turn_id TEXT,
             start_sequence INTEGER NOT NULL,
             end_sequence INTEGER,
             next_turn_id TEXT,
@@ -122,6 +124,20 @@ pub fn init_session_tables(conn: &Connection) -> SqliteResult<()> {
     // shell results by the same parser as the live event pipeline.
     conn.execute(
         "ALTER TABLE session_turns ADD COLUMN git_artifacts_json TEXT NOT NULL DEFAULT '[]'",
+        [],
+    )
+    .ok();
+    // Durable exact join key from user_message.result_json.turnIntentId.
+    // Nullable for legacy materialized turns that predate the runtime id.
+    conn.execute(
+        "ALTER TABLE session_turns ADD COLUMN turn_intent_id TEXT",
+        [],
+    )
+    .ok();
+    // DialogTurn id from user_message.result_json.executionTurnId. This is
+    // the only durable key allowed to join terminal assistant args.turnId.
+    conn.execute(
+        "ALTER TABLE session_turns ADD COLUMN execution_turn_id TEXT",
         [],
     )
     .ok();
@@ -480,6 +496,18 @@ mod tests {
         .expect("query table existence")
     }
 
+    fn column_exists(conn: &Connection, table_name: &str, column_name: &str) -> bool {
+        let mut statement = conn
+            .prepare(&format!("PRAGMA table_info({table_name})"))
+            .expect("prepare table-info query");
+        let exists = statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query table-info")
+            .filter_map(Result::ok)
+            .any(|name| name == column_name);
+        exists
+    }
+
     #[test]
     fn init_session_tables_creates_usage_telemetry_tables_and_indexes() {
         let conn = Connection::open_in_memory().expect("open in-memory sqlite");
@@ -569,5 +597,51 @@ mod tests {
 
         // Second init is a no-op (marker-gated) and must not fail.
         init_session_tables(&conn).expect("re-init session schema");
+    }
+    #[test]
+    fn init_session_tables_adds_nullable_turn_identity_columns_to_existing_turn_index() {
+        let conn = Connection::open_in_memory().expect("open in-memory sqlite");
+        // Simulate an existing sessions.db produced before the v9 turn-index
+        // contract. The migration must preserve it and expose a nullable
+        // exact runtime join key rather than forcing a synthesized value.
+        conn.execute_batch(
+            "CREATE TABLE session_turns (
+                session_id TEXT NOT NULL,
+                turn_id TEXT NOT NULL,
+                start_sequence INTEGER NOT NULL,
+                end_sequence INTEGER,
+                next_turn_id TEXT,
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                duration_ms INTEGER,
+                user_event_ids_json TEXT NOT NULL DEFAULT '[]',
+                user_preview TEXT NOT NULL DEFAULT '',
+                event_count INTEGER NOT NULL DEFAULT 0,
+                body_event_count INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL,
+                interrupted INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (session_id, turn_id)
+            );",
+        )
+        .expect("create legacy session_turns table");
+
+        init_session_tables(&conn).expect("migrate legacy session schema");
+
+        assert!(column_exists(&conn, "session_turns", "turn_intent_id"));
+        assert!(column_exists(&conn, "session_turns", "execution_turn_id"));
+        for column in ["turn_intent_id", "execution_turn_id"] {
+            let is_nullable: i64 = conn
+                .query_row(
+                    r#"SELECT "notnull" FROM pragma_table_info('session_turns') WHERE name = ?1"#,
+                    [column],
+                    |row| row.get(0),
+                )
+                .expect("read turn identity nullability");
+            assert_eq!(
+                is_nullable, 0,
+                "{column} must remain nullable for legacy rows"
+            );
+        }
     }
 }

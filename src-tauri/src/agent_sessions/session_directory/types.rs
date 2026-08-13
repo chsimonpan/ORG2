@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use core_types::key_source::KeySource;
 use orgtrack_core::sources::imported_history::ImportedHistorySidebarRow;
+use core_types::session::ParentSessionRelation;
 
 // ============================================================================
 // Core Types
@@ -102,6 +103,9 @@ pub struct SessionAggregateRecord {
     /// Parent/root session id for child sessions such as Agent Org member sessions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
+    /// Explicit semantics for the parent ID. Absent means no lineage claim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_relation: Option<ParentSessionRelation>,
     /// Agent Org roster member id for org member session rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub org_member_id: Option<String>,

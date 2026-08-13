@@ -59,6 +59,10 @@ pub fn ensure_unified_schema(conn: &Connection) -> SqliteResult<()> {
     );
     try_migrate(
         conn,
+        "ALTER TABLE agent_sessions ADD COLUMN parent_session_relation TEXT",
+    );
+    try_migrate(
+        conn,
         "ALTER TABLE agent_sessions ADD COLUMN parent_event_id TEXT",
     );
     try_migrate(conn, "ALTER TABLE agent_sessions ADD COLUMN org_id TEXT");

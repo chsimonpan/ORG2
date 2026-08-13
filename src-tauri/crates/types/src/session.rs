@@ -3,6 +3,40 @@
 //!
 //! Frontend mirrors these in `src/util/session/sessionCategory.ts`.
 
+use serde::{Deserialize, Serialize};
+
+/// Explicit semantics for a native session's `parent_session_id`.
+/// A raw parent ID alone must not become Journey lineage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParentSessionRelation {
+    CompactContinuation,
+    Delegated,
+}
+
+impl ParentSessionRelation {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CompactContinuation => "compact_continuation",
+            Self::Delegated => "delegated",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "compact_continuation" => Some(Self::CompactContinuation),
+            "delegated" => Some(Self::Delegated),
+            _ => None,
+        }
+    }
+}
+
+impl AsRef<str> for ParentSessionRelation {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
 /// OS Agent (workspace-isolated subagent host) sessions.
 pub const OS_SESSION_PREFIX: &str = "osagent-";
 

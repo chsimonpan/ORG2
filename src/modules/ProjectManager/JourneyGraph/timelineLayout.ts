@@ -23,11 +23,21 @@ export const TIMELINE_CAP_MS = 25 * 60 * 1000;
 /** Gaps above this threshold get a labeled compression band. */
 export const TIMELINE_IDLE_GAP_MS = 15 * 60 * 1000;
 /** Node kinds that are placed on the timeline lanes. */
-export const TIMELINE_KINDS = new Set(["session", "turn", "checkpoint", "artifact", "commit"]);
+export const TIMELINE_KINDS = new Set([
+  "session",
+  "turn",
+  "checkpoint",
+  "artifact",
+  "commit",
+]);
 /** Node kinds whose labels are always shown, even when throttled. */
 export const STRUCTURAL_KINDS = new Set(["checkpoint", "commit", "artifact"]);
 /** Edge kinds that are drawn as connector curves between placed milestones. */
-export const CURVE_KINDS = new Set(["forkedFrom", "resumedFrom", "compactedTo"]);
+export const CURVE_KINDS = new Set([
+  "forkedFrom",
+  "resumedFrom",
+  "compactedTo",
+]);
 /** Lane whose members could not be attributed to a session. */
 export const UNLINKED_LANE_ID = "unlinked-facts";
 
@@ -43,7 +53,34 @@ export const MIN_LABEL_GAP_PX = 104;
 /** A lane whose last milestone is older than this fades out at the tail. */
 export const FADE_TAIL_MS = 90 * 60 * 1000;
 
-export function parseTimestampMs(value: string | null | undefined): number | null {
+export const MIN_TIMELINE_SCALE = 0.5;
+export const MAX_TIMELINE_SCALE = 2.5;
+
+export function clampTimelineScale(scale: number): number {
+  return Math.min(MAX_TIMELINE_SCALE, Math.max(MIN_TIMELINE_SCALE, scale));
+}
+
+export function zoomTimelineScale(scale: number, delta: number): number {
+  return clampTimelineScale(scale * (delta > 0 ? 1.1 : 0.9));
+}
+
+/** Fit the recorded canvas to a viewport without changing fact coordinates. */
+export function fitTimelineScale(
+  viewportWidth: number,
+  contentWidth: number
+): number {
+  if (
+    !Number.isFinite(viewportWidth) ||
+    !Number.isFinite(contentWidth) ||
+    contentWidth <= 0
+  )
+    return 1;
+  return clampTimelineScale(viewportWidth / contentWidth);
+}
+
+export function parseTimestampMs(
+  value: string | null | undefined
+): number | null {
   if (!value) return null;
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? null : parsed;
@@ -67,7 +104,13 @@ export interface CompressedAxis {
 export function buildCompressedAxis(timestamps: number[]): CompressedAxis {
   const sorted = [...new Set(timestamps)].sort((a, b) => a - b);
   if (sorted.length === 0) {
-    return { points: [], compTotal: 0, pxPerComp: 1, xOf: () => 0, idleBands: [] };
+    return {
+      points: [],
+      compTotal: 0,
+      pxPerComp: 1,
+      xOf: () => 0,
+      idleBands: [],
+    };
   }
   const points: CompressedPoint[] = [{ raw: sorted[0], comp: 0 }];
   const idleBands: CompressedAxis["idleBands"] = [];
@@ -109,8 +152,10 @@ export interface PlacedLane {
   lane: StorylineLane;
   y: number;
   placed: PlacedMilestone[];
-  /** True when the lane's last milestone is stale relative to the newest fact. */
+  /** True when the lane is explicitly paused, or stale relative to newest fact. */
   fadeTail: boolean;
+  /** Branch lanes get a factual vertical offset from their lineage parent. */
+  depth: number;
 }
 
 export interface PlacedCurve {
@@ -133,14 +178,22 @@ export interface StorylineLayout {
   totalHeight: number;
   /** Newest raw timestamp across all placed milestones (null when empty). */
   latestTs: number | null;
+  /** Compressed x of the injected "now" instant, when it lies on the axis. */
+  nowX: number | null;
 }
 
 /** Milestone kinds eligible for timeline placement. */
 function isTimelineMilestone(milestone: StorylineMilestone): boolean {
-  return TIMELINE_KINDS.has(milestone.kind) && parseTimestampMs(milestone.displayTimestamp) !== null;
+  return (
+    TIMELINE_KINDS.has(milestone.kind) &&
+    parseTimestampMs(milestone.displayTimestamp) !== null
+  );
 }
 
-export function layoutStoryline(viewModel: StorylineViewModel): StorylineLayout {
+export function layoutStoryline(
+  viewModel: StorylineViewModel,
+  nowMs: number = Date.now()
+): StorylineLayout {
   const allTs: number[] = [];
   for (const lane of viewModel.lanes) {
     for (const milestone of lane.milestones) {
@@ -152,24 +205,43 @@ export function layoutStoryline(viewModel: StorylineViewModel): StorylineLayout 
   const latestTs = allTs.length > 0 ? Math.max(...allTs) : null;
 
   const placedById = new Map<string, { x: number; y: number; kind: string }>();
+  const laneById = new Map(viewModel.lanes.map((lane) => [lane.id, lane]));
+  const depthForLane = (lane: StorylineLane): number => {
+    let depth = 0;
+    let cursor = lane.parentLaneId;
+    const visited = new Set<string>([lane.id]);
+    while (cursor && !visited.has(cursor)) {
+      visited.add(cursor);
+      depth += 1;
+      cursor = laneById.get(cursor)?.parentLaneId;
+    }
+    return depth;
+  };
   const lanes: PlacedLane[] = viewModel.lanes.map((lane, index) => {
+    const depth = depthForLane(lane);
     const y = PAD_TOP + index * LANE_HEIGHT;
     let lastLabelX = -Infinity;
     const placed = lane.milestones
       .filter(isTimelineMilestone)
       .map((milestone) => {
-        const x = PAD_LEFT + axis.xOf(parseTimestampMs(milestone.displayTimestamp)!);
+        const x =
+          PAD_LEFT + axis.xOf(parseTimestampMs(milestone.displayTimestamp)!);
         const structural = STRUCTURAL_KINDS.has(milestone.kind);
         const showLabel = structural || x - lastLabelX >= MIN_LABEL_GAP_PX;
         if (showLabel) lastLabelX = x;
         placedById.set(milestone.id, { x, y, kind: milestone.kind });
         return { milestone, x, showLabel };
       });
-    const lastTs = placed.length > 0
-      ? parseTimestampMs(placed[placed.length - 1].milestone.displayTimestamp)
-      : null;
-    const fadeTail = latestTs !== null && lastTs !== null && latestTs - lastTs > FADE_TAIL_MS;
-    return { lane, y, placed, fadeTail };
+    const lastTs =
+      placed.length > 0
+        ? parseTimestampMs(placed[placed.length - 1].milestone.displayTimestamp)
+        : null;
+    const fadeTail =
+      lane.state === "paused" ||
+      (latestTs !== null &&
+        lastTs !== null &&
+        latestTs - lastTs > FADE_TAIL_MS);
+    return { lane, y, placed, fadeTail, depth };
   });
 
   const curves: PlacedCurve[] = [];
@@ -194,8 +266,14 @@ export function layoutStoryline(viewModel: StorylineViewModel): StorylineLayout 
     curves.push({ connector, path, fromX, fromY, toX, toY });
   }
 
-  const totalWidth = LANE_LABEL_WIDTH + PAD_LEFT + Math.max(axis.compTotal * axis.pxPerComp, 160) + PAD_RIGHT;
-  const totalHeight = PAD_TOP + Math.max(viewModel.lanes.length, 1) * LANE_HEIGHT + 24;
+  const totalWidth =
+    LANE_LABEL_WIDTH +
+    PAD_LEFT +
+    Math.max(axis.compTotal * axis.pxPerComp, 160) +
+    PAD_RIGHT;
+  const totalHeight =
+    PAD_TOP + Math.max(viewModel.lanes.length, 1) * LANE_HEIGHT + 24;
+  const nowX = nowMarkerX(axis, latestTs, nowMs);
   return {
     lanes,
     curves,
@@ -205,7 +283,26 @@ export function layoutStoryline(viewModel: StorylineViewModel): StorylineLayout 
     totalWidth,
     totalHeight,
     latestTs,
+    nowX,
   };
+}
+
+/**
+ * Compressed x for the "now" instant. It is only drawn while it actually
+ * lies on the recorded axis: before the first fact or more than a small
+ * lookahead past the newest fact the marker would be a fabricated position.
+ * The lookahead is presentation-only; it never changes fact positions.
+ */
+export function nowMarkerX(
+  axis: CompressedAxis,
+  latestTs: number | null,
+  nowMs: number
+): number | null {
+  if (axis.points.length === 0 || latestTs === null) return null;
+  const firstRaw = axis.points[0].raw;
+  const nowLookaheadMs = 2 * 60 * 60 * 1000;
+  if (nowMs < firstRaw || nowMs > latestTs + nowLookaheadMs) return null;
+  return PAD_LEFT + axis.xOf(nowMs);
 }
 
 /** Formats a raw ms timestamp for tick labels (compact local time). */

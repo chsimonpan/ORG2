@@ -35,6 +35,10 @@ fn node(
         evidence_class: evidence,
         source_ref: source.clone(),
         display_timestamp: None,
+        display_title: None,
+        result_summary: None,
+        lifecycle_status: None,
+        branch: None,
     });
     g.coverage.push(CoverageEntry {
         source_ref: source,
@@ -446,6 +450,10 @@ mod tests {
                 evidence_class: EvidenceClass::Canonical,
                 source_ref: "canonical-session:s".into(),
                 display_timestamp: None,
+                display_title: None,
+                result_summary: None,
+                lifecycle_status: None,
+                branch: None,
             }],
             ..JourneyGraph::default()
         };

@@ -19,6 +19,9 @@ export interface JourneyDisplayNode extends JourneyEvidence {
   agentIdentity?: string | null;
   agentBand?: string | null;
   topicTags: string[];
+  resultSummary?: string | null;
+  lifecycleStatus?: string | null;
+  branch?: string | null;
 }
 
 export interface JourneyViewModel {
@@ -37,11 +40,21 @@ export interface StorylineIdleGap {
   durationMs: number;
 }
 
+export type StorylineLaneState = "active" | "paused" | "completed" | "unknown";
+
 export interface StorylineLane {
   id: string;
   label: string;
   milestones: StorylineMilestone[];
   gaps: StorylineIdleGap[];
+  /** Explicit lifecycle classification; absence is never guessed from time. */
+  state?: StorylineLaneState;
+  /** A factual lineage link places this lane below its parent lane. */
+  parentLaneId?: string;
+  /** Explicit source-system branch label, when this is a session lane. */
+  branch?: string | null;
+  /** True only for a terminal active session with no factual child lane. */
+  isActiveTrunk?: boolean;
 }
 
 export interface StorylineConnector extends JourneyEvidence {
@@ -111,7 +124,7 @@ function titleFromId(id: string): string {
 function toDisplayNode(node: JourneyGraphNode): JourneyDisplayNode {
   return {
     id: node.id,
-    title: titleFromId(node.id),
+    title: node.displayTitle?.trim() || titleFromId(node.id),
     kind: node.kind,
     evidenceClass: node.evidenceClass,
     sourceRef: node.sourceRef,
@@ -119,6 +132,9 @@ function toDisplayNode(node: JourneyGraphNode): JourneyDisplayNode {
     agentIdentity: node.metadata?.agentIdentity ?? null,
     agentBand: node.metadata?.agentBand ?? null,
     topicTags: node.metadata?.topicTags ?? [],
+    resultSummary: node.resultSummary,
+    lifecycleStatus: node.lifecycleStatus,
+    branch: node.branch,
   };
 }
 
@@ -141,29 +157,23 @@ function parseTimestamp(value: string | null | undefined): number | null {
   return Number.isNaN(timestamp) ? null : timestamp;
 }
 
-function agentLaneForNode(
+function turnSequence(id: string): number | null {
+  const match = /^turn\/[^/]+\/(\d+)$/.exec(id);
+  return match ? Number(match[1]) : null;
+}
+
+function sessionIdForNode(
   node: JourneyGraphNode,
-  nodes: JourneyGraphNode[],
   edges: JourneyGraphEdge[]
 ): string | null {
-  const session =
-    node.kind === "session"
-      ? node
-      : (() => {
-          const owner = edges.find(
-            (edge) =>
-              edge.to === node.id &&
-              edge.kind === "contains" &&
-              nodes.find((candidate) => candidate.id === edge.from)?.kind ===
-                "session"
-          );
-          return owner
-            ? nodes.find((candidate) => candidate.id === owner.from)
-            : undefined;
-        })();
-  return (
-    session?.metadata?.agentBand ?? session?.metadata?.agentIdentity ?? null
+  if (node.kind === "session") return node.id;
+  const owner = edges.find(
+    (edge) =>
+      edge.to === node.id &&
+      edge.kind === "contains" &&
+      edge.from.startsWith("session/")
   );
+  return owner?.from ?? null;
 }
 
 /** Pure presentation mapping. It cannot infer or repair graph facts. */
@@ -178,7 +188,38 @@ export function graphToJourneyViewModel(
   };
 }
 
-/** Builds session lanes from explicit contains edges only; unlinked facts stay unlinked. */
+/**
+ * Builds session lanes from explicit contains + factual lineage edges only.
+ * A lane can be active or paused only when canonical lifecycle state says so;
+ * time distance merely compresses the axis and never creates a branch.
+ */
+function laneState(status: string | null | undefined): StorylineLaneState {
+  if (status === "running" || status === "working" || status === "pending")
+    return "active";
+  if (
+    status === "interrupted" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "abandoned"
+  )
+    return "paused";
+  if (status === "completed") return "completed";
+  return "unknown";
+}
+
+function factualParentSessions(edges: JourneyGraphEdge[]): Map<string, string> {
+  const parents = new Map<string, string>();
+  for (const edge of edges) {
+    if (!["forkedFrom", "resumedFrom", "compactedTo"].includes(edge.kind))
+      continue;
+    if (!edge.from.startsWith("session/") || !edge.to.startsWith("session/"))
+      continue;
+    // The graph projector emits child -> parent for all lineage edge kinds.
+    parents.set(edge.from, edge.to);
+  }
+  return parents;
+}
+
 export function graphToStorylineViewModel(
   graph: JourneyGraphPayload,
   idleGapMs = IDLE_GAP_MS
@@ -187,22 +228,46 @@ export function graphToStorylineViewModel(
   const edges = [...graph.edges].sort(compareEdges);
   const laneMembers = new Map<string, JourneyGraphNode[]>();
   const unpositioned: StorylineMilestone[] = [];
+  const sessionNodes = new Map(
+    graph.nodes
+      .filter((node) => node.kind === "session")
+      .map((node) => [node.id, node])
+  );
+  const parentBySession = factualParentSessions(edges);
+  const childSessions = new Set(parentBySession.values());
 
   for (const node of [...graph.nodes].sort(compareNodes)) {
     const timestamp = parseTimestamp(node.displayTimestamp);
     if (timestamp === null) {
-      unpositioned.push({ ...toDisplayNode(node), sequence: null });
+      unpositioned.push({
+        ...toDisplayNode(node),
+        sequence: turnSequence(node.id),
+      });
       continue;
     }
-    const laneId =
-      agentLaneForNode(node, graph.nodes, edges) ?? "unknown-agent";
+    const laneId = sessionIdForNode(node, edges) ?? "unlinked-facts";
     const lane = laneMembers.get(laneId) ?? [];
     lane.push(node);
     laneMembers.set(laneId, lane);
   }
 
+  const laneDepth = (id: string): number => {
+    let depth = 0;
+    let cursor = parentBySession.get(id);
+    const visited = new Set<string>([id]);
+    while (cursor && !visited.has(cursor)) {
+      visited.add(cursor);
+      depth += 1;
+      cursor = parentBySession.get(cursor);
+    }
+    return depth;
+  };
+
   const lanes = [...laneMembers.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
+    .sort(
+      ([left], [right]) =>
+        laneDepth(left) - laneDepth(right) || left.localeCompare(right)
+    )
     .map(([id, members]) => {
       const milestones = [...members]
         .sort((left, right) => {
@@ -212,7 +277,10 @@ export function graphToStorylineViewModel(
             leftTimestamp - rightTimestamp || left.id.localeCompare(right.id)
           );
         })
-        .map((node) => ({ ...toDisplayNode(node), sequence: null }));
+        .map((node) => ({
+          ...toDisplayNode(node),
+          sequence: turnSequence(node.id),
+        }));
       const gaps: StorylineIdleGap[] = [];
       for (let index = 1; index < milestones.length; index += 1) {
         const previous = milestones[index - 1];
@@ -232,11 +300,25 @@ export function graphToStorylineViewModel(
           });
         }
       }
+      const session = sessionNodes.get(id);
+      const state =
+        id === "unlinked-facts"
+          ? "unknown"
+          : laneState(session?.lifecycleStatus);
       return {
         id,
-        label: id === "unknown-agent" ? "Unknown agent" : id,
+        label:
+          id === "unlinked-facts"
+            ? "Unlinked facts"
+            : session?.displayTitle?.trim() ||
+              session?.branch?.trim() ||
+              titleFromId(id),
         milestones,
         gaps,
+        state,
+        branch: session?.branch,
+        parentLaneId: parentBySession.get(id),
+        isActiveTrunk: state === "active" && !childSessions.has(id),
       };
     });
 

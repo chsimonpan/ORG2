@@ -366,6 +366,9 @@ fn build_forked_record(
         created_at: now.to_string(),
         updated_at: now.to_string(),
         parent_session_id: Some(old_session_id.to_string()),
+        parent_session_relation: Some(
+            core_types::session::ParentSessionRelation::CompactContinuation,
+        ),
         agent_definition_id: old_record.agent_definition_id.clone(),
         key_source: old_record.key_source,
         ..Default::default()
@@ -431,6 +434,10 @@ mod tests {
         assert_eq!(
             child.parent_session_id.as_deref(),
             Some("osagent-telegram-42")
+        );
+        assert_eq!(
+            child.parent_session_relation,
+            Some(core_types::session::ParentSessionRelation::CompactContinuation)
         );
         assert_eq!(child.status, SessionStatus::Idle.as_str());
         assert_eq!(child.model, parent.model);

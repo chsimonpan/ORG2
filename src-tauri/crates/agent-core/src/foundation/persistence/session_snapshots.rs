@@ -76,6 +76,7 @@ pub fn ensure_tables_with(conn: &Connection) -> SqliteResult<()> {
             account_id  TEXT,
             workspace_path TEXT,
             user_input  TEXT,
+            parent_session_relation TEXT,
             created_at  TEXT NOT NULL,
             updated_at  TEXT NOT NULL
         );
@@ -137,6 +138,7 @@ pub fn ensure_tables_with(conn: &Connection) -> SqliteResult<()> {
     )?;
 
     try_migrate(conn, "ALTER TABLE agent_messages ADD COLUMN images TEXT");
+    try_migrate(conn, "ALTER TABLE agent_sessions ADD COLUMN parent_session_relation TEXT");
     try_migrate(
         conn,
         "ALTER TABLE agent_messages ADD COLUMN compact_from_sequence INTEGER",

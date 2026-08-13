@@ -58,6 +58,8 @@ fn projected_rounds_to_cached_turns(
             modified_files: round.modified_files,
             resource_interactions: round.resource_interactions,
             git_artifacts: round.git_artifacts,
+            turn_intent_id: None,
+            execution_turn_id: None,
         })
         .collect()
 }

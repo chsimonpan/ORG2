@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import type { StorylineViewModel } from "../viewModel";
 import {
   LANE_HEIGHT,
   PAD_LEFT,
@@ -9,15 +8,33 @@ import {
   TIMELINE_FLOOR_MS,
   TIMELINE_IDLE_GAP_MS,
   buildCompressedAxis,
+  clampTimelineScale,
+  fitTimelineScale,
   formatDuration,
   formatTick,
   layoutStoryline,
+  zoomTimelineScale,
 } from "../timelineLayout";
+import type { StorylineViewModel } from "../viewModel";
 
 const MIN = 60 * 1000;
 
-function milestone(id: string, ts: string | null, kind = "turn", sequence: number | null = null) {
-  return { id, title: id.split("/").slice(1).join("/") || id, kind, evidenceClass: "canonical" as const, sourceRef: `src:${id}`, displayTimestamp: ts, sequence, topicTags: [] };
+function milestone(
+  id: string,
+  ts: string | null,
+  kind = "turn",
+  sequence: number | null = null
+) {
+  return {
+    id,
+    title: id.split("/").slice(1).join("/") || id,
+    kind,
+    evidenceClass: "canonical" as const,
+    sourceRef: `src:${id}`,
+    displayTimestamp: ts,
+    sequence,
+    topicTags: [],
+  };
 }
 
 const base: StorylineViewModel = {
@@ -34,14 +51,34 @@ const base: StorylineViewModel = {
     {
       id: "session/b",
       label: "b",
-      milestones: [milestone("session/b", "2026-07-30T12:00:00.000Z", "session")],
+      milestones: [
+        milestone("session/b", "2026-07-30T12:00:00.000Z", "session"),
+      ],
       gaps: [],
     },
   ],
   connectors: [
-    { from: "session/b", to: "session/a", kind: "forkedFrom", evidenceClass: "canonical", sourceRef: "fork:b:a" },
-    { from: "session/a", to: "session/missing", kind: "resumedFrom", evidenceClass: "canonical", sourceRef: "resume:a:missing" },
-    { from: "session/a", to: "turn/a/1", kind: "handoffTo", evidenceClass: "canonical", sourceRef: "handoff:a:1" },
+    {
+      from: "session/b",
+      to: "session/a",
+      kind: "forkedFrom",
+      evidenceClass: "canonical",
+      sourceRef: "fork:b:a",
+    },
+    {
+      from: "session/a",
+      to: "session/missing",
+      kind: "resumedFrom",
+      evidenceClass: "canonical",
+      sourceRef: "resume:a:missing",
+    },
+    {
+      from: "session/a",
+      to: "turn/a/1",
+      kind: "handoffTo",
+      evidenceClass: "canonical",
+      sourceRef: "handoff:a:1",
+    },
   ],
   unpositioned: [milestone("turn/c/1", null, "turn", 1)],
 };
@@ -49,7 +86,11 @@ const base: StorylineViewModel = {
 describe("buildCompressedAxis", () => {
   it("clamps short bursts up to the floor and long idle down to the cap", () => {
     const t0 = Date.parse("2026-07-30T08:00:00.000Z");
-    const axis = buildCompressedAxis([t0, t0 + 1000, t0 + 1000 + 10 * 60 * MIN]);
+    const axis = buildCompressedAxis([
+      t0,
+      t0 + 1000,
+      t0 + 1000 + 10 * 60 * MIN,
+    ]);
     expect(axis.points[1].comp - axis.points[0].comp).toBe(TIMELINE_FLOOR_MS);
     expect(axis.points[2].comp - axis.points[1].comp).toBe(TIMELINE_CAP_MS);
   });
@@ -72,14 +113,20 @@ describe("layoutStoryline", () => {
   it("places timestamped milestones per lane and leaves untimed facts unpositioned", () => {
     const layout = layoutStoryline(base);
     expect(layout.lanes).toHaveLength(2);
-    expect(layout.lanes[0].placed.map((p) => p.milestone.id)).toEqual(["session/a", "turn/a/1"]);
+    expect(layout.lanes[0].placed.map((p) => p.milestone.id)).toEqual([
+      "session/a",
+      "turn/a/1",
+    ]);
     expect(layout.unpositioned.map((m) => m.id)).toEqual(["turn/c/1"]);
   });
 
   it("draws curves only for factual edges whose endpoints are placed", () => {
     const layout = layoutStoryline(base);
     expect(layout.curves.map((c) => c.connector.kind)).toEqual(["forkedFrom"]);
-    expect(layout.uncurved.map((c) => c.kind)).toEqual(["resumedFrom", "handoffTo"]);
+    expect(layout.uncurved.map((c) => c.kind)).toEqual([
+      "resumedFrom",
+      "handoffTo",
+    ]);
     expect(layout.curves[0].path.startsWith("M ")).toBe(true);
   });
 
@@ -92,9 +139,23 @@ describe("layoutStoryline", () => {
           label: "a",
           milestones: [
             milestone("session/a", new Date(t0).toISOString(), "session"),
-            milestone("turn/a/1", new Date(t0 + 60 * 1000).toISOString(), "turn", 1),
-            milestone("turn/a/2", new Date(t0 + 60 * 1000).toISOString(), "turn", 2),
-            milestone("checkpoint/a/1", new Date(t0 + 60 * 1000).toISOString(), "checkpoint"),
+            milestone(
+              "turn/a/1",
+              new Date(t0 + 60 * 1000).toISOString(),
+              "turn",
+              1
+            ),
+            milestone(
+              "turn/a/2",
+              new Date(t0 + 60 * 1000).toISOString(),
+              "turn",
+              2
+            ),
+            milestone(
+              "checkpoint/a/1",
+              new Date(t0 + 60 * 1000).toISOString(),
+              "checkpoint"
+            ),
           ],
           gaps: [],
         },
@@ -104,7 +165,9 @@ describe("layoutStoryline", () => {
     };
     const layout = layoutStoryline(dense);
     const placed = layout.lanes[0].placed;
-    const labeled = placed.filter((p) => p.showLabel).map((p) => p.milestone.id);
+    const labeled = placed
+      .filter((p) => p.showLabel)
+      .map((p) => p.milestone.id);
     expect(labeled).toContain("checkpoint/a/1");
     // Session + first turn labeled; dense second turn throttled (all within the floor gap).
     expect(labeled).toContain("session/a");
@@ -139,6 +202,63 @@ describe("formatting", () => {
   });
 
   it("formats ticks without throwing", () => {
-    expect(formatTick(Date.parse("2026-07-30T08:05:00.000Z"))).toMatch(/\d+\/\d+ \d+:\d+/);
+    expect(formatTick(Date.parse("2026-07-30T08:05:00.000Z"))).toMatch(
+      /\d+\/\d+ \d+:\d+/
+    );
+  });
+});
+
+describe("P3 viewport controls", () => {
+  it("clamps zoom and computes a bounded fit scale", () => {
+    expect(clampTimelineScale(99)).toBe(2.5);
+    expect(clampTimelineScale(0.1)).toBe(0.5);
+    expect(zoomTimelineScale(1, 1)).toBeCloseTo(1.1);
+    expect(zoomTimelineScale(1, -1)).toBeCloseTo(0.9);
+    expect(fitTimelineScale(600, 1200)).toBe(0.5);
+    expect(fitTimelineScale(2400, 1200)).toBe(2);
+  });
+});
+
+describe("P3 NOW marker", () => {
+  const NOW = Date.parse("2026-07-30T10:00:00.000Z");
+
+  it("places the marker when now lies on the recorded axis", () => {
+    const layout = layoutStoryline(base, NOW);
+    expect(layout.nowX).not.toBeNull();
+    expect(layout.nowX).toBeGreaterThanOrEqual(PAD_LEFT);
+  });
+
+  it("omits the marker before the first fact", () => {
+    const layout = layoutStoryline(
+      base,
+      Date.parse("2026-07-01T00:00:00.000Z")
+    );
+    expect(layout.nowX).toBeNull();
+  });
+
+  it("omits the marker beyond the lookahead after the newest fact", () => {
+    // Newest fact is 12:00; lookahead is 2h, so 15:00 must not draw.
+    const layout = layoutStoryline(
+      base,
+      Date.parse("2026-07-30T15:00:00.000Z")
+    );
+    expect(layout.nowX).toBeNull();
+  });
+
+  it("clamps the marker to the newest fact when now is slightly past it", () => {
+    const layout = layoutStoryline(
+      base,
+      Date.parse("2026-07-30T12:30:00.000Z")
+    );
+    expect(layout.nowX).not.toBeNull();
+  });
+
+  it("omits the marker for an empty axis", () => {
+    const empty: StorylineViewModel = {
+      lanes: [],
+      connectors: [],
+      unpositioned: [],
+    };
+    expect(layoutStoryline(empty, NOW).nowX).toBeNull();
   });
 });
