@@ -175,6 +175,9 @@ pub struct SessionEditArtifactRecord {
     pub session_id: String,
     pub source_event_id: Option<String>,
     pub turn_id: Option<String>,
+    /// Exact event-provided execution turn. Journey does not derive it from order.
+    #[serde(default)]
+    pub execution_turn_id: Option<String>,
     pub sequence_index: i64,
     pub timestamp: Option<String>,
     pub workspace_path: Option<String>,

@@ -197,6 +197,7 @@ fn edit_artifacts_are_upserted_listed_and_deleted_by_session() {
         session_id: "session-1".to_string(),
         source_event_id: Some("event-1".to_string()),
         turn_id: Some("turn-1".to_string()),
+        execution_turn_id: Some("turn-1".to_string()),
         sequence_index: 1,
         timestamp: Some("2026-06-15T00:00:00Z".to_string()),
         workspace_path: Some("/repo".to_string()),
