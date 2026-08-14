@@ -141,6 +141,7 @@ pub async fn create_project(
             id: format!("project-{}", slug),
             name: name.clone(),
             org_id,
+            workspace_id: None,
             status,
             priority,
             health,

@@ -62,6 +62,8 @@ pub(crate) struct AgentRunLaunchRequest {
     pub ide_context: Option<IdeContext>,
     pub parent_session_id: Option<String>,
     pub sub_agent_ids: Vec<String>,
+    pub journey_workspace_id: Option<String>,
+    pub journey_topic_tags: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -393,6 +395,8 @@ pub async fn launch_agent_session(
             ide_context: None,
             parent_session_id: None,
             sub_agent_ids: sub_agent_ids.to_vec(),
+            journey_workspace_id: None,
+            journey_topic_tags: Vec::new(),
         },
     )
     .await?;
