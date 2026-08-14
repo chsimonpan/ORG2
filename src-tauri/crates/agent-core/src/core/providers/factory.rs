@@ -34,6 +34,31 @@ pub fn create_provider(
     create_provider_with_reliability(model, account_id, &ReliabilityConfig::default())
 }
 
+/// Create a provider pinned to the account's exact protocol. Used by Journey review
+/// jobs so persisted routing provenance cannot silently change.
+pub fn create_provider_for_protocol(
+    model: &str,
+    account_id: &str,
+    expected_protocol: &str,
+) -> Result<Box<dyn LLMProvider>, ProviderError> {
+    let spec = resolve_spec_for_account(model, Some(account_id))?;
+    let resolved = resolve_credentials(spec, Some(account_id))?;
+    if resolved.protocol.as_str() != expected_protocol {
+        return Err(ProviderError::AuthError(format!(
+            "review protocol locked to '{}', account currently resolves to '{}'",
+            expected_protocol, resolved.protocol.as_str()
+        )));
+    }
+    let reliability = ReliabilityConfig::default();
+    let primary = build_provider_from_resolved(&resolved, spec, model);
+    Ok(Box::new(ReliableProvider::single(
+        format!("{}/{}", spec.name, model),
+        primary,
+        reliability.max_retries,
+        reliability.base_backoff_ms,
+    )))
+}
+
 /// Create a provider wrapped in [`ReliableProvider`] for retry + fallback.
 ///
 /// The primary model is always tried first. If `reliability.fallback_models`
