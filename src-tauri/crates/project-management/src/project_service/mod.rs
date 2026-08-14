@@ -91,6 +91,7 @@ pub fn create_project(request: &CreateProjectRequest) -> Result<ProjectData, Str
         id: format!("proj-{slug}"),
         name: request.name.clone(),
         org_id: org_id.clone(),
+        workspace_id: None,
         status: request
             .status
             .clone()

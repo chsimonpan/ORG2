@@ -344,6 +344,7 @@ fn apply_project(org_id: &str, entity: &CollabRemoteEntity) -> Result<bool, Stri
                 id: project_id.clone(),
                 name: wire_name.clone().unwrap_or_else(|| project_id.clone()),
                 org_id: org_id.to_string(),
+                workspace_id: None,
                 status: "active".to_string(),
                 priority: "none".to_string(),
                 health: "on_track".to_string(),

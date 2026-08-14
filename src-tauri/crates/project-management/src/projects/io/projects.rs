@@ -668,6 +668,7 @@ fn row_to_project_data(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectData>
         id,
         name,
         org_id,
+        workspace_id: None,
         status,
         priority,
         health,
