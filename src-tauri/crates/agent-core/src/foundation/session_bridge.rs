@@ -51,9 +51,6 @@ pub struct CliLaunchParams {
     pub worktree_base_ref: Option<String>,
     pub hosted_token: Option<String>,
     pub isolate: bool,
-    /// Reuse an existing worktree checkout (mutually exclusive with
-    /// `isolate`, which creates a fresh one).
-    pub worktree_path: Option<String>,
     pub background: bool,
     pub key_source: Option<String>,
     /// Explicit additional directories for CLI implementations that support
