@@ -480,7 +480,6 @@ async fn launch_cli_agent(
         worktree_base_ref: params.worktree_base_ref,
         hosted_token: params.hosted_token,
         isolate: params.isolate,
-        worktree_path: params.worktree_path.clone(),
         background: params.background,
         key_source: params.key_source,
         additional_directories: extras,

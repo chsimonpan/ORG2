@@ -341,7 +341,8 @@ impl AgentSession {
 
     pub async fn invalidate_prompt_cache(&self, reason: PromptCacheInvalidationReason) {
         match reason {
-            PromptCacheInvalidationReason::SessionReset
+            PromptCacheInvalidationReason::GlobalPathExemptionsChanged
+            | PromptCacheInvalidationReason::SessionReset
             | PromptCacheInvalidationReason::AgentDefinitionChanged
             | PromptCacheInvalidationReason::WorkspaceSnapshotChanged => {
                 self.prompt_cache.lock().await.clear();
