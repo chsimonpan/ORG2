@@ -305,8 +305,7 @@ async fn launch_rust_agent(
     {
         WorkspaceLaunchTarget::Worktree {
             workspace_path,
-            worktree_path: params.worktree_path.clone(),
-            branch: params.worktree_base_ref.clone(),
+                branch: params.worktree_base_ref.clone(),
             create_isolated: params.isolate,
             additional_directories: params.additional_directories.clone(),
         }
