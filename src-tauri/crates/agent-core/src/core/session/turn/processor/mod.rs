@@ -462,36 +462,60 @@ impl UnifiedMessageProcessor {
     }
 }
 
+fn side_query_model_cost_rank(model: &str) -> (u8, usize, String) {
+    let lower = model.to_ascii_lowercase();
+    let tier = if lower.contains("nano") || lower.contains("haiku") {
+        0
+    } else if lower.contains("mini") || lower.contains("flash") || lower.contains("small") {
+        1
+    } else {
+        2
+    };
+    (tier, lower.len(), lower)
+}
+
+fn resolve_side_query_model(account_id: &str) -> Result<String, String> {
+    let account = key_vault::key_store::KEY_SERVICE
+        .get_key_by_id(account_id)
+        .ok_or_else(|| format!("Side query account {account_id} no longer exists"))?;
+    if !account.enabled {
+        return Err(format!("Side query account {account_id} is disabled"));
+    }
+    let allowed: Vec<String> = if account.enabled_models.is_empty() {
+        account.available_models.clone()
+    } else {
+        account.enabled_models.iter()
+            .filter(|model| account.available_models.is_empty() || account.available_models.contains(model))
+            .cloned().collect()
+    };
+    if let Some(explicit) = account.side_query_model.as_deref() {
+        if !allowed.iter().any(|candidate| candidate == explicit) {
+            return Err(format!("Side query model '{explicit}' is not enabled for account {account_id}"));
+        }
+        return Ok(explicit.to_string());
+    }
+    allowed.iter().min_by_key(|model| side_query_model_cost_rank(model)).cloned()
+        .ok_or_else(|| format!("Side query account {account_id} has no available model"))
+}
+
 impl UnifiedMessageProcessor {
     async fn side_query_provider(
         &self,
         session_id: &str,
         label: &str,
-    ) -> Result<Arc<dyn LLMProvider>, String> {
-        match self.runtime.provider.side_query_execution() {
-            SideQueryExecution::SharedSession => {
-                self.runtime.provider.set_session_context(session_id);
-                Ok(self.runtime.provider.clone())
-            }
-            SideQueryExecution::IsolatedSession => {
-                let workspace = self.runtime.workspace_state.read().clone();
-                let provider =
-                    crate::providers::factory::create_provider_with_native_harness_preflight(
-                        &self.runtime.model,
-                        self.runtime.account_id.as_deref(),
-                        &self.runtime.resolved.reliability,
-                        self.runtime.native_harness_type,
-                        Some(workspace),
-                    )
-                    .await
-                    .map_err(|err| {
-                        format!("Failed to create isolated side-query provider: {err}")
-                    })?;
-                let provider: Arc<dyn LLMProvider> = Arc::from(provider);
-                provider.set_session_context(&format!("{session_id}:{label}"));
-                Ok(provider)
-            }
-        }
+    ) -> Result<(Arc<dyn LLMProvider>, String), String> {
+        let account_id = self.runtime.account_id.as_deref().ok_or_else(||
+            "Side query configuration error: current session has no account id".to_string()
+        )?;
+        let model = resolve_side_query_model(account_id)?;
+        let workspace = self.runtime.workspace_state.read().clone();
+        let provider = crate::providers::factory::create_provider_with_native_harness_preflight(
+            &model, Some(account_id), &self.runtime.resolved.reliability,
+            self.runtime.native_harness_type, Some(workspace),
+        ).await.map_err(|err| format!("Failed to create side-query provider: {err}"))?;
+        let provider: Arc<dyn LLMProvider> = Arc::from(provider);
+        provider.set_session_context(&format!("{session_id}:{label}"));
+        Ok((provider, model))
     }
 
     pub async fn process(
