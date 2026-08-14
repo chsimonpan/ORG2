@@ -475,6 +475,7 @@ async fn ensure_session_initialized(
     );
 
     let tool_deps = ToolDeps {
+        session_org_id: None,
         workspace: Arc::clone(&workspace_state),
         scratchpad_dir: scratchpad_dir.clone(),
         readonly_extra_dirs,

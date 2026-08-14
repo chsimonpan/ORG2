@@ -156,6 +156,7 @@ impl UnifiedMessageProcessor {
             load_workspace_rules: self.runtime.resolved.load_workspace_rules,
             agent_soul: self.runtime.agent_soul.clone(),
             workspace: live_workspace,
+            global_permitted_paths: Vec::new(),
             channel: self.channel.clone(),
             chat_id: self.chat_id.clone(),
             agent_mode: self.agent_mode,

@@ -378,6 +378,7 @@ impl AgentTool {
         });
         let workspace_state = Arc::new(parking_lot::RwLock::new(workspace));
         let tool_deps = ToolDeps {
+        session_org_id: None,
             workspace: workspace_state,
             scratchpad_dir: self.config.scratchpad_dir.clone(),
             readonly_extra_dirs: vec![crate::skills::loader::global_skills_dir()],
