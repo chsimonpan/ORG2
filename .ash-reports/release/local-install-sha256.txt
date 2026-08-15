@@ -1,2 +1,0 @@
-2d52ff1b96344d93b7ac358fc46adc071e737181b09a700a5d383449ad2c039c  src-tauri/target/release/bundle/deb/ORG2_1.2.5_amd64.deb
-49e3e4d5b859692b7db042667482111469285d25d514110300869fc569b481aa  /home/panshuainan/.local/opt/org2-20260815-0952-semantic/usr/bin/org2
