@@ -66,11 +66,8 @@ pub struct OAuthModelCatalogResponse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OAuthModelCatalogSource {
-    /// Credential-backed discovery succeeded. Codex responses may also contain
-    /// ORGII's built-in bases when the local CLI returned a version-limited list.
+    /// Credential-backed discovery succeeded for this exact provider account.
     Live,
-    /// Credential-backed discovery was unavailable and the static catalog was used.
-    Fallback,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1300,67 +1297,34 @@ fn oauth_static_catalog(
     }
 }
 
-fn fallback_discovered_models(agent_type: &str) -> Result<Vec<DiscoveredModel>, String> {
-    let (models, _) = oauth_static_catalog(agent_type)
-        .ok_or_else(|| format!("Unsupported OAuth model catalog agent type: {agent_type}"))?;
-    Ok(models
-        .iter()
-        .map(|model| DiscoveredModel {
-            id: (*model).to_string(),
-            ..DiscoveredModel::default()
-        })
-        .collect())
-}
-
 pub(super) fn resolved_oauth_catalog(
     agent_type: &str,
-    mut discovered: Vec<DiscoveredModel>,
+    discovered: Vec<DiscoveredModel>,
     source: OAuthModelCatalogSource,
 ) -> Result<OAuthModelCatalogResponse, String> {
-    let (static_models, fallback_defaults) = oauth_static_catalog(agent_type)
+    let (_, fallback_defaults) = oauth_static_catalog(agent_type)
         .ok_or_else(|| format!("Unsupported OAuth model catalog agent type: {agent_type}"))?;
 
-    // Codex model discovery is version-gated by the installed CLI and by the
-    // client_version sent to the compatibility endpoint. ORGII supports these
-    // model families independently of that local discovery version, so retain
-    // live metadata for every returned model and append any missing built-in
-    // Codex bases. Claude Code remains strictly account-visible.
-    if agent_type == "codex" {
-        for model in static_models {
-            if discovered
-                .iter()
-                .any(|discovered_model| discovered_model.id == *model)
-            {
-                continue;
-            }
-            discovered.push(DiscoveredModel {
-                id: (*model).to_string(),
-                ..DiscoveredModel::default()
-            });
-        }
-    }
-
+    // A live OAuth catalog is account-bound provider data. Never union baked
+    // model ids into it: doing so makes models from another entitlement look
+    // runnable on this account and silently turns discovery into a fallback.
     let models: Vec<String> = discovered.iter().map(|model| model.id.clone()).collect();
     let mut default_enabled_models: Vec<String> = discovered
         .iter()
         .filter(|model| model.is_default)
         .map(|model| model.id.clone())
         .collect();
-    // All built-in GPT-5.6 Codex families are product defaults even when an
-    // older live catalog names a different default. Preserve that live default
-    // and append the built-ins so rescans never turn a user's existing default
-    // off while making Sol, Terra, and Luna immediately runnable.
-    if agent_type == "codex" || default_enabled_models.is_empty() {
-        for model in fallback_defaults {
-            if !models.iter().any(|available| available.as_str() == *model)
-                || default_enabled_models
-                    .iter()
-                    .any(|enabled| enabled == *model)
-            {
-                continue;
-            }
-            default_enabled_models.push((*model).to_string());
+    // Static defaults may rank account-visible models, but they must never add
+    // a model that this exact OAuth account did not return.
+    for model in fallback_defaults {
+        if !models.iter().any(|available| available.as_str() == *model)
+            || default_enabled_models
+                .iter()
+                .any(|enabled| enabled == *model)
+        {
+            continue;
         }
+        default_enabled_models.push((*model).to_string());
     }
     if default_enabled_models.is_empty() {
         default_enabled_models.extend(models.first().cloned());
@@ -1387,39 +1351,33 @@ pub(super) fn resolved_oauth_catalog(
     })
 }
 
-fn is_oauth_discovery_auth_error(error: &str) -> bool {
-    let lower = error.to_lowercase();
-    lower.contains("401")
-        || lower.contains("403")
-        || lower.contains("unauthorized")
-        || lower.contains("forbidden")
-        || lower.contains("invalid credential")
-        || lower.contains("invalid token")
-        || lower.contains("access denied")
-        || lower.contains("token expired")
-}
-
-/// Resolve one authoritative OAuth catalog for every wizard and refresh entry
-/// point. Codex keeps live capability metadata while completing the response
-/// with ORGII's built-in model bases; other OAuth providers remain strictly
-/// account-visible. The full static catalog remains the discovery fallback.
+/// Resolve one authoritative, account-bound OAuth catalog for every wizard
+/// and refresh entry point. Credential-backed discovery never degrades to a
+/// baked catalog: callers either receive this provider/account's live models or
+/// an error. This prevents cross-account/provider model fallback.
 #[tauri::command]
 pub async fn oauth_model_catalog(
     request: OAuthModelCatalogRequest,
 ) -> Result<OAuthModelCatalogResponse, String> {
-    let fallback = fallback_discovered_models(&request.agent_type)?;
-    let Some(access_token) = request
+    // Validate the agent type before inspecting credentials so unsupported
+    // providers still get the canonical error.
+    oauth_static_catalog(&request.agent_type).ok_or_else(|| {
+        format!(
+            "Unsupported OAuth model catalog agent type: {}",
+            request.agent_type
+        )
+    })?;
+    let access_token = request
         .access_token
         .as_deref()
         .map(str::trim)
         .filter(|token| !token.is_empty())
-    else {
-        return resolved_oauth_catalog(
-            &request.agent_type,
-            fallback,
-            OAuthModelCatalogSource::Fallback,
-        );
-    };
+        .ok_or_else(|| {
+            format!(
+                "{} OAuth model discovery requires an access token",
+                request.agent_type
+            )
+        })?;
 
     let discovered = match request.agent_type.as_str() {
         "claude_code" => {
@@ -1447,30 +1405,11 @@ pub async fn oauth_model_catalog(
         Ok(models) if !models.is_empty() => {
             resolved_oauth_catalog(&request.agent_type, models, OAuthModelCatalogSource::Live)
         }
-        Ok(_) => {
-            log::warn!(
-                "[oauth_model_catalog] {} returned an empty catalog; using fallback",
-                request.agent_type
-            );
-            resolved_oauth_catalog(
-                &request.agent_type,
-                fallback,
-                OAuthModelCatalogSource::Fallback,
-            )
-        }
-        Err(err) if is_oauth_discovery_auth_error(&err) => Err(err),
-        Err(err) => {
-            log::warn!(
-                "[oauth_model_catalog] {} discovery failed ({}); using fallback",
-                request.agent_type,
-                err
-            );
-            resolved_oauth_catalog(
-                &request.agent_type,
-                fallback,
-                OAuthModelCatalogSource::Fallback,
-            )
-        }
+        Ok(_) => Err(format!(
+            "{} OAuth model discovery returned an empty account-visible catalog",
+            request.agent_type
+        )),
+        Err(err) => Err(err),
     }
 }
 
@@ -1581,20 +1520,53 @@ mod tests {
     }
 
     #[test]
-    fn oauth_auth_failures_are_not_hidden_by_the_fallback_catalog() {
-        for error in [
-            "HTTP 401",
-            "HTTP 403",
-            "unauthorized",
-            "forbidden",
-            "invalid credential",
-            "invalid token",
-            "access denied",
-            "token expired",
-        ] {
-            assert!(is_oauth_discovery_auth_error(error), "{error}");
-        }
-        assert!(!is_oauth_discovery_auth_error("request timed out"));
+    fn live_codex_catalog_keeps_only_account_visible_gpt_5_6_models() {
+        let catalog = resolved_oauth_catalog(
+            "codex",
+            vec![
+                DiscoveredModel {
+                    id: "gpt-5.6-terra".to_string(),
+                    context_window: Some(1_050_000),
+                    supported_efforts: vec!["medium".to_string(), "ultra".to_string()],
+                    default_effort: Some("ultra".to_string()),
+                    is_default: true,
+                    ..DiscoveredModel::default()
+                },
+                DiscoveredModel {
+                    id: "account-visible-model".to_string(),
+                    is_default: false,
+                    ..DiscoveredModel::default()
+                },
+            ],
+            OAuthModelCatalogSource::Live,
+        )
+        .expect("live catalog");
+
+        assert_eq!(
+            catalog.models,
+            vec!["gpt-5.6-terra", "account-visible-model"]
+        );
+        assert_eq!(catalog.default_enabled_models, vec!["gpt-5.6-terra"]);
+        assert!(!catalog.models.iter().any(|model| model == "gpt-5.6-sol"));
+        assert!(!catalog.models.iter().any(|model| model == "gpt-5.6-luna"));
+        assert!(catalog
+            .model_variants
+            .iter()
+            .any(|variant| variant.model == "gpt-5.6-terra-ultra"));
+    }
+
+    #[tokio::test]
+    async fn oauth_catalog_rejects_missing_credentials_instead_of_falling_back() {
+        let err = oauth_model_catalog(OAuthModelCatalogRequest {
+            agent_type: "codex".to_string(),
+            access_token: None,
+            refresh_token: None,
+            id_token: None,
+        })
+        .await
+        .expect_err("missing credentials must not expose a baked catalog");
+
+        assert!(err.contains("requires an access token"), "{err}");
     }
 
     #[test]

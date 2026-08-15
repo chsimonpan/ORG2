@@ -236,7 +236,7 @@ export interface OAuthModelCatalog {
   modelContextLengths: ModelContextLengths;
   modelVariants: ModelVariantInfo[];
   defaultVariants: DefaultVariantInfo[];
-  source: "live" | "fallback";
+  source: "live";
 }
 
 export interface OAuthModelCatalogCredentials {

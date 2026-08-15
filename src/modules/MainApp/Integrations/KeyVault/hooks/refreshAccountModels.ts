@@ -81,14 +81,6 @@ async function fetchOAuthCatalogForAccount(
         : envVars?.OPENAI_REFRESH_TOKEN,
     idToken: envVars?.OPENAI_ID_TOKEN ?? envVars?.CODEX_ID_TOKEN,
   });
-  // A stored account is already a better last-known-good source than the
-  // baked bootstrap list. Never replace it when live discovery is unavailable.
-  if (catalog.source !== "live") {
-    throw new RefreshModelsError(
-      "Live model discovery is temporarily unavailable",
-      "transient"
-    );
-  }
   return {
     models: catalog.models,
     modelContextLengths: catalog.modelContextLengths,

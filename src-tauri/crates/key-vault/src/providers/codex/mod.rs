@@ -18,8 +18,8 @@ use tokio::process::{Child, Command};
 /// ChatGPT usage API endpoint
 const USAGE_API_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 const CODEX_MODELS_API_URL: &str = "https://chatgpt.com/backend-api/codex/models";
-const CODEX_MODELS_CLIENT_VERSION: &str = "0.124.0";
-const CODEX_USER_AGENT: &str = "codex_cli_rs/0.124.0 (orgii, cli)";
+const CODEX_MODELS_CLIENT_VERSION: &str = "0.145.0";
+const CODEX_USER_AGENT: &str = "codex_cli_rs/0.145.0 (orgii, cli)";
 const APP_SERVER_TIMEOUT_SECS: u64 = 10;
 const APP_SERVER_SHUTDOWN_TIMEOUT_SECS: u64 = 2;
 
@@ -219,10 +219,12 @@ impl CodexValidator {
             .map(|models| models.into_iter().map(|model| model.id).collect())
     }
 
-    /// Discover the account-visible Codex catalog through the public
-    /// app-server protocol. The legacy private HTTP route is retained only as
-    /// a compatibility fallback for machines where the Codex binary cannot be
-    /// launched.
+    /// Discover the model catalog returned by this exact ChatGPT OAuth
+    /// account. The request is pinned to the current Codex client version and,
+    /// when available, the account id from the same credential. There is no
+    /// static or cross-provider fallback: both transport attempts use these
+    /// same credentials, and discovery either returns this account's models or
+    /// fails.
     pub async fn discover_models(
         &self,
         access_token: &str,
@@ -234,49 +236,26 @@ impl CodexValidator {
             return Err("Codex OAuth access token is empty".to_string());
         }
 
-        let app_server_error = match self
+        if let Ok(models) = self
             .list_models_via_app_server(token, refresh_token, id_token)
             .await
         {
-            Ok(models) if !models.is_empty() => return Ok(models),
-            Ok(_) => {
-                log::warn!(
-                    "[CodexModels] app-server returned an empty model catalog; using compatibility fallback"
-                );
-                None
-            }
-            Err(err) => {
-                log::warn!(
-                    "[CodexModels] app-server model discovery failed ({err}); using compatibility fallback"
-                );
-                Some(err)
-            }
-        };
-
-        match self.list_models_via_private_backend(token, id_token).await {
-            Ok(models) => Ok(models
-                .into_iter()
-                .map(|id| DiscoveredModel {
-                    id,
-                    ..DiscoveredModel::default()
-                })
-                .collect()),
-            Err(private_error) => {
-                if let Some(auth_error) = app_server_error.filter(|error| {
-                    let lower = error.to_lowercase();
-                    lower.contains("401")
-                        || lower.contains("403")
-                        || lower.contains("unauthorized")
-                        || lower.contains("forbidden")
-                        || lower.contains("invalid token")
-                        || lower.contains("token expired")
-                }) {
-                    Err(auth_error)
-                } else {
-                    Err(private_error)
-                }
+            if !models.is_empty() {
+                return Ok(models);
             }
         }
+
+        self.list_models_via_private_backend(token, id_token)
+            .await
+            .map(|models| {
+                models
+                    .into_iter()
+                    .map(|id| DiscoveredModel {
+                        id,
+                        ..DiscoveredModel::default()
+                    })
+                    .collect()
+            })
     }
 
     async fn list_models_via_app_server(
@@ -1320,13 +1299,14 @@ mod model_discovery_tests {
     }
 
     #[test]
-    fn codex_models_response_parses_filters_and_deduplicates() {
+    fn codex_models_response_finds_account_visible_gpt_5_6_families() {
         let models = parse_codex_models_response(
             r#"{
                 "models": [
-                    { "slug": "gpt-5.5", "visibility": "list", "supported_in_api": true },
-                    { "slug": "gpt-5.2-codex", "visibility": "list", "supported_in_api": true },
-                    { "slug": "gpt-5.2-codex", "visibility": "list", "supported_in_api": true },
+                    { "slug": "gpt-5.6-sol", "visibility": "list", "supported_in_api": true },
+                    { "slug": "gpt-5.6-terra", "visibility": "list", "supported_in_api": true },
+                    { "slug": "gpt-5.6-luna", "visibility": "list", "supported_in_api": true },
+                    { "slug": "gpt-5.6-terra", "visibility": "list", "supported_in_api": true },
                     { "slug": "hidden-model", "visibility": "hidden", "supported_in_api": true },
                     { "slug": "unsupported", "visibility": "list", "supported_in_api": false },
                     { "slug": "" }
@@ -1337,8 +1317,14 @@ mod model_discovery_tests {
 
         assert_eq!(
             models,
-            vec!["gpt-5.5".to_string(), "gpt-5.2-codex".to_string()]
+            vec![
+                "gpt-5.6-sol".to_string(),
+                "gpt-5.6-terra".to_string(),
+                "gpt-5.6-luna".to_string(),
+            ]
         );
+        assert_eq!(CODEX_MODELS_CLIENT_VERSION, "0.145.0");
+        assert!(CODEX_USER_AGENT.contains(CODEX_MODELS_CLIENT_VERSION));
     }
 
     #[test]

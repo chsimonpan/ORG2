@@ -374,7 +374,7 @@ export const OAuthModelCatalogResponseSchema = z.object({
   model_context_lengths: ModelContextLengthsSchema,
   model_variants: z.array(ModelVariantInfoSchema),
   default_variants: z.array(DefaultVariantInfoSchema),
-  source: z.enum(["live", "fallback"]),
+  source: z.literal("live"),
 });
 
 export const RefreshOauthTokenInput = z.object({

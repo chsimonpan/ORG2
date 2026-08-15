@@ -52,8 +52,12 @@ export function resolveModelDisplaySelection(
   if (!selectedAccount) return selection;
 
   const baseModel = resolveModelVariantFields(selection.model).base_model;
-  const accountModelIds = (selectedAccount.availableModels ?? []).filter(
-    (modelId) =>
+  const accountModelIds = [
+    ...(selectedAccount.availableModels ?? []),
+    ...(selectedAccount.modelVariants ?? []).map((variant) => variant.model),
+  ].filter(
+    (modelId, index, modelIds) =>
+      modelIds.indexOf(modelId) === index &&
       accountHasModel(selectedAccount, modelId) &&
       resolveModelVariantFields(modelId).base_model === baseModel
   );
