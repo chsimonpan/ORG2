@@ -19,6 +19,7 @@ const api = vi.hoisted(() => ({
   closeFork: vi.fn(),
   retryReview: vi.fn(),
   startTask: vi.fn(),
+  activateEntry: vi.fn(),
   checkpoint: vi.fn(),
   finishTask: vi.fn(),
   startFork: vi.fn(),
@@ -50,6 +51,7 @@ const snapshot = {
   branches: {
     "fork-a": {
       id: "fork-a",
+      name: "验证分叉",
       parent_branch_id: "main",
       parent_anchor_message_id: "anchor-1",
       anchor_sequence: 3,
@@ -115,6 +117,7 @@ describe("SessionJourneyControls rendered behavior", () => {
     api.forkCompare.mockResolvedValue({ groups: [] });
     api.closeFork.mockResolvedValue({ job_id: "job", state: "queued" });
     api.retryReview.mockResolvedValue({ revision: 8 });
+    api.activateEntry.mockResolvedValue({ revision: 8 });
     api.discard.mockResolvedValue({ parent_anchor_message_id: "anchor-1" });
     api.returnToParent.mockResolvedValue({
       parent_anchor_message_id: "anchor-1",
@@ -157,6 +160,32 @@ describe("SessionJourneyControls rendered behavior", () => {
     expect(resolveDurableJourneyMessageId("user-message-")).toBeNull();
   });
 
+  it("exposes New Task and Fork and reactivates named tree entries by durable IDs", async () => {
+    expect(container.textContent).toContain("新建Task");
+    expect(container.textContent).toContain("Fork");
+
+    await click(container, "Task/Fork 树");
+    const tree = container.querySelector(
+      '[data-testid="session-task-fork-tree"]'
+    );
+    expect(tree?.textContent).toContain("验证分叉");
+    expect(tree?.textContent).toContain("验证关闭");
+
+    const taskButton = tree?.querySelector(
+      '[data-journey-entry-id="task-a"]'
+    ) as HTMLButtonElement | null;
+    await act(async () => {
+      taskButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(api.activateEntry).toHaveBeenCalledWith({
+      sessionId: "session-a",
+      expectedRevision: 7,
+      taskId: "task-a",
+      branchId: "fork-a",
+    });
+  });
+
   it("keeps direct Fork available without a hydrated visual anchor", async () => {
     await act(async () => {
       root.unmount();
@@ -169,10 +198,10 @@ describe("SessionJourneyControls rendered behavior", () => {
     });
 
     const fork = Array.from(container.querySelectorAll("button")).find(
-      (element) => element.textContent?.trim().startsWith("分叉")
+      (element) => element.textContent?.trim().startsWith("Fork")
     ) as HTMLButtonElement | undefined;
     expect(fork?.disabled).toBe(false);
-    await click(container, "分叉");
+    await click(container, "Fork");
     expect(document.body.textContent).toContain("最近一条已持久化的用户消息");
     const input = document.body.querySelector("input") as HTMLInputElement;
     const valueSetter = Object.getOwnPropertyDescriptor(
@@ -204,7 +233,7 @@ describe("SessionJourneyControls rendered behavior", () => {
       await Promise.resolve();
     });
 
-    await click(container, "分叉");
+    await click(container, "Fork");
     const input = document.body.querySelector("input") as HTMLInputElement;
     const valueSetter = Object.getOwnPropertyDescriptor(
       HTMLInputElement.prototype,

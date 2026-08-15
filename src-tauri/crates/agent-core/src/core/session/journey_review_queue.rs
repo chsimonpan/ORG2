@@ -1085,6 +1085,7 @@ mod tests {
             "f".into(),
             JourneyFork {
                 id: "f".into(),
+                name: "fork f".into(),
                 parent_branch_id: "main".into(),
                 parent_anchor_message_id: Some("anchor".into()),
                 anchor_sequence: 2,

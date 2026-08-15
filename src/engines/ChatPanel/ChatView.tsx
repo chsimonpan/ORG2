@@ -41,12 +41,14 @@ import { derivedSnapshotAtom } from "@src/engines/SessionCore/core/atoms/events"
 import type { SessionEvent } from "@src/engines/SessionCore/core/types";
 import { derivePlanApprovalViewState } from "@src/engines/SessionCore/derived/planDisplayEvents";
 import { useTodoSync } from "@src/engines/SessionCore/hooks/session/useTodoSync";
+import { isBackendUserMessageEvent } from "@src/engines/SessionCore/sync/utils/activityIds";
 import { ForkCancelledError } from "@src/features/TeamCollaboration/forkSession";
 import { useFileReviewSync } from "@src/hooks/fileReview";
 import { createLogger } from "@src/hooks/logger";
 import { usePendingPlanApproval } from "@src/hooks/session/usePendingPlanApproval";
 import { useSessionWorkspaceSync } from "@src/hooks/session/useSessionWorkspaceSync";
 import { useSessionView } from "@src/hooks/ui/tabs/useSessionView";
+import { SessionJourneyControls } from "@src/modules/WorkStation/Chat/Journey/SessionJourneyControls";
 import { loadSessions, sessionByIdAtom } from "@src/store/session";
 import {
   isSessionActiveAtom,
@@ -283,6 +285,13 @@ const ChatView: React.FC<ChatViewProps> = memo(
     const canvasPreviewPill = useChatViewCanvasPreview(sessionId, snapshot);
     const currentPlanApproval = usePendingPlanApproval(sessionId);
     const chatEvents = snapshot?.chatEvents ?? EMPTY_CHAT_EVENTS;
+    const latestUserMessageId = useMemo(() => {
+      for (let index = chatEvents.length - 1; index >= 0; index -= 1) {
+        const event = chatEvents[index];
+        if (event && isBackendUserMessageEvent(event)) return event.id;
+      }
+      return null;
+    }, [chatEvents]);
     const isAgentWorking = useAtomValue(isSessionActiveAtom);
 
     const gitArtifactStats = useMemo(
@@ -440,6 +449,17 @@ const ChatView: React.FC<ChatViewProps> = memo(
             }
             data-chat-pinned-header-portal-host
           />
+          {!isReadOnlySurface && (
+            <div
+              className="flex flex-shrink-0 items-center border-b border-border-2 bg-chat-pane px-2 py-1"
+              data-testid="live-session-journey-controls"
+            >
+              <SessionJourneyControls
+                sessionId={sessionId}
+                messageId={latestUserMessageId}
+              />
+            </div>
+          )}
           <div className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
             <ChatViewHistorySurface
               sessionId={sessionId}

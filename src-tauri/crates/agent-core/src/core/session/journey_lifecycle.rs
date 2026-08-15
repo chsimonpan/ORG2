@@ -127,6 +127,10 @@ pub struct JourneyCheckpoint {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JourneyFork {
     pub id: String,
+    /// User-facing name captured when the fork is created. Older snapshots did
+    /// not persist it, so consumers may fall back to the authoritative ID.
+    #[serde(default)]
+    pub name: String,
     pub parent_branch_id: String,
     /// Durable message identity for the parent prefix boundary. Sequences are
     /// ordering coordinates only; a return-to-parent action must name this ID.
@@ -278,6 +282,7 @@ impl SessionJourney {
         let main_branch_id = main_branch_id.into();
         let branch = JourneyFork {
             id: main_branch_id.clone(),
+            name: "主干".into(),
             parent_branch_id: main_branch_id.clone(),
             parent_anchor_message_id: None,
             anchor_sequence: 0,
@@ -409,6 +414,7 @@ impl SessionJourney {
                 fork_id.clone(),
                 JourneyFork {
                     id: fork_id.clone(),
+                    name: task_name.clone(),
                     parent_branch_id: parent,
                     parent_anchor_message_id: Some(parent_anchor_message_id),
                     anchor_sequence,
@@ -433,6 +439,54 @@ impl SessionJourney {
                 },
             );
             s.active_task_id = Some(task_id);
+            Ok(())
+        })
+    }
+
+    /// Reactivate an accumulated task/fork by its authoritative IDs.
+    ///
+    /// Reactivation resumes editing at the durable branch/task coordinates.
+    /// Names and branch anchors stay untouched; terminal task/fork state is
+    /// reopened so future messages can be persisted into that exact lineage.
+    pub fn activate_entry(
+        &mut self,
+        expected_revision: u64,
+        task_id: &str,
+        branch_id: &str,
+    ) -> Result<(), JourneyError> {
+        self.mutate(expected_revision, |s| {
+            let task = s
+                .tasks
+                .get(task_id)
+                .ok_or_else(|| JourneyError::UnknownTask(task_id.into()))?;
+            if task.branch_id != branch_id {
+                return Err(JourneyError::InvalidState("任务与分叉不匹配"));
+            }
+            let branch = s
+                .branches
+                .get(branch_id)
+                .ok_or_else(|| JourneyError::UnknownBranch(branch_id.into()))?;
+            if matches!(branch.state, ForkState::Discarded) {
+                return Err(JourneyError::InvalidState("已丢弃分叉不可重新启用"));
+            }
+            let task = s
+                .tasks
+                .get_mut(task_id)
+                .ok_or_else(|| JourneyError::UnknownTask(task_id.into()))?;
+            task.state = TaskState::Active;
+            task.finish_sequence = None;
+            task.outcome = None;
+            if branch_id != "main" {
+                let branch = s
+                    .branches
+                    .get_mut(branch_id)
+                    .ok_or_else(|| JourneyError::UnknownBranch(branch_id.into()))?;
+                branch.state = ForkState::Active;
+                branch.frozen_end_sequence = None;
+                branch.close_work_id = None;
+            }
+            s.active_branch_id = branch_id.into();
+            s.active_task_id = Some(task_id.into());
             Ok(())
         })
     }
@@ -2043,6 +2097,32 @@ mod tests {
             Err(JourneyError::MissingHandoff)
         ));
     }
+    #[test]
+    fn accumulated_task_and_fork_can_be_reactivated_by_authoritative_ids() {
+        let mut j = SessionJourney::new("s", "main");
+        j.start_fork(
+            0,
+            "fork-id".into(),
+            "task-id".into(),
+            "验证替代方案".into(),
+            "anchor".into(),
+            3,
+        )
+        .unwrap();
+        assert_eq!(j.branches["fork-id"].name, "验证替代方案");
+        j.active_task_id = None;
+        j.active_branch_id = "main".into();
+        j.activate_entry(1, "task-id", "fork-id").unwrap();
+        assert_eq!(j.active_task_id.as_deref(), Some("task-id"));
+        assert_eq!(j.active_branch_id, "fork-id");
+        assert_eq!(j.tasks["task-id"].state, TaskState::Active);
+        assert_eq!(j.branches["fork-id"].state, ForkState::Active);
+        assert!(matches!(
+            j.activate_entry(2, "task-id", "main"),
+            Err(JourneyError::InvalidState("任务与分叉不匹配"))
+        ));
+    }
+
     #[test]
     fn lifecycle_is_cas_and_never_needs_llm() {
         let mut j = SessionJourney::new("s", "main");

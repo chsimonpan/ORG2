@@ -129,7 +129,13 @@ export const SessionJourneySnapshot: React.FC<{
               key={fork.id}
             >
               <GitFork size={14} className="mb-1 text-success-6" />
-              <strong>{fork.id}</strong>
+              <strong>
+                {fork.name?.trim() ||
+                  Object.values(currentSnapshot.tasks).find(
+                    (task) => task.branch_id === fork.id
+                  )?.name ||
+                  fork.id}
+              </strong>
               <p className="mt-1 text-text-3">
                 锚点 {fork.anchor_sequence} · {forkStateLabel(fork.state)}
               </p>

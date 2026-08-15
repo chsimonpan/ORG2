@@ -110,6 +110,7 @@ describe("Project Journey tree", () => {
               branches: {
                 "fork-1": {
                   id: "fork-1",
+                  name: "方案分叉",
                   parent_branch_id: "main",
                   parent_anchor_message_id: "message-7",
                   anchor_sequence: 7,
@@ -146,6 +147,7 @@ describe("Project Journey tree", () => {
           sessionId: "s",
           anchorMessageId: "message-7",
           anchorSequence: 7,
+          title: "方案分叉",
         }),
       ])
     );

@@ -6,10 +6,11 @@
 
 use agent_core::core::journey_lifecycle::RuntimeProvenance;
 use agent_core::session::journey_application_service::{
-    CreateCheckpointRequest, CreateForkRequest, CreateTaskRequest, DiscardForkRequest,
-    DiscardForkResponse, FinishTaskRequest, ForkCompareResponse, JourneySnapshotResponse,
-    JourneyWriteResponse, PromoteFactRequest, RequestForkCloseRequest, RetryReviewRequest,
-    ReturnToParentRequest, ReturnToParentResponse, SessionJourneyApplicationService,
+    ActivateJourneyEntryRequest, CreateCheckpointRequest, CreateForkRequest, CreateTaskRequest,
+    DiscardForkRequest, DiscardForkResponse, FinishTaskRequest, ForkCompareResponse,
+    JourneySnapshotResponse, JourneyWriteResponse, PromoteFactRequest, RequestForkCloseRequest,
+    RetryReviewRequest, ReturnToParentRequest, ReturnToParentResponse,
+    SessionJourneyApplicationService,
 };
 use agent_core::session::journey_review_queue::ReviewJob;
 
@@ -41,6 +42,18 @@ pub async fn journey_task_start(
     })
     .await
     .map_err(|error| format!("会话旅程任务启动异常：{error}"))?
+}
+
+#[tauri::command]
+pub async fn journey_entry_activate(
+    request: ActivateJourneyEntryRequest,
+) -> Result<JourneyWriteResponse, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut conn = open_connection()?;
+        SessionJourneyApplicationService::activate_entry(&mut conn, request).map_err(service_error)
+    })
+    .await
+    .map_err(|error| format!("会话旅程重新启用异常：{error}"))?
 }
 
 #[tauri::command]
@@ -380,6 +393,7 @@ mod tests {
         for command in [
             "journey_snapshot",
             "journey_task_start",
+            "journey_entry_activate",
             "journey_checkpoint",
             "journey_task_finish",
             "journey_fork_start",

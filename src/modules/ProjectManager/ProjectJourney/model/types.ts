@@ -38,6 +38,7 @@ export interface ProjectJourneyCheckpointLike {
 
 export interface ProjectJourneyForkLike {
   id: string;
+  name?: string;
   parent_branch_id: string;
   parent_anchor_message_id: string | null;
   anchor_sequence: number;

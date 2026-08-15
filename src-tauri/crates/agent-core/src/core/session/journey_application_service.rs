@@ -33,6 +33,15 @@ pub struct CreateTaskRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ActivateJourneyEntryRequest {
+    pub session_id: String,
+    pub expected_revision: u64,
+    pub task_id: String,
+    pub branch_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateForkRequest {
     pub session_id: String,
     pub expected_revision: u64,
@@ -403,6 +412,22 @@ impl SessionJourneyApplicationService {
                         next_user_message,
                         latest_user_sequence,
                     )
+                    .map_err(Self::domain_error)
+            },
+        )
+    }
+
+    pub fn activate_entry(
+        conn: &mut Connection,
+        request: ActivateJourneyEntryRequest,
+    ) -> JourneyApplicationResult<JourneyWriteResponse> {
+        Self::write(
+            conn,
+            &request.session_id,
+            request.expected_revision,
+            |_conn, journey, revision| {
+                journey
+                    .activate_entry(revision, &request.task_id, &request.branch_id)
                     .map_err(Self::domain_error)
             },
         )

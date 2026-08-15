@@ -74,7 +74,7 @@ function sessionNodeFromAggregate(
     .map((fork: ProjectJourneyForkLike) => ({
       id: `fork:${session.session_id}:${fork.id}`,
       kind: "fork",
-      title: fork.id,
+      title: fork.name?.trim() || fork.id,
       status: fork.state,
       projectId: project.id,
       projectSlug: project.slug,

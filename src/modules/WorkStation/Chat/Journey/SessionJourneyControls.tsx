@@ -1,5 +1,7 @@
 import {
+  ChevronDown,
   ChevronLeft,
+  ChevronRight,
   Flag,
   GitFork,
   MapPin,
@@ -22,6 +24,7 @@ import Modal from "@src/scaffold/ModalSystem";
 import {
   REVIEW_PANEL_STORAGE_KEY,
   type ReviewPanelMode,
+  accumulatedJourneyTree,
   activeTask,
   hasRecoverableJourney,
   isRevisionConflict,
@@ -71,6 +74,7 @@ export const SessionJourneyControls: React.FC<{
     null
   );
   const [error, setError] = useState<string | null>(null);
+  const [journeyTreeOpen, setJourneyTreeOpen] = useState(false);
   const [dialog, setDialog] = useState<
     "task" | "checkpoint" | "finish" | "fork" | "closeFork" | null
   >(null);
@@ -137,6 +141,10 @@ export const SessionJourneyControls: React.FC<{
     }
   };
   const task = activeTask(snapshot);
+  const journeyTree = useMemo(
+    () => accumulatedJourneyTree(snapshot),
+    [snapshot]
+  );
   const reviews = useMemo(() => visibleReviews(snapshot), [snapshot]);
   const revision = snapshot?.revision ?? 0;
   const durableMessageId = resolveDurableJourneyMessageId(messageId);
@@ -242,7 +250,7 @@ export const SessionJourneyControls: React.FC<{
         className="flex items-center gap-1"
         data-testid="session-journey-controls"
       >
-        {task ? (
+        {task && (
           <span
             className="inline-flex max-w-44 items-center gap-1 truncate rounded border border-primary-5 bg-primary-1 px-2 py-1 text-xs text-primary-7"
             title={task.name}
@@ -250,16 +258,17 @@ export const SessionJourneyControls: React.FC<{
             <Flag size={13} />
             任务：{task.name}
           </span>
-        ) : (
-          <Button
-            size="small"
-            appearance="ghost"
-            icon={<Play size={14} />}
-            onClick={() => setDialog("task")}
-          >
-            开始任务
-          </Button>
         )}
+        <Button
+          size="small"
+          appearance="ghost"
+          icon={<Play size={14} />}
+          onClick={() => setDialog("task")}
+          disabled={Boolean(task)}
+          title={task ? "请先结束当前任务" : "在当前 Session 新建 Task"}
+        >
+          新建Task
+        </Button>
         <Button
           size="small"
           appearance="ghost"
@@ -271,7 +280,22 @@ export const SessionJourneyControls: React.FC<{
               : "将从当前分支最近一条已持久化的用户消息创建分叉"
           }
         >
-          分叉
+          Fork
+        </Button>
+        <Button
+          size="small"
+          appearance="ghost"
+          icon={
+            journeyTreeOpen ? (
+              <ChevronDown size={14} />
+            ) : (
+              <ChevronRight size={14} />
+            )
+          }
+          onClick={() => setJourneyTreeOpen((open) => !open)}
+          aria-expanded={journeyTreeOpen}
+        >
+          Task/Fork 树
         </Button>
         {task && (
           <>
@@ -316,6 +340,21 @@ export const SessionJourneyControls: React.FC<{
           审核{reviews.length ? ` ${reviews.length}` : ""}
         </Button>
       </div>
+      {journeyTreeOpen && (
+        <JourneyEditingTree
+          entries={journeyTree}
+          onActivate={(taskId, branchId) =>
+            void mutate(() =>
+              sessionJourneyApi.activateEntry({
+                sessionId,
+                expectedRevision: revision,
+                taskId,
+                branchId,
+              })
+            )
+          }
+        />
+      )}
       {error && (
         <span className="text-xs text-danger-6" role="alert">
           旅程操作失败：{error}
@@ -392,6 +431,76 @@ export const SessionJourneyControls: React.FC<{
     </>
   );
 };
+
+const JourneyEditingTree: React.FC<{
+  entries: ReturnType<typeof accumulatedJourneyTree>;
+  onActivate: (taskId: string, branchId: string) => void;
+}> = ({ entries, onActivate }) => (
+  <div
+    className="mt-1 min-w-64 rounded border border-border-2 bg-bg-1 p-2 text-xs shadow-sm"
+    data-testid="session-task-fork-tree"
+  >
+    {entries.length === 0 ? (
+      <span className="text-text-3">此 Session 尚无 Task/Fork</span>
+    ) : (
+      <ul
+        className="space-y-1"
+        role="tree"
+        aria-label="Session Task/Fork 编辑树"
+      >
+        {entries.map((entry) => (
+          <li key={entry.id} role="treeitem" aria-selected={entry.active}>
+            <button
+              type="button"
+              className={`flex w-full items-center gap-1.5 rounded px-2 py-1 text-left hover:bg-fill-2 ${entry.active ? "bg-primary-1 text-primary-7" : "text-text-1"}`}
+              data-journey-entry-id={
+                entry.kind === "task" ? entry.taskId : entry.branchId
+              }
+              disabled={!entry.taskId}
+              onClick={() =>
+                entry.taskId && onActivate(entry.taskId, entry.branchId)
+              }
+            >
+              {entry.kind === "fork" ? (
+                <GitFork size={13} />
+              ) : (
+                <Flag size={13} />
+              )}
+              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+              <span className="text-[10px] text-text-3">{entry.state}</span>
+            </button>
+            {entry.children.length > 0 && (
+              <ul className="ml-4 border-l border-border-2 pl-2" role="group">
+                {entry.children.map((child) => (
+                  <li
+                    key={child.id}
+                    role="treeitem"
+                    aria-selected={child.active}
+                  >
+                    <button
+                      type="button"
+                      className={`flex w-full items-center gap-1.5 rounded px-2 py-1 text-left hover:bg-fill-2 ${child.active ? "bg-primary-1 text-primary-7" : "text-text-1"}`}
+                      data-journey-entry-id={child.taskId}
+                      onClick={() => onActivate(child.taskId, child.branchId)}
+                    >
+                      <Flag size={12} />
+                      <span className="min-w-0 flex-1 truncate">
+                        {child.name}
+                      </span>
+                      <span className="text-[10px] text-text-3">
+                        {child.state}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+);
 
 const JourneyDialog: React.FC<{
   kind: "task" | "checkpoint" | "finish" | "fork" | "closeFork" | null;

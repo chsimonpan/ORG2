@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { JourneySnapshot } from "@src/api/tauri/sessionJourney";
 
 import {
+  accumulatedJourneyTree,
   activeTask,
   hasRecoverableJourney,
   isRevisionConflict,
@@ -153,4 +154,76 @@ describe("session Journey UI model", () => {
     ).toBe(true);
     expect(isRevisionConflict("网络错误")).toBe(false);
   });
+});
+
+it("builds the accumulated Task/Fork editing tree with names and authoritative IDs", () => {
+  const snapshot = {
+    session_id: "session-1",
+    revision: 4,
+    active_branch_id: "fork-opaque-id",
+    active_task_id: "task-fork",
+    tasks: {
+      "task-main": {
+        id: "task-main",
+        name: "主线调研",
+        branch_id: "main",
+        state: "finished",
+        start_sequence: 1,
+        finish_sequence: 2,
+        outcome: "completed" as const,
+      },
+      "task-fork": {
+        id: "task-fork",
+        name: "替代方案实验",
+        branch_id: "fork-opaque-id",
+        state: "active",
+        start_sequence: 3,
+        finish_sequence: null,
+        outcome: null,
+      },
+    },
+    checkpoints: {},
+    branches: {
+      main: {
+        id: "main",
+        name: "主干",
+        parent_branch_id: "main",
+        parent_anchor_message_id: null,
+        anchor_sequence: 0,
+        state: "active",
+        handoff_capsule: null,
+      },
+      "fork-opaque-id": {
+        id: "fork-opaque-id",
+        name: "验证替代方案",
+        parent_branch_id: "main",
+        parent_anchor_message_id: "message-3",
+        anchor_sequence: 3,
+        state: "active",
+        handoff_capsule: null,
+      },
+    },
+    reviews: {},
+  };
+  expect(accumulatedJourneyTree(snapshot)).toEqual([
+    expect.objectContaining({
+      kind: "task",
+      name: "主线调研",
+      taskId: "task-main",
+      branchId: "main",
+    }),
+    expect.objectContaining({
+      kind: "fork",
+      name: "验证替代方案",
+      taskId: "task-fork",
+      branchId: "fork-opaque-id",
+      children: [
+        expect.objectContaining({
+          name: "替代方案实验",
+          taskId: "task-fork",
+          branchId: "fork-opaque-id",
+        }),
+      ],
+    }),
+  ]);
 });

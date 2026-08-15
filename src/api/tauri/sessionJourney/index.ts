@@ -32,6 +32,8 @@ export interface JourneyCheckpoint {
 }
 export interface JourneyFork {
   id: string;
+  /** Persisted display name; absent only on legacy snapshots. */
+  name?: string;
   parent_branch_id: string;
   parent_anchor_message_id: string | null;
   anchor_sequence: number;
@@ -100,6 +102,12 @@ export interface CreateTaskRequest {
   taskId: string;
   name: string;
   position: TaskStartPosition;
+}
+export interface ActivateJourneyEntryRequest {
+  sessionId: string;
+  expectedRevision: number;
+  taskId: string;
+  branchId: string;
 }
 export interface CreateForkRequest {
   sessionId: string;
@@ -171,6 +179,8 @@ export const sessionJourneyApi = {
     invoke<JourneySnapshotResponse>("journey_snapshot", { sessionId }),
   startTask: (request: CreateTaskRequest) =>
     invoke<JourneyWriteResponse>("journey_task_start", { request }),
+  activateEntry: (request: ActivateJourneyEntryRequest) =>
+    invoke<JourneyWriteResponse>("journey_entry_activate", { request }),
   checkpoint: (request: CreateCheckpointRequest) =>
     invoke<JourneyWriteResponse>("journey_checkpoint", { request }),
   finishTask: (request: FinishTaskRequest) =>
