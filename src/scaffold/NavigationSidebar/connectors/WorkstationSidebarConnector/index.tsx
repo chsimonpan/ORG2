@@ -100,11 +100,66 @@ const logger = createLogger("WorkstationSidebarGuide");
  * data consumed here via `sidebarConnector.cloudMenuData`.
  */
 
+export type Org2SessionStatusTone = "error" | "running" | "ended";
+
+/** Map only the canonical backend/WS Session.status; never infer from selection. */
+export function resolveOrg2SessionStatusTone(
+  status: string | undefined
+): Org2SessionStatusTone {
+  if (status === "completed") return "ended";
+  if (
+    status === "failed" ||
+    status === "error" ||
+    status === "cancelled" ||
+    status === "abandoned" ||
+    status === "timeout" ||
+    status === "killed" ||
+    status === "archived"
+  ) {
+    return "error";
+  }
+  return "running";
+}
+
+function createOrg2SessionStatusIndicator(
+  status: string | undefined
+): React.ReactNode {
+  const tone = resolveOrg2SessionStatusTone(status);
+  const colorClass =
+    tone === "error"
+      ? "bg-danger-6"
+      : tone === "ended"
+        ? "bg-success-6"
+        : "bg-blue-500";
+  const label = `Session status: ${tone}`;
+  return (
+    <span
+      aria-label={label}
+      title={label}
+      className={`h-2 w-2 shrink-0 rounded-full ${colorClass} ${
+        tone === "running"
+          ? "motion-safe:animate-pulse motion-reduce:opacity-80"
+          : ""
+      }`}
+    />
+  );
+}
+
+export function formatOrg2ProjectLabel(projectName: string): string {
+  const withoutPrefix = projectName.replace(
+    /^proj(?=$|[\s:_. /-])[\s:_. /-]*/i,
+    ""
+  );
+  return withoutPrefix || projectName;
+}
+
 export function buildOrg2TreeItems(
   sessions: readonly import("@src/store/session").Session[]
 ): NavigationMenuItem[] {
   const projects = new Map<string, NavigationMenuItem[]>();
   for (const session of sessions) {
+    // Preserve the current session-first contract: projectSlug is not a
+    // durable Journey binding, so only authoritative projectId groups rows.
     const projectId = session.projectId || "Unlinked";
     const rows = projects.get(projectId) ?? [];
     rows.push({
@@ -112,22 +167,30 @@ export function buildOrg2TreeItems(
       key: `org2-tree-session-${session.session_id}`,
       label: session.name || session.user_input || session.session_id,
       shortcut: session.workItemId ? `工作项：${session.workItemId}` : "session",
+      treeDepth: 2,
+      trailingElement: createOrg2SessionStatusIndicator(session.status),
     });
     projects.set(projectId, rows);
   }
-  return [{
-    id: "org2-tree-workspace",
-    key: "org2-tree-workspace",
-    label: "工作区层级",
-    shortcut: "工作区",
-    children: Array.from(projects.entries()).map(([projectId, rows]) => ({
-      id: `org2-tree-project-${projectId}`,
-      key: `org2-tree-project-${projectId}`,
-      label: projectId === "Unlinked" ? "未绑定项目（拒绝推断）" : projectId,
-      shortcut: projectId === "Unlinked" ? "Unlinked" : "project",
-      children: rows,
-    })),
-  }];
+  return [
+    {
+      id: "org2-tree-workspace",
+      key: "org2-tree-workspace",
+      label: "工作区层级",
+      shortcut: "工作区",
+      children: Array.from(projects.entries()).map(([projectId, rows]) => ({
+        id: `org2-tree-project-${projectId}`,
+        key: `org2-tree-project-${projectId}`,
+        label:
+          projectId === "Unlinked"
+            ? "未绑定项目（拒绝推断）"
+            : formatOrg2ProjectLabel(projectId),
+        shortcut: projectId === "Unlinked" ? "Unlinked" : "project",
+        treeDepth: 1,
+        children: rows,
+      })),
+    },
+  ];
 }
 
 export const WorkstationSidebarConnector: React.FC = () => {

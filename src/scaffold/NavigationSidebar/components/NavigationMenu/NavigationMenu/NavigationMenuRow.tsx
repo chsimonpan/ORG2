@@ -87,12 +87,13 @@ export const NavigationMenuParentRow = React.forwardRef<
     },
     [resetImmediateCursor, onMouseLeave]
   );
+  const treeDepth = item.treeDepth ?? 0;
   return (
     <div
       {...rootProps}
       {...dragHandlers}
       ref={ref}
-      className={`${rootProps.className ?? ""} ${item.dragPayload ? "cursor-grab active:cursor-grabbing" : ""}`}
+      className={`${rootProps.className ?? ""} ${treeDepth > 0 ? "relative" : ""} ${item.dragPayload ? "cursor-grab active:cursor-grabbing" : ""}`}
       onMouseEnter={onMouseEnter}
       onMouseLeave={handleRootMouseLeave}
       onContextMenu={
@@ -115,6 +116,13 @@ export const NavigationMenuParentRow = React.forwardRef<
           }}
         />
       )}
+      {treeDepth > 0 && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute -bottom-0.5 -top-0.5 w-px bg-border-3"
+          style={{ left: `${8 + (treeDepth - 1) * 12}px` }}
+        />
+      )}
       <div
         data-testid={item.dataTestId}
         data-tour-target={item.tourTarget}
@@ -132,6 +140,11 @@ export const NavigationMenuParentRow = React.forwardRef<
             ? "cursor-default opacity-60"
             : `${cursorReset ? "cursor-default" : "cursor-pointer"} hover:bg-sidebar-selected`
         }`}
+        style={
+          treeDepth > 0
+            ? { paddingLeft: `${12 + treeDepth * 12}px` }
+            : undefined
+        }
         onClick={(event: React.MouseEvent) => {
           if (item.disabled) return;
           markClicked();
@@ -315,7 +328,8 @@ export const NavigationMenuLeafRow = React.forwardRef<
     markClicked,
     resetCursor: resetImmediateCursor,
   } = useImmediateCursorReset(isSelected, !item.disabled);
-  const showIndentGuide = Boolean(item.showIndentGuide);
+  const treeDepth = item.treeDepth ?? 0;
+  const showIndentGuide = Boolean(item.showIndentGuide || treeDepth > 0);
 
   const handleRootMouseLeave = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
@@ -338,7 +352,11 @@ export const NavigationMenuLeafRow = React.forwardRef<
     >
       {dragState && <ReferenceDragGhost dragState={dragState} />}
       {showIndentGuide && (
-        <span className="pointer-events-none absolute -bottom-0.5 -top-0.5 left-2 w-px bg-border-3" />
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute -bottom-0.5 -top-0.5 w-px bg-border-3"
+          style={{ left: `${8 + Math.max(0, treeDepth - 1) * 12}px` }}
+        />
       )}
       <div
         data-testid={item.dataTestId}
@@ -361,6 +379,11 @@ export const NavigationMenuLeafRow = React.forwardRef<
                 ? `${cursorReset ? "cursor-default" : "cursor-pointer"} text-text-2 hover:bg-sidebar-selected hover:text-text-1`
                 : `${cursorReset ? "cursor-default" : "cursor-pointer"} text-text-1 hover:bg-sidebar-selected`
         }`}
+        style={
+          treeDepth > 0
+            ? { paddingLeft: `${12 + treeDepth * 12}px` }
+            : undefined
+        }
         onClick={(event: React.MouseEvent) => {
           if (item.disabled) return;
           if (

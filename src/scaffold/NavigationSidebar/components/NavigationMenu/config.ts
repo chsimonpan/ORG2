@@ -54,6 +54,8 @@ export interface NavigationMenuItem {
   showDrillDownIndicator?: boolean;
   /** Indents the row and draws a vertical guide line for inline child rows. */
   showIndentGuide?: boolean;
+  /** Explicit visual depth for multi-level inline trees. */
+  treeDepth?: number;
   visualTone?: "default" | "secondary";
   /**
    * The viewer pinned this row. Set by the row builders (local and cloud) so
