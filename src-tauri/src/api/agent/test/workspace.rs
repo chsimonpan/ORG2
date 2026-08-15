@@ -303,6 +303,8 @@ pub async fn test_session_launch_seed_only(
         worktree_path: None,
         project_slug: None,
         parent_session_id: None,
+        journey_workspace_id: None,
+        journey_topic_tags: Vec::new(),
         durable_run_id: None,
         additional_directories,
     };

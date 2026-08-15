@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 use core_types::key_source::KeySource;
+use core_types::session::ParentSessionRelation;
 
 /// Valid values for [`UnifiedSessionRecord::session_type`].
 ///
@@ -90,6 +91,8 @@ pub struct UnifiedSessionRecord {
     pub org_member_id: Option<String>,
 
     pub parent_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_relation: Option<ParentSessionRelation>,
     pub parent_event_id: Option<String>,
 
     /// — JSON-encoded `BTreeMap<PathBuf, AdditionalDirectory>`.
@@ -190,6 +193,7 @@ impl Default for UnifiedSessionRecord {
             agent_definition_id: None,
             org_member_id: None,
             parent_session_id: None,
+            parent_session_relation: None,
             parent_event_id: None,
             workspace_additional_json: default_workspace_additional_json(),
             key_source: KeySource::default(),
@@ -221,7 +225,7 @@ pub(in crate::core::session::persistence) const UNIFIED_SESSION_SELECT: &str = r
         s.work_item_id, s.agent_role, s.worktree_path,
         s.worktree_branch, s.base_branch, s.merge_status,
         s.project_slug, s.agent_definition_id, s.org_member_id,
-        s.parent_session_id, s.parent_event_id,
+        s.parent_session_id, s.parent_session_relation, s.parent_event_id,
         s.workspace_additional_json,
         COALESCE(s.key_source, 'own_key'),
         s.agent_exec_mode,
@@ -238,7 +242,19 @@ pub(in crate::core::session::persistence) const UNIFIED_SESSION_SELECT: &str = r
 pub(in crate::core::session::persistence) fn row_to_record(
     row: &rusqlite::Row,
 ) -> rusqlite::Result<UnifiedSessionRecord> {
-    let key_source_str: String = row.get(28)?;
+    let parent_session_relation = row
+        .get::<_, Option<String>>(26)?
+        .map(|value| {
+            ParentSessionRelation::parse(&value).ok_or_else(|| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    26,
+                    rusqlite::types::Type::Text,
+                    format!("unknown ParentSessionRelation value: {value:?}").into(),
+                )
+            })
+        })
+        .transpose()?;
+    let key_source_str: String = row.get(29)?;
     // Fail-closed on unknown `key_source` values rather than silently
     // mapping to `OwnKey`: a bad value here means the row was written by
     // a build that doesn't agree with us about the enum, and treating it
@@ -246,7 +262,7 @@ pub(in crate::core::session::persistence) fn row_to_record(
     // affected. Same reasoning the CLI `row_to_session` uses.
     let key_source = KeySource::parse(&key_source_str).ok_or_else(|| {
         rusqlite::Error::FromSqlConversionFailure(
-            28,
+            29,
             rusqlite::types::Type::Text,
             format!("unknown KeySource value: {key_source_str:?}").into(),
         )
@@ -257,7 +273,7 @@ pub(in crate::core::session::persistence) fn row_to_record(
         status: row.get(2)?,
         model: row.get(3)?,
         account_id: row.get(4)?,
-        native_harness_type: row.get(30)?,
+        native_harness_type: row.get(31)?,
         user_input: row.get(5)?,
         total_tokens: row.get(6)?,
         created_at: row.get(7)?,
@@ -279,15 +295,16 @@ pub(in crate::core::session::persistence) fn row_to_record(
         agent_definition_id: row.get(23)?,
         org_member_id: row.get(24)?,
         parent_session_id: row.get(25)?,
-        parent_event_id: row.get(26)?,
-        workspace_additional_json: row.get(27)?,
+        parent_session_relation,
+        parent_event_id: row.get(27)?,
+        workspace_additional_json: row.get(28)?,
         key_source,
-        agent_exec_mode: row.get(29)?,
-        product_mode: row.get(34)?,
-        draft_text: row.get(31)?,
-        reply_target_event_id: row.get(32)?,
+        agent_exec_mode: row.get(30)?,
+        product_mode: row.get(35)?,
+        draft_text: row.get(32)?,
+        reply_target_event_id: row.get(33)?,
         pinned: {
-            let pinned_int: i64 = row.get(33)?;
+            let pinned_int: i64 = row.get(34)?;
             pinned_int != 0
         },
     })

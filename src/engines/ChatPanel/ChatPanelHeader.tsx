@@ -4,6 +4,7 @@ import {
   Maximize2,
   MonitorPlay,
   PanelRight,
+  Search,
   TerminalSquare,
 } from "lucide-react";
 import React from "react";
@@ -200,6 +201,19 @@ export function ChatPanelHeader({
           <span
             ref={focusedWorkstationMenuHostRef}
             className="inline-flex shrink-0 @[1100px]/focusedchat:hidden"
+          />
+        )}
+        {showSessionContent && showTranscriptActions && (
+          <Button
+            htmlType="button"
+            variant="tertiary"
+            size="small"
+            iconOnly
+            onClick={handleOpenSearch}
+            aria-label={t("sessions:chat.findInChat")}
+            title={t("sessions:chat.findInChat")}
+            data-testid="chat-panel-header-search-button"
+            icon={<Search size={CHAT_PANEL_HEADER_ICON_SIZE} strokeWidth={2} />}
           />
         )}
         {showSessionContent && (

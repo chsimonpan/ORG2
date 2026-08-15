@@ -1,0 +1,643 @@
+[prepare-sidecars] cargo build -p orgtrack-pm-cli --bin org2-pm
+    Updating `rsproxy-sparse` index
+ Downloading crates ...
+  Downloaded adler2 v2.0.1 (registry `rsproxy-sparse`)
+  Downloaded raw-window-handle v0.6.2 (registry `rsproxy-sparse`)
+  Downloaded regex-syntax v0.8.11 (registry `rsproxy-sparse`)
+  Downloaded kuchikiki v0.8.8-speedreader (registry `rsproxy-sparse`)
+  Downloaded reqwest v0.13.4 (registry `rsproxy-sparse`)
+  Downloaded regex v1.12.4 (registry `rsproxy-sparse`)
+  Downloaded percent-encoding v2.3.2 (registry `rsproxy-sparse`)
+  Downloaded libgit2-sys v0.18.5+1.9.4 (registry `rsproxy-sparse`)
+  Downloaded rand_chacha v0.2.2 (registry `rsproxy-sparse`)
+  Downloaded notify v8.2.0 (registry `rsproxy-sparse`)
+  Downloaded matches v0.1.10 (registry `rsproxy-sparse`)
+  Downloaded proc-macro-crate v1.3.1 (registry `rsproxy-sparse`)
+  Downloaded regex-automata v0.4.14 (registry `rsproxy-sparse`)
+  Downloaded moxcms v0.8.1 (registry `rsproxy-sparse`)
+  Downloaded ref-cast-impl v1.0.25 (registry `rsproxy-sparse`)
+  Downloaded rayon v1.12.0 (registry `rsproxy-sparse`)
+  Downloaded litemap v0.8.2 (registry `rsproxy-sparse`)
+  Downloaded memoffset v0.9.1 (registry `rsproxy-sparse`)
+  Downloaded memchr v2.8.2 (registry `rsproxy-sparse`)
+  Downloaded phf_generator v0.13.1 (registry `rsproxy-sparse`)
+  Downloaded tauri-codegen v2.6.2 (registry `rsproxy-sparse`)
+  Downloaded pkg-config v0.3.33 (registry `rsproxy-sparse`)
+  Downloaded phf_shared v0.11.3 (registry `rsproxy-sparse`)
+  Downloaded proc-macro-error-attr v1.0.4 (registry `rsproxy-sparse`)
+  Downloaded open v5.3.5 (registry `rsproxy-sparse`)
+  Downloaded nucleo-matcher v0.3.1 (registry `rsproxy-sparse`)
+  Downloaded rustc_version v0.4.1 (registry `rsproxy-sparse`)
+  Downloaded schemars_derive v0.8.22 (registry `rsproxy-sparse`)
+  Downloaded siphasher v0.3.11 (registry `rsproxy-sparse`)
+  Downloaded synstructure v0.13.2 (registry `rsproxy-sparse`)
+  Downloaded tauri v2.10.3 (registry `rsproxy-sparse`)
+  Downloaded time-core v0.1.8 (registry `rsproxy-sparse`)
+  Downloaded libappindicator v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded once_cell v1.21.4 (registry `rsproxy-sparse`)
+  Downloaded rayon-core v1.13.0 (registry `rsproxy-sparse`)
+  Downloaded socket2 v0.6.4 (registry `rsproxy-sparse`)
+  Downloaded libloading v0.7.4 (registry `rsproxy-sparse`)
+  Downloaded lock_api v0.4.14 (registry `rsproxy-sparse`)
+  Downloaded pango-sys v0.18.0 (registry `rsproxy-sparse`)
+  Downloaded phf v0.11.3 (registry `rsproxy-sparse`)
+  Downloaded png v0.18.1 (registry `rsproxy-sparse`)
+  Downloaded png v0.17.16 (registry `rsproxy-sparse`)
+  Downloaded serde_with v3.21.0 (registry `rsproxy-sparse`)
+  Downloaded sha2 v0.10.9 (registry `rsproxy-sparse`)
+  Downloaded ahash v0.8.12 (registry `rsproxy-sparse`)
+  Downloaded proc-macro2 v1.0.106 (registry `rsproxy-sparse`)
+  Downloaded string_cache_codegen v0.5.4 (registry `rsproxy-sparse`)
+  Downloaded system-deps v6.2.2 (registry `rsproxy-sparse`)
+  Downloaded async-trait v0.1.89 (registry `rsproxy-sparse`)
+  Downloaded ref-cast v1.0.25 (registry `rsproxy-sparse`)
+  Downloaded toml_datetime v0.6.3 (registry `rsproxy-sparse`)
+  Downloaded servo_arc v0.2.0 (registry `rsproxy-sparse`)
+  Downloaded tray-icon v0.21.3 (registry `rsproxy-sparse`)
+  Downloaded constant_time_eq v0.4.2 (registry `rsproxy-sparse`)
+  Downloaded phf_shared v0.13.1 (registry `rsproxy-sparse`)
+  Downloaded async-task v4.7.1 (registry `rsproxy-sparse`)
+  Downloaded serialize-to-javascript-impl v0.1.2 (registry `rsproxy-sparse`)
+  Downloaded gtk v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded memmap2 v0.9.10 (registry `rsproxy-sparse`)
+  Downloaded rand v0.8.6 (registry `rsproxy-sparse`)
+  Downloaded mac v0.1.1 (registry `rsproxy-sparse`)
+  Downloaded parking v2.2.1 (registry `rsproxy-sparse`)
+  Downloaded libz-sys v1.1.29 (registry `rsproxy-sparse`)
+  Downloaded arrayref v0.3.9 (registry `rsproxy-sparse`)
+  Downloaded mio v1.2.1 (registry `rsproxy-sparse`)
+  Downloaded libc v0.2.186 (registry `rsproxy-sparse`)
+  Downloaded serde_repr v0.1.20 (registry `rsproxy-sparse`)
+  Downloaded heck v0.5.0 (registry `rsproxy-sparse`)
+  Downloaded piper v0.2.5 (registry `rsproxy-sparse`)
+  Downloaded async-executor v1.14.0 (registry `rsproxy-sparse`)
+  Downloaded phf_generator v0.10.0 (registry `rsproxy-sparse`)
+  Downloaded stable_deref_trait v1.2.1 (registry `rsproxy-sparse`)
+  Downloaded toml_parser v1.1.2+spec-1.1.0 (registry `rsproxy-sparse`)
+  Downloaded libappindicator-sys v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded ppv-lite86 v0.2.21 (registry `rsproxy-sparse`)
+  Downloaded phf_generator v0.8.0 (registry `rsproxy-sparse`)
+  Downloaded serde_yaml v0.9.34+deprecated (registry `rsproxy-sparse`)
+  Downloaded rand_core v0.9.5 (registry `rsproxy-sparse`)
+  Downloaded rustls-pki-types v1.14.1 (registry `rsproxy-sparse`)
+  Downloaded option-ext v0.2.0 (registry `rsproxy-sparse`)
+  Downloaded aho-corasick v1.1.4 (registry `rsproxy-sparse`)
+  Downloaded selectors v0.36.1 (registry `rsproxy-sparse`)
+  Downloaded fallible-streaming-iterator v0.1.9 (registry `rsproxy-sparse`)
+  Downloaded tungstenite v0.29.0 (registry `rsproxy-sparse`)
+  Downloaded mime v0.3.17 (registry `rsproxy-sparse`)
+  Downloaded polling v3.11.0 (registry `rsproxy-sparse`)
+  Downloaded async-lock v3.4.2 (registry `rsproxy-sparse`)
+  Downloaded servo_arc v0.4.3 (registry `rsproxy-sparse`)
+  Downloaded webkit2gtk-sys v2.0.2 (registry `rsproxy-sparse`)
+  Downloaded tracing v0.1.44 (registry `rsproxy-sparse`)
+  Downloaded phf_shared v0.8.0 (registry `rsproxy-sparse`)
+  Downloaded serialize-to-javascript v0.1.2 (registry `rsproxy-sparse`)
+  Downloaded smallvec v1.15.2 (registry `rsproxy-sparse`)
+  Downloaded thiserror-impl v1.0.69 (registry `rsproxy-sparse`)
+  Downloaded notify-types v2.1.0 (registry `rsproxy-sparse`)
+  Downloaded lru v0.12.5 (registry `rsproxy-sparse`)
+  Downloaded rand v0.7.3 (registry `rsproxy-sparse`)
+  Downloaded string_cache v0.8.9 (registry `rsproxy-sparse`)
+  Downloaded selectors v0.24.0 (registry `rsproxy-sparse`)
+  Downloaded sync_wrapper v1.0.2 (registry `rsproxy-sparse`)
+  Downloaded pango v0.18.3 (registry `rsproxy-sparse`)
+  Downloaded simd-adler32 v0.3.9 (registry `rsproxy-sparse`)
+  Downloaded alloc-no-stdlib v2.0.4 (registry `rsproxy-sparse`)
+  Downloaded phf v0.8.0 (registry `rsproxy-sparse`)
+  Downloaded rustls v0.23.40 (registry `rsproxy-sparse`)
+  Downloaded rustc-hash v2.1.2 (registry `rsproxy-sparse`)
+  Downloaded target-lexicon v0.12.16 (registry `rsproxy-sparse`)
+  Downloaded scopeguard v1.2.0 (registry `rsproxy-sparse`)
+  Downloaded serde_spanned v1.1.1 (registry `rsproxy-sparse`)
+  Downloaded iana-time-zone v0.1.65 (registry `rsproxy-sparse`)
+  Downloaded anyhow v1.0.102 (registry `rsproxy-sparse`)
+  Downloaded phf v0.10.1 (registry `rsproxy-sparse`)
+  Downloaded atomic-waker v1.1.2 (registry `rsproxy-sparse`)
+  Downloaded parking_lot_core v0.9.12 (registry `rsproxy-sparse`)
+  Downloaded serde_with_macros v3.21.0 (registry `rsproxy-sparse`)
+  Downloaded string_cache v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded toml v0.8.2 (registry `rsproxy-sparse`)
+  Downloaded log v0.4.32 (registry `rsproxy-sparse`)
+  Downloaded slab v0.4.12 (registry `rsproxy-sparse`)
+  Downloaded phf_codegen v0.8.0 (registry `rsproxy-sparse`)
+  Downloaded new_debug_unreachable v1.0.6 (registry `rsproxy-sparse`)
+  Downloaded schemars v1.2.1 (registry `rsproxy-sparse`)
+  Downloaded matchit v0.8.4 (registry `rsproxy-sparse`)
+  Downloaded miniz_oxide v0.8.9 (registry `rsproxy-sparse`)
+  Downloaded proc-macro-crate v2.0.2 (registry `rsproxy-sparse`)
+  Downloaded num-traits v0.2.19 (registry `rsproxy-sparse`)
+  Downloaded vcpkg v0.2.15 (registry `rsproxy-sparse`)
+  Downloaded petgraph v0.6.5 (registry `rsproxy-sparse`)
+  Downloaded serde_derive v1.0.228 (registry `rsproxy-sparse`)
+  Downloaded unic-char-range v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded rand v0.9.4 (registry `rsproxy-sparse`)
+  Downloaded markup5ever v0.14.1 (registry `rsproxy-sparse`)
+  Downloaded markup5ever v0.38.0 (registry `rsproxy-sparse`)
+  Downloaded rustls-webpki v0.103.13 (registry `rsproxy-sparse`)
+  Downloaded hex v0.4.3 (registry `rsproxy-sparse`)
+  Downloaded phf v0.12.1 (registry `rsproxy-sparse`)
+  Downloaded getrandom v0.2.17 (registry `rsproxy-sparse`)
+  Downloaded allocator-api2 v0.2.21 (registry `rsproxy-sparse`)
+  Downloaded proc-macro-hack v0.5.20+deprecated (registry `rsproxy-sparse`)
+  Downloaded siphasher v1.0.3 (registry `rsproxy-sparse`)
+  Downloaded phf v0.13.1 (registry `rsproxy-sparse`)
+  Downloaded pxfm v0.1.29 (registry `rsproxy-sparse`)
+  Downloaded soup3-sys v0.5.0 (registry `rsproxy-sparse`)
+  Downloaded toml_edit v0.25.12+spec-1.1.0 (registry `rsproxy-sparse`)
+  Downloaded urlencoding v2.1.3 (registry `rsproxy-sparse`)
+  Downloaded pathdiff v0.2.3 (registry `rsproxy-sparse`)
+  Downloaded serde_spanned v0.6.9 (registry `rsproxy-sparse`)
+  Downloaded gdk-sys v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded phf_macros v0.10.0 (registry `rsproxy-sparse`)
+  Downloaded atk v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded dtor-proc-macro v0.0.6 (registry `rsproxy-sparse`)
+  Downloaded tauri-build v2.6.2 (registry `rsproxy-sparse`)
+  Downloaded openssl-probe v0.2.1 (registry `rsproxy-sparse`)
+  Downloaded convert_case v0.4.0 (registry `rsproxy-sparse`)
+  Downloaded nodrop v0.1.14 (registry `rsproxy-sparse`)
+  Downloaded block-buffer v0.10.4 (registry `rsproxy-sparse`)
+  Downloaded soup3 v0.5.0 (registry `rsproxy-sparse`)
+  Downloaded quote v1.0.45 (registry `rsproxy-sparse`)
+  Downloaded javascriptcore-rs v1.1.2 (registry `rsproxy-sparse`)
+  Downloaded mime_guess v2.0.5 (registry `rsproxy-sparse`)
+  Downloaded toml_edit v0.19.15 (registry `rsproxy-sparse`)
+  Downloaded muda v0.17.2 (registry `rsproxy-sparse`)
+  Downloaded signal-hook-registry v1.4.8 (registry `rsproxy-sparse`)
+  Downloaded tree-sitter-language v0.1.7 (registry `rsproxy-sparse`)
+  Downloaded syn v1.0.109 (registry `rsproxy-sparse`)
+  Downloaded toml v0.9.12+spec-1.1.0 (registry `rsproxy-sparse`)
+  Downloaded async-recursion v1.1.1 (registry `rsproxy-sparse`)
+  Downloaded hashbrown v0.12.3 (registry `rsproxy-sparse`)
+  Downloaded pin-project-lite v0.2.17 (registry `rsproxy-sparse`)
+  Downloaded crossbeam-epoch v0.9.18 (registry `rsproxy-sparse`)
+  Downloaded indexmap v2.14.0 (registry `rsproxy-sparse`)
+  Downloaded tauri-runtime-wry v2.10.1 (registry `rsproxy-sparse`)
+  Downloaded phf_shared v0.10.0 (registry `rsproxy-sparse`)
+  Downloaded shlex v2.0.1 (registry `rsproxy-sparse`)
+  Downloaded byteorder v1.5.0 (registry `rsproxy-sparse`)
+  Downloaded ring v0.17.14 (registry `rsproxy-sparse`)
+  Downloaded cssparser v0.29.6 (registry `rsproxy-sparse`)
+  Downloaded dyn-clone v1.0.20 (registry `rsproxy-sparse`)
+  Downloaded byteorder-lite v0.1.0 (registry `rsproxy-sparse`)
+  Downloaded rand_core v0.5.1 (registry `rsproxy-sparse`)
+  Downloaded inotify-sys v0.1.5 (registry `rsproxy-sparse`)
+  Downloaded web_atoms v0.2.4 (registry `rsproxy-sparse`)
+  Downloaded toml_edit v0.20.2 (registry `rsproxy-sparse`)
+  Downloaded match_token v0.1.0 (registry `rsproxy-sparse`)
+  Downloaded syn v2.0.117 (registry `rsproxy-sparse`)
+  Downloaded tauri-macros v2.5.5 (registry `rsproxy-sparse`)
+  Downloaded cairo-rs v0.18.5 (registry `rsproxy-sparse`)
+  Downloaded phf_macros v0.13.1 (registry `rsproxy-sparse`)
+  Downloaded phf_generator v0.11.3 (registry `rsproxy-sparse`)
+  Downloaded alloc-stdlib v0.2.2 (registry `rsproxy-sparse`)
+  Downloaded ordered-stream v0.2.0 (registry `rsproxy-sparse`)
+  Downloaded getrandom v0.1.16 (registry `rsproxy-sparse`)
+  Downloaded phf_shared v0.12.1 (registry `rsproxy-sparse`)
+  Downloaded sha1 v0.10.6 (registry `rsproxy-sparse`)
+  Downloaded tendril v0.5.0 (registry `rsproxy-sparse`)
+  Downloaded zerofrom v0.1.8 (registry `rsproxy-sparse`)
+  Downloaded h2 v0.4.14 (registry `rsproxy-sparse`)
+  Downloaded axum v0.8.9 (registry `rsproxy-sparse`)
+  Downloaded http-range v0.1.5 (registry `rsproxy-sparse`)
+  Downloaded rand_core v0.6.4 (registry `rsproxy-sparse`)
+  Downloaded rand_chacha v0.3.1 (registry `rsproxy-sparse`)
+  Downloaded wry v0.54.4 (registry `rsproxy-sparse`)
+  Downloaded serde-untagged v0.1.9 (registry `rsproxy-sparse`)
+  Downloaded inotify v0.11.2 (registry `rsproxy-sparse`)
+  Downloaded futures-io v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded crypto-common v0.1.7 (registry `rsproxy-sparse`)
+  Downloaded async-channel v2.5.0 (registry `rsproxy-sparse`)
+  Downloaded gdkwayland-sys v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded fastrand v2.4.1 (registry `rsproxy-sparse`)
+  Downloaded winnow v1.0.3 (registry `rsproxy-sparse`)
+  Downloaded schemars v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded async-process v2.5.0 (registry `rsproxy-sparse`)
+  Downloaded potential_utf v0.1.5 (registry `rsproxy-sparse`)
+  Downloaded rand_pcg v0.2.1 (registry `rsproxy-sparse`)
+  Downloaded axum-core v0.5.6 (registry `rsproxy-sparse`)
+  Downloaded zerofrom-derive v0.1.7 (registry `rsproxy-sparse`)
+  Downloaded fallible-iterator v0.3.0 (registry `rsproxy-sparse`)
+  Downloaded futures-sink v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded jsonptr v0.6.3 (registry `rsproxy-sparse`)
+  Downloaded phf_codegen v0.13.1 (registry `rsproxy-sparse`)
+  Downloaded cssparser-macros v0.6.1 (registry `rsproxy-sparse`)
+  Downloaded atk-sys v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded darling_macro v0.23.0 (registry `rsproxy-sparse`)
+  Downloaded gio v0.18.4 (registry `rsproxy-sparse`)
+  Downloaded cpufeatures v0.2.17 (registry `rsproxy-sparse`)
+  Downloaded zerocopy v0.8.52 (registry `rsproxy-sparse`)
+  Downloaded tendril v0.4.3 (registry `rsproxy-sparse`)
+  Downloaded dtor v0.3.0 (registry `rsproxy-sparse`)
+  Downloaded cfb v0.7.3 (registry `rsproxy-sparse`)
+  Downloaded subtle v2.6.1 (registry `rsproxy-sparse`)
+  Downloaded displaydoc v0.2.6 (registry `rsproxy-sparse`)
+  Downloaded hashbrown v0.17.1 (registry `rsproxy-sparse`)
+  Downloaded grep-regex v0.1.14 (registry `rsproxy-sparse`)
+  Downloaded cfg-if v1.0.4 (registry `rsproxy-sparse`)
+  Downloaded string_cache_codegen v0.6.1 (registry `rsproxy-sparse`)
+  Downloaded hyper-util v0.1.20 (registry `rsproxy-sparse`)
+  Downloaded tokio-rustls v0.26.4 (registry `rsproxy-sparse`)
+  Downloaded erased-serde v0.4.10 (registry `rsproxy-sparse`)
+  Downloaded unicode-ident v1.0.24 (registry `rsproxy-sparse`)
+  Downloaded semver v1.0.28 (registry `rsproxy-sparse`)
+  Downloaded plist v1.9.0 (registry `rsproxy-sparse`)
+  Downloaded jobserver v0.1.34 (registry `rsproxy-sparse`)
+  Downloaded hashbrown v0.15.5 (registry `rsproxy-sparse`)
+  Downloaded try-lock v0.2.5 (registry `rsproxy-sparse`)
+  Downloaded digest v0.10.7 (registry `rsproxy-sparse`)
+  Downloaded bytes v1.11.1 (registry `rsproxy-sparse`)
+  Downloaded glib-sys v0.18.1 (registry `rsproxy-sparse`)
+  Downloaded foldhash v0.2.0 (registry `rsproxy-sparse`)
+  Downloaded tinystr v0.8.3 (registry `rsproxy-sparse`)
+  Downloaded toml_datetime v0.7.5+spec-1.1.0 (registry `rsproxy-sparse`)
+  Downloaded http-body-util v0.1.3 (registry `rsproxy-sparse`)
+  Downloaded proc-macro-error v1.0.4 (registry `rsproxy-sparse`)
+  Downloaded thiserror v2.0.18 (registry `rsproxy-sparse`)
+  Downloaded hyper-rustls v0.27.9 (registry `rsproxy-sparse`)
+  Downloaded dom_query v0.27.0 (registry `rsproxy-sparse`)
+  Downloaded endi v1.1.1 (registry `rsproxy-sparse`)
+  Downloaded time-macros v0.2.27 (registry `rsproxy-sparse`)
+  Downloaded tokio v1.52.3 (registry `rsproxy-sparse`)
+  Downloaded num-conv v0.2.2 (registry `rsproxy-sparse`)
+  Downloaded croner v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded arrayvec v0.7.6 (registry `rsproxy-sparse`)
+  Downloaded gtk-sys v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded grep-searcher v0.1.16 (registry `rsproxy-sparse`)
+  Downloaded x11 v2.21.0 (registry `rsproxy-sparse`)
+  Downloaded tokio-macros v2.7.0 (registry `rsproxy-sparse`)
+  Downloaded bstr v1.12.1 (registry `rsproxy-sparse`)
+  Downloaded tower-service v0.3.3 (registry `rsproxy-sparse`)
+  Downloaded tokio-tungstenite v0.29.0 (registry `rsproxy-sparse`)
+  Downloaded tauri-plugin-opener v2.5.4 (registry `rsproxy-sparse`)
+  Downloaded crc32fast v1.5.0 (registry `rsproxy-sparse`)
+  Downloaded icu_normalizer v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded phf_codegen v0.11.3 (registry `rsproxy-sparse`)
+  Downloaded serde_urlencoded v0.7.1 (registry `rsproxy-sparse`)
+  Downloaded tokio-util v0.7.18 (registry `rsproxy-sparse`)
+  Downloaded tracing-attributes v0.1.31 (registry `rsproxy-sparse`)
+  Downloaded rand_chacha v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded cfg-expr v0.15.8 (registry `rsproxy-sparse`)
+  Downloaded encoding_rs v0.8.35 (registry `rsproxy-sparse`)
+  Downloaded tao v0.34.8 (registry `rsproxy-sparse`)
+  Downloaded proc-macro-crate v3.5.0 (registry `rsproxy-sparse`)
+  Downloaded precomputed-hash v0.1.1 (registry `rsproxy-sparse`)
+  Downloaded camino v1.2.2 (registry `rsproxy-sparse`)
+  Downloaded dtoa-short v0.3.5 (registry `rsproxy-sparse`)
+  Downloaded zerovec-derive v0.11.3 (registry `rsproxy-sparse`)
+  Downloaded rustls-native-certs v0.8.4 (registry `rsproxy-sparse`)
+  Downloaded icu_properties v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded zerotrie v0.2.4 (registry `rsproxy-sparse`)
+  Downloaded blocking v1.6.2 (registry `rsproxy-sparse`)
+  Downloaded foldhash v0.1.5 (registry `rsproxy-sparse`)
+  Downloaded serde_core v1.0.228 (registry `rsproxy-sparse`)
+  Downloaded rusqlite v0.32.1 (registry `rsproxy-sparse`)
+  Downloaded tinyvec v1.11.0 (registry `rsproxy-sparse`)
+  Downloaded html5ever v0.38.0 (registry `rsproxy-sparse`)
+  Downloaded urlpattern v0.3.0 (registry `rsproxy-sparse`)
+  Downloaded field-offset v0.3.6 (registry `rsproxy-sparse`)
+  Downloaded toml_datetime v1.1.1+spec-1.1.0 (registry `rsproxy-sparse`)
+  Downloaded tower-layer v0.3.3 (registry `rsproxy-sparse`)
+  Downloaded futures-core v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded ico v0.5.0 (registry `rsproxy-sparse`)
+  Downloaded icu_provider v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded idna v1.1.0 (registry `rsproxy-sparse`)
+  Downloaded quick-xml v0.39.4 (registry `rsproxy-sparse`)
+  Downloaded glob v0.3.3 (registry `rsproxy-sparse`)
+  Downloaded fixedbitset v0.4.2 (registry `rsproxy-sparse`)
+  Downloaded icu_normalizer_data v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded tinyvec_macros v0.1.1 (registry `rsproxy-sparse`)
+  Downloaded ipnet v2.12.0 (registry `rsproxy-sparse`)
+  Downloaded serde_path_to_error v0.1.20 (registry `rsproxy-sparse`)
+  Downloaded is-docker v0.2.0 (registry `rsproxy-sparse`)
+  Downloaded getrandom v0.3.4 (registry `rsproxy-sparse`)
+  Downloaded tower v0.5.3 (registry `rsproxy-sparse`)
+  Downloaded url v2.5.8 (registry `rsproxy-sparse`)
+  Downloaded heck v0.4.1 (registry `rsproxy-sparse`)
+  Downloaded json-patch v3.0.1 (registry `rsproxy-sparse`)
+  Downloaded bytemuck v1.25.0 (registry `rsproxy-sparse`)
+  Downloaded zbus_macros v5.16.0 (registry `rsproxy-sparse`)
+  Downloaded data-encoding v2.11.0 (registry `rsproxy-sparse`)
+  Downloaded winnow v0.7.15 (registry `rsproxy-sparse`)
+  Downloaded zvariant_utils v3.4.0 (registry `rsproxy-sparse`)
+  Downloaded thiserror v1.0.69 (registry `rsproxy-sparse`)
+  Downloaded gdk v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded html5ever v0.29.1 (registry `rsproxy-sparse`)
+  Downloaded enumflags2_derive v0.7.12 (registry `rsproxy-sparse`)
+  Downloaded tauri-utils v2.9.2 (registry `rsproxy-sparse`)
+  Downloaded serde v1.0.228 (registry `rsproxy-sparse`)
+  Downloaded equivalent v1.0.2 (registry `rsproxy-sparse`)
+  Downloaded walkdir v2.5.0 (registry `rsproxy-sparse`)
+  Downloaded writeable v0.6.3 (registry `rsproxy-sparse`)
+  Downloaded tower-http v0.6.11 (registry `rsproxy-sparse`)
+  Downloaded darling v0.23.0 (registry `rsproxy-sparse`)
+  Downloaded zvariant v5.12.0 (registry `rsproxy-sparse`)
+  Downloaded gio-sys v0.18.1 (registry `rsproxy-sparse`)
+  Downloaded serde_derive_internals v0.29.1 (registry `rsproxy-sparse`)
+  Downloaded deranged v0.5.8 (registry `rsproxy-sparse`)
+  Downloaded event-listener v5.4.1 (registry `rsproxy-sparse`)
+  Downloaded async-io v2.6.0 (registry `rsproxy-sparse`)
+  Downloaded dlopen2_derive v0.4.3 (registry `rsproxy-sparse`)
+  Downloaded zbus v5.16.0 (registry `rsproxy-sparse`)
+  Downloaded futf v0.1.5 (registry `rsproxy-sparse`)
+  Downloaded crossbeam-utils v0.8.21 (registry `rsproxy-sparse`)
+  Downloaded hashlink v0.9.1 (registry `rsproxy-sparse`)
+  Downloaded parking_lot v0.12.5 (registry `rsproxy-sparse`)
+  Downloaded enumflags2 v0.7.12 (registry `rsproxy-sparse`)
+  Downloaded zbus_names v4.3.2 (registry `rsproxy-sparse`)
+  Downloaded ctor-proc-macro v0.0.7 (registry `rsproxy-sparse`)
+  Downloaded cargo-platform v0.1.9 (registry `rsproxy-sparse`)
+  Downloaded dpi v0.1.2 (registry `rsproxy-sparse`)
+  Downloaded form_urlencoded v1.2.2 (registry `rsproxy-sparse`)
+  Downloaded schemars v0.8.22 (registry `rsproxy-sparse`)
+  Downloaded hmac v0.12.1 (registry `rsproxy-sparse`)
+  Downloaded derive_more v0.99.20 (registry `rsproxy-sparse`)
+  Downloaded icu_collections v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded futures-channel v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded utf8_iter v1.0.4 (registry `rsproxy-sparse`)
+  Downloaded blake3 v1.8.5 (registry `rsproxy-sparse`)
+  Downloaded ctor v0.8.0 (registry `rsproxy-sparse`)
+  Downloaded gdk-pixbuf-sys v0.18.0 (registry `rsproxy-sparse`)
+  Downloaded indexmap v1.9.3 (registry `rsproxy-sparse`)
+  Downloaded bitflags v2.13.0 (registry `rsproxy-sparse`)
+  Downloaded bitflags v1.3.2 (registry `rsproxy-sparse`)
+  Downloaded either v1.16.0 (registry `rsproxy-sparse`)
+  Downloaded generic-array v0.14.7 (registry `rsproxy-sparse`)
+  Downloaded tauri-plugin v2.6.2 (registry `rsproxy-sparse`)
+  Downloaded httparse v1.10.1 (registry `rsproxy-sparse`)
+  Downloaded derive_more v2.1.1 (registry `rsproxy-sparse`)
+  Downloaded async-signal v0.2.14 (registry `rsproxy-sparse`)
+  Downloaded base64 v0.22.1 (registry `rsproxy-sparse`)
+  Downloaded unic-ucd-version v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded cargo_metadata v0.19.2 (registry `rsproxy-sparse`)
+  Downloaded cairo-sys-rs v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded zerovec v0.11.6 (registry `rsproxy-sparse`)
+  Downloaded git2 v0.20.4 (registry `rsproxy-sparse`)
+  Downloaded futures-macro v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded unicase v2.9.0 (registry `rsproxy-sparse`)
+  Downloaded untrusted v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded chrono v0.4.45 (registry `rsproxy-sparse`)
+  Downloaded cargo_toml v0.22.3 (registry `rsproxy-sparse`)
+  Downloaded same-file v1.0.6 (registry `rsproxy-sparse`)
+  Downloaded tree-sitter v0.24.7 (registry `rsproxy-sparse`)
+  Downloaded dirs-sys v0.5.0 (registry `rsproxy-sparse`)
+  Downloaded brotli v8.0.3 (registry `rsproxy-sparse`)
+  Downloaded yoke v0.8.3 (registry `rsproxy-sparse`)
+  Downloaded errno v0.3.14 (registry `rsproxy-sparse`)
+  Downloaded streaming-iterator v0.1.9 (registry `rsproxy-sparse`)
+  Downloaded tree-sitter-javascript v0.23.1 (registry `rsproxy-sparse`)
+  Downloaded gdk-pixbuf v0.18.5 (registry `rsproxy-sparse`)
+  Downloaded cpufeatures v0.3.0 (registry `rsproxy-sparse`)
+  Downloaded javascriptcore-rs-sys v1.1.1 (registry `rsproxy-sparse`)
+  Downloaded ryu v1.0.23 (registry `rsproxy-sparse`)
+  Downloaded version_check v0.9.5 (registry `rsproxy-sparse`)
+  Downloaded fnv v1.0.7 (registry `rsproxy-sparse`)
+  Downloaded hyper v1.10.1 (registry `rsproxy-sparse`)
+  Downloaded time v0.3.47 (registry `rsproxy-sparse`)
+  Downloaded bs58 v0.5.1 (registry `rsproxy-sparse`)
+  Downloaded event-listener-strategy v0.5.4 (registry `rsproxy-sparse`)
+  Downloaded darling_core v0.23.0 (registry `rsproxy-sparse`)
+  Downloaded strsim v0.11.1 (registry `rsproxy-sparse`)
+  Downloaded bit-vec v0.8.0 (registry `rsproxy-sparse`)
+  Downloaded serde_json v1.0.150 (registry `rsproxy-sparse`)
+  Downloaded rustls-platform-verifier v0.7.0 (registry `rsproxy-sparse`)
+  Downloaded typeid v1.0.3 (registry `rsproxy-sparse`)
+  Downloaded crossbeam-channel v0.5.15 (registry `rsproxy-sparse`)
+  Downloaded glib-macros v0.18.5 (registry `rsproxy-sparse`)
+  Downloaded is-wsl v0.4.0 (registry `rsproxy-sparse`)
+  Downloaded autocfg v1.5.1 (registry `rsproxy-sparse`)
+  Downloaded futures-util v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded gdkx11-sys v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded version-compare v0.2.1 (registry `rsproxy-sparse`)
+  Downloaded fxhash v0.2.1 (registry `rsproxy-sparse`)
+  Downloaded ident_case v1.0.1 (registry `rsproxy-sparse`)
+  Downloaded unic-ucd-ident v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded bit-set v0.8.0 (registry `rsproxy-sparse`)
+  Downloaded encoding_rs_io v0.1.7 (registry `rsproxy-sparse`)
+  Downloaded getrandom v0.4.2 (registry `rsproxy-sparse`)
+  Downloaded ignore v0.4.26 (registry `rsproxy-sparse`)
+  Downloaded itoa v1.0.18 (registry `rsproxy-sparse`)
+  Downloaded globset v0.4.18 (registry `rsproxy-sparse`)
+  Downloaded powerfmt v0.2.0 (registry `rsproxy-sparse`)
+  Downloaded dlopen2 v0.8.2 (registry `rsproxy-sparse`)
+  Downloaded dunce v1.0.5 (registry `rsproxy-sparse`)
+  Downloaded want v0.3.1 (registry `rsproxy-sparse`)
+  Downloaded utf-8 v0.7.6 (registry `rsproxy-sparse`)
+  Downloaded x11-dl v2.21.0 (registry `rsproxy-sparse`)
+  Downloaded cssparser v0.36.0 (registry `rsproxy-sparse`)
+  Downloaded webkit2gtk v2.0.2 (registry `rsproxy-sparse`)
+  Downloaded find-msvc-tools v0.1.9 (registry `rsproxy-sparse`)
+  Downloaded dtoa v1.0.11 (registry `rsproxy-sparse`)
+  Downloaded idna_adapter v1.2.2 (registry `rsproxy-sparse`)
+  Downloaded async-broadcast v0.7.2 (registry `rsproxy-sparse`)
+  Downloaded unicode-segmentation v1.13.3 (registry `rsproxy-sparse`)
+  Downloaded toml v1.1.2+spec-1.1.0 (registry `rsproxy-sparse`)
+  Downloaded icu_locale_core v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded image v0.25.10 (registry `rsproxy-sparse`)
+  Downloaded tree-sitter-typescript v0.23.2 (registry `rsproxy-sparse`)
+  Downloaded unic-common v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded tauri-winres v0.3.6 (registry `rsproxy-sparse`)
+  Downloaded tree-sitter-python v0.23.6 (registry `rsproxy-sparse`)
+  Downloaded fdeflate v0.3.7 (registry `rsproxy-sparse`)
+  Downloaded rustix v1.1.4 (registry `rsproxy-sparse`)
+  Downloaded futures-lite v2.6.1 (registry `rsproxy-sparse`)
+  Downloaded winnow v0.5.40 (registry `rsproxy-sparse`)
+  Downloaded concurrent-queue v2.5.0 (registry `rsproxy-sparse`)
+  Downloaded grep-matcher v0.1.8 (registry `rsproxy-sparse`)
+  Downloaded flate2 v1.1.9 (registry `rsproxy-sparse`)
+  Downloaded http-body v1.0.1 (registry `rsproxy-sparse`)
+  Downloaded typenum v1.20.1 (registry `rsproxy-sparse`)
+  Downloaded derive_more-impl v2.1.1 (registry `rsproxy-sparse`)
+  Downloaded gobject-sys v0.18.0 (registry `rsproxy-sparse`)
+  Downloaded brotli-decompressor v5.0.1 (registry `rsproxy-sparse`)
+  Downloaded gtk3-macros v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded tauri-runtime v2.10.1 (registry `rsproxy-sparse`)
+  Downloaded zvariant_derive v5.12.0 (registry `rsproxy-sparse`)
+  Downloaded dirs v6.0.0 (registry `rsproxy-sparse`)
+  Downloaded http v1.4.2 (registry `rsproxy-sparse`)
+  Downloaded embed-resource v3.0.9 (registry `rsproxy-sparse`)
+  Downloaded zmij v1.0.21 (registry `rsproxy-sparse`)
+  Downloaded hashbrown v0.14.5 (registry `rsproxy-sparse`)
+  Downloaded infer v0.19.0 (registry `rsproxy-sparse`)
+  Downloaded tree-sitter-rust v0.23.3 (registry `rsproxy-sparse`)
+  Downloaded gdkx11 v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded futures-executor v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded toml_writer v1.1.1+spec-1.1.0 (registry `rsproxy-sparse`)
+  Downloaded uuid v1.23.3 (registry `rsproxy-sparse`)
+  Downloaded cc v1.2.63 (registry `rsproxy-sparse`)
+  Downloaded tracing-core v0.1.36 (registry `rsproxy-sparse`)
+  Downloaded httpdate v1.0.3 (registry `rsproxy-sparse`)
+  Downloaded zeroize v1.8.2 (registry `rsproxy-sparse`)
+  Downloaded unsafe-libyaml v0.2.11 (registry `rsproxy-sparse`)
+  Downloaded yoke-derive v0.8.2 (registry `rsproxy-sparse`)
+  Downloaded thiserror-impl v2.0.18 (registry `rsproxy-sparse`)
+  Downloaded keyboard-types v0.7.0 (registry `rsproxy-sparse`)
+  Downloaded icu_properties_data v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded unic-char-property v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded cookie v0.18.1 (registry `rsproxy-sparse`)
+  Downloaded crossbeam-deque v0.8.6 (registry `rsproxy-sparse`)
+  Downloaded glib v0.18.5 (registry `rsproxy-sparse`)
+  Downloaded futures-task v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded libsqlite3-sys v0.30.1 (registry `rsproxy-sparse`)
+  Downloaded chrono-tz v0.10.4 (registry `rsproxy-sparse`)
+  Downloaded linux-raw-sys v0.12.1 (registry `rsproxy-sparse`)
+   Compiling libc v0.2.186
+   Compiling displaydoc v0.2.6
+   Compiling fastrand v2.4.1
+   Compiling futures-util v0.3.32
+   Compiling bitflags v2.13.0
+   Compiling num-traits v0.2.19
+   Compiling getrandom v0.3.4
+   Compiling zeroize v1.8.2
+   Compiling phf_generator v0.13.1
+   Compiling rustls-pki-types v1.14.1
+   Compiling phf_codegen v0.13.1
+   Compiling string_cache_codegen v0.6.1
+   Compiling phf_macros v0.13.1
+   Compiling selectors v0.36.1
+   Compiling rustix v1.1.4
+   Compiling glib-sys v0.18.1
+   Compiling parking_lot_core v0.9.12
+   Compiling errno v0.3.14
+   Compiling parking_lot v0.12.5
+   Compiling gobject-sys v0.18.0
+   Compiling cairo-sys-rs v0.18.2
+   Compiling signal-hook-registry v1.4.8
+   Compiling mio v1.2.1
+   Compiling gio-sys v0.18.1
+   Compiling pango-sys v0.18.0
+   Compiling atk-sys v0.18.2
+   Compiling web_atoms v0.2.4
+   Compiling socket2 v0.6.4
+   Compiling getrandom v0.4.2
+   Compiling dirs-sys v0.5.0
+   Compiling uuid v1.23.3
+   Compiling tokio v1.52.3
+   Compiling dirs v6.0.0
+   Compiling javascriptcore-rs-sys v1.1.1
+   Compiling gdk-pixbuf-sys v0.18.0
+   Compiling soup3-sys v0.5.0
+   Compiling futures-executor v0.3.32
+   Compiling gdk-sys v0.18.2
+   Compiling tinystr v0.8.3
+   Compiling zerotrie v0.2.4
+   Compiling glib v0.18.5
+   Compiling icu_locale_core v2.2.0
+   Compiling icu_collections v2.2.0
+   Compiling gtk-sys v0.18.2
+   Compiling phf v0.13.1
+   Compiling cssparser v0.36.0
+   Compiling icu_provider v2.2.0
+   Compiling icu_normalizer v2.2.0
+   Compiling icu_properties v2.2.0
+   Compiling markup5ever v0.38.0
+   Compiling idna_adapter v1.2.2
+   Compiling html5ever v0.38.0
+   Compiling idna v1.1.0
+   Compiling url v2.5.8
+   Compiling x11 v2.21.0
+   Compiling urlpattern v0.3.0
+   Compiling schemars v0.8.22
+   Compiling dom_query v0.27.0
+   Compiling gdkx11-sys v0.18.2
+   Compiling webkit2gtk-sys v2.0.2
+   Compiling cfb v0.7.3
+   Compiling tauri-utils v2.9.2
+   Compiling tokio-util v0.7.18
+   Compiling infer v0.19.0
+   Compiling gio v0.18.4
+   Compiling cairo-rs v0.18.5
+   Compiling atk v0.18.2
+   Compiling javascriptcore-rs v1.1.2
+   Compiling x11-dl v2.21.0
+   Compiling rustls v0.23.40
+   Compiling linux-raw-sys v0.12.1
+   Compiling rustls-webpki v0.103.13
+   Compiling libappindicator-sys v0.9.0
+   Compiling dlopen2 v0.8.2
+   Compiling h2 v0.4.14
+   Compiling gdkwayland-sys v0.18.2
+   Compiling moxcms v0.8.1
+   Compiling chrono v0.4.45
+   Compiling rand_core v0.9.5
+   Compiling rand_chacha v0.9.0
+   Compiling hyper v1.10.1
+   Compiling polling v3.11.0
+   Compiling tauri-build v2.6.2
+   Compiling tauri-codegen v2.6.2
+   Compiling hyper-util v0.1.20
+   Compiling async-io v2.6.0
+   Compiling image v0.25.10
+   Compiling app_paths v0.1.0 (/work/src-tauri/crates/app-paths)
+   Compiling tower v0.5.3
+   Compiling rustls-native-certs v0.8.4
+   Compiling async-signal v0.2.14
+   Compiling tokio-rustls v0.26.4
+   Compiling tauri-plugin v2.6.2
+   Compiling rand v0.9.4
+   Compiling libz-sys v1.1.29
+   Compiling inotify-sys v0.1.5
+   Compiling inotify v0.11.2
+   Compiling tungstenite v0.29.0
+   Compiling async-process v2.5.0
+   Compiling libgit2-sys v0.18.5+1.9.4
+   Compiling hyper-rustls v0.27.9
+   Compiling gdk-pixbuf v0.18.5
+   Compiling pango v0.18.3
+   Compiling soup3 v0.5.0
+   Compiling tower-http v0.6.11
+   Compiling rustls-platform-verifier v0.7.0
+   Compiling memmap2 v0.9.10
+   Compiling zbus v5.16.0
+   Compiling open v5.3.5
+   Compiling notify v8.2.0
+   Compiling gdk v0.18.2
+   Compiling reqwest v0.13.4
+   Compiling grep-searcher v0.1.16
+   Compiling git2 v0.20.4
+   Compiling tokio-tungstenite v0.29.0
+   Compiling database v0.1.0 (/work/src-tauri/crates/database)
+   Compiling core_types v0.1.0 (/work/src-tauri/crates/types)
+   Compiling axum v0.8.9
+   Compiling gtk v0.18.2
+   Compiling gdkx11 v0.18.2
+   Compiling chrono-tz v0.10.4
+   Compiling orgtrack_sync v0.1.0 (/work/src-tauri/crates/orgtrack-sync)
+   Compiling app_utils v0.1.0 (/work/src-tauri/crates/app-utils)
+   Compiling croner v2.2.0
+   Compiling hmac v0.12.1
+   Compiling tauri v2.10.3
+   Compiling tauri-macros v2.5.5
+   Compiling tauri-plugin-opener v2.5.4
+   Compiling webkit2gtk v2.0.2
+   Compiling libappindicator v0.9.0
+   Compiling muda v0.17.2
+   Compiling tao v0.34.8
+   Compiling tray-icon v0.21.3
+   Compiling tauri-runtime v2.10.1
+   Compiling wry v0.54.4
+   Compiling tauri-runtime-wry v2.10.1
+   Compiling search v0.1.0 (/work/src-tauri/crates/search)
+   Compiling git v0.1.0 (/work/src-tauri/crates/git)
+   Compiling project_management v0.1.0 (/work/src-tauri/crates/project-management)
+error[E0063]: missing field `workspace_id` in initializer of `project::ProjectMeta`
+  --> crates/project-management/src/project_service/mod.rs:90:16
+   |
+90 |     let meta = ProjectMeta {
+   |                ^^^^^^^^^^^ missing `workspace_id`
+
+error[E0063]: missing field `workspace_id` in initializer of `project::ProjectMeta`
+   --> crates/project-management/src/projects/io/projects.rs:667:16
+    |
+667 |     let meta = ProjectMeta {
+    |                ^^^^^^^^^^^ missing `workspace_id`
+
+error[E0063]: missing field `workspace_id` in initializer of `project::ProjectMeta`
+   --> crates/project-management/src/sync/collab_bridge/apply.rs:343:24
+    |
+343 |             let meta = ProjectMeta {
+    |                        ^^^^^^^^^^^ missing `workspace_id`
+
+For more information about this error, try `rustc --explain E0063`.
+error: could not compile `project_management` (lib) due to 3 previous errors
+[prepare-sidecars] org2-pm build failed

@@ -511,7 +511,7 @@ fn review_side_query_config(provenance: &RuntimeProvenance) -> SideQueryConfig {
         temperature: 0.0,
         // A Journey review is not a bounded turn. It carries no
         // Journey-specific output budget.
-        max_tokens: None,
+        max_tokens: 4096,
         structured: Some(StructuredOutput {
             tool_name: "提交分叉审核".into(),
             schema,

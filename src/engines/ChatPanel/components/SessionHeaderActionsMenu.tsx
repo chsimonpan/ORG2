@@ -10,7 +10,6 @@ import {
   PanelLeft,
   PanelRight,
   RefreshCw,
-  Search,
   Share2,
 } from "lucide-react";
 import React from "react";
@@ -167,16 +166,6 @@ export const SessionHeaderActionsMenu: React.FC<
               zIndex: 9999,
             }}
           >
-            {showTranscriptActions && (
-              <button
-                type="button"
-                className={`${DROPDOWN_CLASSES.item} ${DROPDOWN_CLASSES.itemHover} w-full text-left`}
-                onClick={handleOpenSearch}
-              >
-                <Search size={DROPDOWN_ITEM.iconSize} strokeWidth={1.75} />
-                <span className="flex-1 truncate">{t("chat.findInChat")}</span>
-              </button>
-            )}
             <button
               type="button"
               className={`${DROPDOWN_CLASSES.item} ${DROPDOWN_CLASSES.itemHover} w-full text-left disabled:cursor-not-allowed disabled:opacity-50`}

@@ -198,6 +198,8 @@ fn claude_native_key_info_exposes_output_config_effort_variants() {
         reasoning: Some("always_on".to_string()),
         fast: false,
         context_window: Some(200_000),
+        context_window_override: None,
+        reasoning_effort_override: None,
     }];
 
     let info = KeyInfo::from(key);
@@ -556,6 +558,8 @@ fn relay_claude_code_key_gets_no_synthesized_effort_variants() {
         reasoning: None,
         fast: false,
         context_window: Some(128_000),
+        context_window_override: None,
+        reasoning_effort_override: None,
     }];
 
     let info = KeyInfo::from(key);
@@ -579,6 +583,8 @@ fn third_party_anthropic_protocol_key_keeps_record_rows_untouched() {
         reasoning: None,
         fast: false,
         context_window: Some(131_072),
+        context_window_override: None,
+        reasoning_effort_override: None,
     }];
 
     let info = KeyInfo::from(key);

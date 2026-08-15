@@ -23,6 +23,7 @@ use serde_json::{json, Value};
 use std::sync::OnceLock;
 
 use crate::providers::model_capabilities::{classify_family, ModelFamily};
+use key_vault::key_store::{ModelVariant, ReasoningEffort, KEY_SERVICE};
 
 /// User-selectable reasoning effort, independent of provider protocol.
 /// Mirrors the frontend `MODEL_REASONING_LEVEL`.
@@ -50,7 +51,7 @@ impl ReasoningLevel {
             "medium" => Some(Self::Medium),
             "high" => Some(Self::High),
             "extra" | "extra-high" | "xhigh" => Some(Self::ExtraHigh),
-            "max" | "ultra" => Some(Self::Max),
+            "max" => Some(Self::Max),
             "ultracode" => Some(Self::Ultracode),
             _ => None,
         }
@@ -117,7 +118,6 @@ const SUFFIX_TOKENS: &[&str] = &[
     "extra-high",
     "xhigh",
     "max",
-    "ultra",
     "ultracode",
     "minimal",
     "thinking",
@@ -187,6 +187,51 @@ pub fn parse_model_variant(model: &str) -> ParsedVariant {
         thinking,
         fast,
     }
+}
+
+/// Resolve the user-selected reasoning effort without changing provider
+/// request transport. An explicit ORG2 suffix always wins; absent one, the
+/// Key Vault per-model override applies; absent both, `None` leaves the
+/// provider/model's established default unchanged.
+pub fn resolve_effective_reasoning_effort(
+    model: &str,
+    account_id: Option<&str>,
+) -> Option<ReasoningLevel> {
+    let variants = account_id
+        .and_then(|account_id| KEY_SERVICE.get_key_by_id(account_id))
+        .map(|key| key.model_variants)
+        .unwrap_or_default();
+    resolve_effective_reasoning_effort_with_variants(model, &variants)
+}
+
+fn resolve_effective_reasoning_effort_with_variants(
+    model: &str,
+    variants: &[ModelVariant],
+) -> Option<ReasoningLevel> {
+    let parsed = parse_model_variant(model);
+    if parsed.level.is_some() {
+        return parsed.level;
+    }
+
+    variants
+        .iter()
+        .find(|variant| variant.model == model)
+        .or_else(|| {
+            variants.iter().find(|variant| {
+                variant.model == parsed.base_model || variant.base_model == parsed.base_model
+            })
+        })
+        .and_then(|variant| variant.reasoning_effort_override)
+        .map(|effort| match effort {
+            ReasoningEffort::None => ReasoningLevel::None,
+            ReasoningEffort::Baseline => ReasoningLevel::Baseline,
+            ReasoningEffort::Low => ReasoningLevel::Low,
+            ReasoningEffort::Medium => ReasoningLevel::Medium,
+            ReasoningEffort::High => ReasoningLevel::High,
+            ReasoningEffort::ExtraHigh => ReasoningLevel::ExtraHigh,
+            ReasoningEffort::Max => ReasoningLevel::Max,
+            ReasoningEffort::Ultracode => ReasoningLevel::Ultracode,
+        })
 }
 
 // ── Reasoning trigger words ─────────────────────────────────────────────────
@@ -608,8 +653,69 @@ pub fn resolve_openai_compat_thinking(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use key_vault::key_store::ModelVariant;
 
     use crate::providers::registry::provider_id;
+
+    #[test]
+    fn suffix_reasoning_effort_beats_key_vault_override() {
+        let variants = vec![ModelVariant {
+            model: "gpt-5.5".to_string(),
+            base_model: "gpt-5.5".to_string(),
+            reasoning: None,
+            fast: false,
+            context_window: None,
+            context_window_override: None,
+            reasoning_effort_override: Some(ReasoningEffort::Low),
+        }];
+
+        assert_eq!(
+            resolve_effective_reasoning_effort_with_variants("gpt-5.5-high", &variants),
+            Some(ReasoningLevel::High)
+        );
+        assert_eq!(
+            resolve_effective_reasoning_effort_with_variants("gpt-5.5", &variants),
+            Some(ReasoningLevel::Low)
+        );
+        assert_eq!(
+            resolve_effective_reasoning_effort_with_variants("gpt-5.5", &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn exact_variant_effort_precedes_base_fallback_regardless_of_order() {
+        let base = ModelVariant {
+            model: "gpt-5.5".to_string(),
+            base_model: "gpt-5.5".to_string(),
+            reasoning: None,
+            fast: false,
+            context_window: None,
+            context_window_override: None,
+            reasoning_effort_override: Some(ReasoningEffort::Low),
+        };
+        let exact = ModelVariant {
+            model: "gpt-5.5-fast".to_string(),
+            base_model: "gpt-5.5".to_string(),
+            reasoning: None,
+            fast: true,
+            context_window: None,
+            context_window_override: None,
+            reasoning_effort_override: Some(ReasoningEffort::Medium),
+        };
+
+        assert_eq!(
+            resolve_effective_reasoning_effort_with_variants(
+                "gpt-5.5-fast",
+                &[base.clone(), exact.clone()]
+            ),
+            Some(ReasoningLevel::Medium)
+        );
+        assert_eq!(
+            resolve_effective_reasoning_effort_with_variants("gpt-5.5-fast", &[exact, base]),
+            Some(ReasoningLevel::Medium)
+        );
+    }
 
     // ── parse_model_variant ────────────────────────────────────────────────
 
@@ -643,14 +749,6 @@ mod tests {
         assert_eq!(p.base_model, "claude-fable-5");
         assert_eq!(p.level, Some(ReasoningLevel::Ultracode));
         assert!(!p.thinking);
-    }
-
-    #[test]
-    fn parses_codex_ultra_as_max() {
-        let p = parse_model_variant("gpt-5.6-sol-ultra-fast");
-        assert_eq!(p.base_model, "gpt-5.6-sol");
-        assert_eq!(p.level, Some(ReasoningLevel::Max));
-        assert!(p.fast);
     }
 
     #[test]

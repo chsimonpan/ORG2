@@ -133,6 +133,8 @@ pub enum ModelType {
     BedrockApi,
     /// Fully user-defined gateway: the user supplies base URL and protocol.
     CustomApi,
+    /// OpenAI-compatible embedding-only credential. Never used for chat.
+    EmbeddingApi,
     AzureOpenaiApi,
     /// Azure-hosted Anthropic gateway. Same auth shape as `AzureOpenaiApi`
     /// (an Azure resource key + base URL) but routed through the Anthropic
@@ -198,6 +200,7 @@ impl ModelType {
             ModelType::CherryinApi => "cherryin_api",
             ModelType::BedrockApi => "bedrock_api",
             ModelType::CustomApi => "custom_api",
+            ModelType::EmbeddingApi => "embedding_api",
             ModelType::AzureOpenaiApi => "azure_openai_api",
             ModelType::AzureAnthropicApi => "azure_anthropic_api",
             ModelType::OrgiiOrchestrator => "orgii_orchestrator",
@@ -260,6 +263,7 @@ impl ModelType {
             "cherryin_api" | "cherryin" => Some(ModelType::CherryinApi),
             "bedrock_api" | "bedrock" => Some(ModelType::BedrockApi),
             "custom_api" | "custom" => Some(ModelType::CustomApi),
+            "embedding_api" | "embedding" => Some(ModelType::EmbeddingApi),
             "azure_openai_api" | "azure_openai" | "azure" => Some(ModelType::AzureOpenaiApi),
             "azure_anthropic_api" | "azure_anthropic" => Some(ModelType::AzureAnthropicApi),
             "orgii_orchestrator" | "orgii" => Some(ModelType::OrgiiOrchestrator),
@@ -436,6 +440,9 @@ pub struct ModelKey {
     pub last_validated_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub enabled_models: Vec<String>,
+    /// Explicit model used for side queries, constrained to this account.
+    #[serde(default)]
+    pub side_query_model: Option<String>,
     #[serde(default)]
     pub model_aliases: Vec<ModelAlias>,
     #[serde(default)]
@@ -493,6 +500,25 @@ pub struct ModelVariant {
     /// `None` when the provider did not report one (official OpenAI/Anthropic).
     #[serde(default)]
     pub context_window: Option<u64>,
+    /// Explicit runtime override, independent from provider discovery.
+    #[serde(default)]
+    pub context_window_override: Option<u64>,
+    /// User-selected reasoning effort; None means provider/model default.
+    #[serde(default)]
+    pub reasoning_effort_override: Option<ReasoningEffort>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningEffort {
+    None,
+    Baseline,
+    Low,
+    Medium,
+    High,
+    ExtraHigh,
+    Max,
+    Ultracode,
 }
 
 /// A user-chosen default variant for one base model family. `base_model` is
@@ -530,6 +556,7 @@ impl ModelKey {
             last_validation_error: None,
             last_validated_at: None,
             enabled_models: Vec::new(),
+            side_query_model: None,
             model_aliases: Vec::new(),
             model_variants: Vec::new(),
             default_variants: Vec::new(),

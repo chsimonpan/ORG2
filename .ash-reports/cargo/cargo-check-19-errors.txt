@@ -1,0 +1,29 @@
+782:error[E0432]: unresolved import `super::slash::handle_browse_selection`
+788:error[E0425]: cannot find function `load_llm_history_for_active_journey` in module `unified_persistence`
+794:error[E0425]: cannot find function `load_llm_history_for_active_journey` in module `crate::session::persistence`
+808:error[E0308]: mismatched types
+832:error[E0308]: mismatched types
+841:error[E0308]: mismatched types
+865:error[E0308]: mismatched types
+889:error[E0308]: mismatched types
+913:error[E0308]: mismatched types
+937:error[E0308]: mismatched types
+946:error[E0308]: mismatched types
+955:error[E0308]: mismatched types
+964:error[E0308]: mismatched types
+988:error[E0308]: mismatched types
+1012:error[E0599]: no associated function or constant named `new_with_account` found for struct `OpenAIResponsesClient` in the current scope
+1029:error[E0308]: mismatched types
+1052:error[E0308]: mismatched types
+1076:error[E0609]: no field `account_id` on type `&OpenAIResponsesClient`
+1084:error[E0061]: this function takes 6 arguments but 7 arguments were supplied
+1119:error[E0609]: no field `account_id` on type `&OpenAIResponsesClient`
+1127:error[E0061]: this function takes 6 arguments but 7 arguments were supplied
+1162:error[E0609]: no field `text_only_wire` on type `ModelCapabilities`
+1170:error[E0560]: struct `UnifiedSessionRecord` has no field named `parent_session_relation`
+1178:error[E0308]: mismatched types
+1187:error[E0609]: no field `side_query_model` on type `ModelKey`
+1195:error[E0599]: no variant, associated function, or constant named `EmbeddingApi` found for enum `ModelType` in the current scope
+1201:error[E0277]: the size for values of type `str` cannot be known at compilation time
+1210:error[E0277]: the size for values of type `str` cannot be known at compilation time
+1219:error[E0277]: the size for values of type `str` cannot be known at compilation time

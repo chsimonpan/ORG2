@@ -1,0 +1,136 @@
+M  src/ActionSystem/actionIds.ts
+ M src/ActionSystem/actions/sessionActions.zod.ts
+ M src/api/tauri/rpc/procedures/agentSession.ts
+ M src/api/tauri/rpc/procedures/index.ts
+ M src/api/tauri/rpc/procedures/validation.ts
+ M src/api/tauri/rpc/router.ts
+M  src/api/tauri/rpc/schemas/agentOrgs.ts
+ M src/api/tauri/rpc/schemas/index.ts
+ M src/api/tauri/rpc/schemas/validationValueObjects.ts
+M  src/app/root/e2e/helpers/accounts.ts
+M  src/app/root/e2e/helpers/sessionConfig.ts
+ D src/config/settingsSchema/__tests__/autoUpdateDefault.test.ts
+ M src/engines/ChatPanel/ChatHistory/components/PinnedTurnHeader.tsx
+ M src/engines/ChatPanel/ChatHistory/components/TurnPaginationControls.tsx
+ M src/engines/ChatPanel/ChatHistory/exactTargetNavigation.ts
+ M src/engines/ChatPanel/ChatHistory/index.tsx
+ M src/engines/ChatPanel/blocks/ToolCallBlock/helpers/index.ts
+ M src/engines/ChatPanel/blocks/ToolCallBlock/index.tsx
+ M src/engines/ChatPanel/blocks/ToolCallBlock/types.ts
+ D src/engines/ChatPanel/hooks/useInputArea/__tests__/useSubmitMessageSlash.test.ts
+ D src/engines/ChatPanel/panels/LinkSessionToProjectModal.tsx
+ M src/engines/SessionCore/hooks/useAgentADEActions.ts
+ D src/features/Org2Cloud/commentTaskRunner.test.ts
+ D src/features/Org2Cloud/commentTaskRunner.ts
+ D src/features/Org2Cloud/org2CloudSyncEngine.test.ts
+ M src/features/TaskKanban/hooks/useTaskKanbanHeader.tsx
+ D src/features/TeamCollaboration/components/SessionForkHeaderExtras/addressingComment.test.ts
+ D src/features/TeamCollaboration/components/SessionForkHeaderExtras/addressingComment.ts
+ M src/hooks/keyVault/useKeyVault.ts
+ D src/modules/MainApp/AgentOrgs/components/index.ts
+ M src/modules/MainApp/Integrations/KeyVault/Accounts/Table/AccountInlineExpandedCard.tsx
+ M src/modules/MainApp/Integrations/KeyVault/Accounts/Table/AccountModelsInlineSplit.tsx
+ M src/modules/MainApp/Integrations/KeyVault/Accounts/Table/MyAccountsTableSection.tsx
+ M src/modules/MainApp/Integrations/useIntegrationsPage.tsx
+ M src/modules/ProjectManager/ProjectManagerLayout/components/ProjectManagerContentRouter.tsx
+ M src/modules/ProjectManager/ProjectManagerLayout/hooks/useProjectTabActions.ts
+ M src/modules/ProjectManager/ProjectManagerLayout/index.tsx
+ D src/modules/ProjectManager/WorkItems/components/AgentWorkflow/SessionRunCard/index.tsx
+ D src/modules/ProjectManager/WorkItems/components/AgentWorkflow/index.tsx
+ M src/modules/ProjectManager/shared/components/PropertiesPanel/usePropertiesPanel.ts
+ D src/modules/SetupWalkthrough/steps/ThemeSelectionStep.tsx
+ M src/modules/WorkStation/AppShell/WorkstationTabHeader.tsx
+ M src/modules/WorkStation/Chat/Communication/MessageViewer/MessageBubbleRenderer.tsx
+ M src/modules/WorkStation/Chat/Communication/index.tsx
+ M src/modules/WorkStation/shared/DiffSectionList/sessionReplaySections.ts
+ M src/scaffold/GlobalSpotlight/palettes/DispatchCategoryPalette/types.ts
+ M src/scaffold/NavigationSidebar/connectors/WorkstationSidebarConnector/index.tsx
+ M src/scaffold/NavigationSidebar/connectors/WorkstationSidebarConnector/org2Tree.test.ts
+ M src/store/collaboration/protocol.ts
+ M src/store/collaboration/types.ts
+ D src/store/platform/autoUpdateAtom.ts
+ M src/store/workstation/tabs/__tests__/workspaceState.test.ts
+ M src/store/workstation/tabs/factories/project.ts
+ M src/store/workstation/tabs/types.ts
+M  src/types/extensions/types.ts
+?? .ash-cargo-check.exit
+?? .ash-cargo-check.log
+?? .ash-final-status.txt
+?? .ash-patched-first-parent.txt
+?? .ash-pnpm-install-own.exit
+?? .ash-pnpm-install-own.log
+?? .ash-pnpm-install-own.pid
+?? .ash-pnpm-install.exit
+?? .ash-pnpm-install.log
+?? .ash-reports-semantic-tsc-baseline-restored.exit
+?? .ash-reports-semantic-tsc-baseline-restored.log
+?? .ash-reports-semantic-tsc-batch1.exit
+?? .ash-reports-semantic-tsc-batch1.log
+?? .ash-reports-semantic-tsc-batch2.exit
+?? .ash-reports-semantic-tsc-batch2.log
+?? .ash-reports-semantic-tsc-batch3.exit
+?? .ash-reports-semantic-tsc-batch3.log
+?? .ash-reports-semantic-tsc-deps.exit
+?? .ash-reports-semantic-tsc-deps.log
+?? .ash-reports-semantic-tsc-field1.exit
+?? .ash-reports-semantic-tsc-field1.log
+?? .ash-reports-semantic-tsc-field2.exit
+?? .ash-reports-semantic-tsc-field2.log
+?? .ash-reports-semantic-tsc-field3.exit
+?? .ash-reports-semantic-tsc-field3.log
+?? .ash-reports-semantic-tsc-field4.exit
+?? .ash-reports-semantic-tsc-field4.log
+?? .ash-reports-semantic-tsc-fix1.exit
+?? .ash-reports-semantic-tsc-fix1.log
+?? .ash-reports-semantic-tsc-fix10.exit
+?? .ash-reports-semantic-tsc-fix10.log
+?? .ash-reports-semantic-tsc-fix11.exit
+?? .ash-reports-semantic-tsc-fix11.log
+?? .ash-reports-semantic-tsc-fix12.exit
+?? .ash-reports-semantic-tsc-fix12.log
+?? .ash-reports-semantic-tsc-fix13.exit
+?? .ash-reports-semantic-tsc-fix13.log
+?? .ash-reports-semantic-tsc-fix2.exit
+?? .ash-reports-semantic-tsc-fix2.log
+?? .ash-reports-semantic-tsc-fix3.exit
+?? .ash-reports-semantic-tsc-fix3.log
+?? .ash-reports-semantic-tsc-fix4.exit
+?? .ash-reports-semantic-tsc-fix4.log
+?? .ash-reports-semantic-tsc-fix5.exit
+?? .ash-reports-semantic-tsc-fix5.log
+?? .ash-reports-semantic-tsc-fix6.exit
+?? .ash-reports-semantic-tsc-fix6.log
+?? .ash-reports-semantic-tsc-fix7.exit
+?? .ash-reports-semantic-tsc-fix7.log
+?? .ash-reports-semantic-tsc-fix8.exit
+?? .ash-reports-semantic-tsc-fix8.log
+?? .ash-reports-semantic-tsc-fix9.exit
+?? .ash-reports-semantic-tsc-fix9.log
+?? .ash-reports-semantic-tsc-fresh.exit
+?? .ash-reports-semantic-tsc-fresh.log
+?? .ash-reports-semantic-tsc-fresh.pid
+?? .ash-reports-semantic-tsc-journey1.exit
+?? .ash-reports-semantic-tsc-journey1.log
+?? .ash-reports-semantic-tsc-journey2.exit
+?? .ash-reports-semantic-tsc-journey2.log
+?? .ash-reports-semantic-tsc-journey3.exit
+?? .ash-reports-semantic-tsc-journey3.log
+?? .ash-reports-semantic-tsc-journey4.exit
+?? .ash-reports-semantic-tsc-journey4.log
+?? .ash-reports-semantic-tsc-journey5.exit
+?? .ash-reports-semantic-tsc-journey5.log
+?? .ash-reports-semantic-tsc-journey6.exit
+?? .ash-reports-semantic-tsc-journey6.log
+?? .ash-reports-semantic-tsc-journey7.exit
+?? .ash-reports-semantic-tsc-journey7.log
+?? .ash-reports-semantic-tsc-own-deps.exit
+?? .ash-reports-semantic-tsc-own-deps.log
+?? .ash-reports-semantic-tsc.exit
+?? .ash-reports-semantic-tsc.log
+?? .ash-reports/removed-obsolete/
+?? .ash-targeted-vitest-fix.exit
+?? .ash-targeted-vitest-fix.log
+?? .ash-targeted-vitest.exit
+?? .ash-targeted-vitest.log
+?? .ash-validation.pid
+?? src/engines/ChatPanel/ChatHistory/chatMinimap.tsx

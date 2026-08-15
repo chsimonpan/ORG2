@@ -7,6 +7,7 @@
  * without rewriting the session workspace to the Workstation's current repo.
  */
 import { useAtomValue, useSetAtom } from "jotai";
+import { Search } from "lucide-react";
 import React, { memo, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -24,6 +25,7 @@ import { useSessionViewMode } from "@src/engines/ChatPanel/hooks/useSessionViewM
 import SessionViewersIndicator from "@src/features/Org2Cloud/SessionViewersIndicator";
 import { usePublishWorkstationTabHeader } from "@src/hooks/workStation";
 import { getChatPanelBackgroundStyle } from "@src/modules/shared/layouts/viewContainerTokens";
+import { TabBarTrailingIconButton } from "@src/modules/WorkStation/shared";
 import { sessionByIdAtom } from "@src/store/session";
 import type { SessionContinuation } from "@src/store/session/sessionTabPlacementAtom";
 import {
@@ -117,6 +119,17 @@ const ChatSessionTabRenderer: React.FC<UnifiedTabContentProps> = memo(
           view={sessionView}
           testIdPrefix="workstation-session"
         />
+        {!humanSession && (
+          <TabBarTrailingIconButton
+            title={t("sessions:chat.findInChat")}
+            tooltipPosition="bottom-end"
+            nativeTitle={false}
+            onClick={headerActions.handleOpenSearch}
+            data-testid="workstation-session-header-search-button"
+          >
+            <Search size={14} strokeWidth={2} />
+          </TabBarTrailingIconButton>
+        )}
         <SessionHeaderActionsMenu
           activeSessionExists={Boolean(session)}
           copyEventJsonLabel={headerActions.copyEventJsonLabel}

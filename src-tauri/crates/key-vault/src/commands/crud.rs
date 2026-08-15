@@ -57,6 +57,8 @@ impl From<ModelVariantInfo> for ModelVariant {
             reasoning: v.reasoning,
             fast: v.fast,
             context_window: v.context_window.filter(|ctx| *ctx > 0),
+            context_window_override: None,
+            reasoning_effort_override: None,
         }
     }
 }

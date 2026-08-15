@@ -27,4 +27,5 @@ pub use builders::{
     save_tool_result_msg, save_user_msg, save_user_msg_with_id,
 };
 pub use cleanup::{clear_messages, truncate_messages_from_sequence};
+pub(crate) use load_llm::{reconstruct, visible_rows};
 pub use load_llm::{compact_cutoff_sequence, load_llm_history, turns_since_last_tool_call};

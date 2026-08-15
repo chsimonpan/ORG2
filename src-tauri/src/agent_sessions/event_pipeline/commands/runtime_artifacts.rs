@@ -83,6 +83,7 @@ fn persist_runtime_orgtrack_records(
             session_id: session.session_id.clone(),
             source_event_id: Some(event.id.clone()),
             turn_id,
+            execution_turn_id: None,
             sequence_index: sequence_index as i64,
             timestamp: Some(event.created_at.clone()),
             workspace_path: event

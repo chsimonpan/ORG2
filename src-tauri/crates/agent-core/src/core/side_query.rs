@@ -249,7 +249,7 @@ pub async fn side_query_typed(
             &messages,
             tools_ref,
             model,
-            config.max_tokens,
+            Some(config.max_tokens),
             config.temperature,
             chat_options,
         )
@@ -301,7 +301,7 @@ pub async fn side_query_typed(
             &messages,
             retry_tools_ref,
             model,
-            retry_max_tokens,
+            Some(retry_max_tokens),
             config.temperature,
             chat_options,
         )

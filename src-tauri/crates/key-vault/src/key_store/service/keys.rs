@@ -135,6 +135,8 @@ impl KeyService {
                     reasoning: Some(reasoning.to_string()),
                     fast: false,
                     context_window: None,
+                    context_window_override: None,
+                    reasoning_effort_override: None,
                 });
             }
             entry.updated_at = chrono::Utc::now();
@@ -229,6 +231,8 @@ impl KeyService {
                                 reasoning: None,
                                 fast: false,
                                 context_window: Some(*ctx),
+                                context_window_override: None,
+                                reasoning_effort_override: None,
                             });
                         }
                     }

@@ -3,6 +3,12 @@
 
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::gateway::{GatewayCommand, SessionKey};
+use crate::definitions::OS_AGENT_ID;
+use crate::integrations::gateway::browse::{self, BrowseLevel, BrowseOption, BrowseState};
+use crate::session::session_id::{next_version_for, os_session_id_base, with_version};
+use crate::tools::impls::orchestration::channel::REINJECT_CHANNEL;
+use core_types::key_source::KeySource;
+use rusqlite::OptionalExtension;
 use crate::state::AgentAppState;
 use tracing::info;
 
@@ -124,6 +130,325 @@ pub(super) async fn handle_command(
     push_debug_outbound(state, &reply).await;
     Ok(None)
 }
+
+pub(super) async fn handle_browse_selection(
+    state: &AgentAppState,
+    session_key: &SessionKey,
+    number: usize,
+) -> String {
+    let loaded = tokio::task::spawn_blocking({
+        let key = session_key.clone();
+        move || browse::load(&key).map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string());
+    let Ok(Ok(Some(snapshot))) = loaded else {
+        return "浏览状态不可用，请使用 `/session tree` 重新开始。".to_string();
+    };
+    let Some(selected) = browse::selection(&snapshot, number) else {
+        return format!(
+            "请选择当前页面显示的编号（1-{}）。",
+            browse::page_slice(&snapshot).len()
+        );
+    };
+
+    match selected {
+        BrowseOption::Project {
+            workspace_id,
+            project_slug,
+            ..
+        } => start_browse_sessions(session_key, workspace_id, project_slug).await,
+        BrowseOption::Session {
+            session_id,
+            terminal_turn_id,
+            terminal_turn_status,
+        } => {
+            bind_browse_leaf(
+                state,
+                session_key,
+                &snapshot,
+                &session_id,
+                &terminal_turn_id,
+                &terminal_turn_status,
+            )
+            .await
+        }
+    }
+}
+
+async fn clear_browse_state(session_key: &SessionKey) -> Result<(), String> {
+    let key = session_key.clone();
+    tokio::task::spawn_blocking(move || browse::clear(&key).map_err(|err| err.to_string()))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+async fn start_browse_tree(session_key: &SessionKey) -> String {
+    start_browse_projects(session_key, None).await
+}
+
+async fn start_browse_projects(session_key: &SessionKey, workspace_id: Option<String>) -> String {
+    let key = session_key.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let projects = project_management::projects::io::read_all_projects()?;
+        let mut options: Vec<_> = projects
+            .into_iter()
+            .filter(|project| {
+                workspace_id
+                    .as_ref()
+                    .map(|scope| project.meta.workspace_id.as_ref() == Some(scope))
+                    .unwrap_or(true)
+            })
+            .map(|project| BrowseOption::Project {
+                workspace_id: project.meta.workspace_id,
+                project_slug: project.slug,
+                name: project.meta.name,
+            })
+            .collect();
+        options.sort_by(|a, b| browse_option_label(a).cmp(&browse_option_label(b)));
+        let state = browse::new_state(
+            &key,
+            BrowseLevel::Project,
+            workspace_id.clone(),
+            None,
+            options,
+        );
+        browse::save(&state).map_err(|err| err.to_string())?;
+        let heading = workspace_id
+            .as_deref()
+            .map(|scope| format!("工作区 {scope} 的项目"))
+            .unwrap_or_else(|| "项目".to_string());
+        Ok::<_, String>(render_browse(&state, &heading))
+    })
+    .await;
+    result
+        .unwrap_or_else(|err| Err(err.to_string()))
+        .unwrap_or_else(|err| format!("无法加载项目：{err}"))
+}
+
+async fn start_browse_sessions(
+    session_key: &SessionKey,
+    workspace_id: Option<String>,
+    project_slug: String,
+) -> String {
+    let key = session_key.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let options = terminal_session_options(Some(&project_slug))?;
+        let state = browse::new_state(
+            &key,
+            BrowseLevel::Session,
+            workspace_id,
+            Some(project_slug.clone()),
+            options,
+        );
+        browse::save(&state).map_err(|err| err.to_string())?;
+        Ok::<_, String>(render_browse(
+            &state,
+            &format!("项目 {project_slug} 的已结束会话"),
+        ))
+    })
+    .await;
+    result
+        .unwrap_or_else(|err| Err(err.to_string()))
+        .unwrap_or_else(|err| format!("无法加载会话：{err}"))
+}
+
+async fn start_browse_recent(session_key: &SessionKey) -> String {
+    let key = session_key.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let options = terminal_session_options(None)?;
+        let state = browse::new_state(&key, BrowseLevel::Session, None, None, options);
+        browse::save(&state).map_err(|err| err.to_string())?;
+        Ok::<_, String>(render_browse(&state, "最近已结束会话"))
+    })
+    .await;
+    result
+        .unwrap_or_else(|err| Err(err.to_string()))
+        .unwrap_or_else(|err| format!("无法加载最近会话：{err}"))
+}
+
+async fn move_browse_page(session_key: &SessionKey, forward: bool) -> String {
+    let key = session_key.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let Some(mut state) = browse::load(&key).map_err(|err| err.to_string())? else {
+            return Ok::<_, String>(
+                "当前没有项目树浏览状态，请使用 `/session tree` 重新开始。".to_string(),
+            );
+        };
+        let page = if forward {
+            state.page.saturating_add(1)
+        } else {
+            state.page.saturating_sub(1)
+        };
+        browse::set_page(&mut state, page);
+        browse::save(&state).map_err(|err| err.to_string())?;
+        Ok(render_browse(&state, browse_heading(&state)))
+    })
+    .await;
+    result
+        .unwrap_or_else(|err| Err(err.to_string()))
+        .unwrap_or_else(|err| format!("无法切换浏览页：{err}"))
+}
+
+async fn browse_back(session_key: &SessionKey) -> String {
+    let key = session_key.clone();
+    let state = tokio::task::spawn_blocking(move || browse::load(&key)).await;
+    let Ok(Ok(Some(state))) = state else {
+        return "当前没有项目树浏览状态，请使用 `/session tree` 重新开始。".to_string();
+    };
+    match state.level {
+        BrowseLevel::Project => start_browse_tree(session_key).await,
+        BrowseLevel::Session => match state.project_slug {
+            Some(_) => start_browse_projects(session_key, state.workspace_id).await,
+            None => start_browse_tree(session_key).await,
+        },
+    }
+}
+
+async fn bind_browse_leaf(
+    state: &AgentAppState,
+    session_key: &SessionKey,
+    snapshot: &BrowseState,
+    session_id: &str,
+    terminal_turn_id: &str,
+    terminal_turn_status: &str,
+) -> String {
+    let session_id = session_id.to_string();
+    let session_id_for_validation = session_id.clone();
+    let expected_project = snapshot.project_slug.clone();
+    let expected_turn_id = terminal_turn_id.to_string();
+    let expected_status = terminal_turn_status.to_string();
+    let checked = tokio::task::spawn_blocking(move || {
+        let Some(record) = crate::session::persistence::get_session(&session_id_for_validation)
+            .map_err(|err| err.to_string())?
+        else {
+            return Ok::<_, String>(false);
+        };
+        if expected_project.is_some() && record.project_slug != expected_project {
+            return Ok(false);
+        }
+        let conn = database::db::get_connection().map_err(|err| err.to_string())?;
+        let marker = conn
+            .query_row(
+                "SELECT last_terminal_turn_id, last_terminal_turn_status
+                 FROM agent_sessions WHERE session_id = ?1",
+                [&session_id_for_validation],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|err| err.to_string())?;
+        Ok(marker == Some((Some(expected_turn_id), Some(expected_status))))
+    })
+    .await;
+    match checked {
+        Ok(Ok(true)) => {
+            state
+                .gateway_bindings
+                .set(session_key.clone(), session_id.clone())
+                .await;
+            format!("已将当前聊天绑定到会话 `{session_id}`。最近已结束回合：`{terminal_turn_id}`（{}）。", terminal_turn_status_label(&terminal_turn_status))
+        }
+        Ok(Ok(false)) => {
+            "该会话已不属于当前浏览快照，请使用 `/session tree` 或 `/session recent` 刷新。"
+                .to_string()
+        }
+        Ok(Err(err)) => format!("无法校验会话：{err}"),
+        Err(err) => format!("无法校验会话：{err}"),
+    }
+}
+
+fn terminal_session_options(project_slug: Option<&str>) -> Result<Vec<BrowseOption>, String> {
+    let conn = database::db::get_connection().map_err(|err| err.to_string())?;
+    let mut sql = String::from(
+        "SELECT session_id, last_terminal_turn_id, last_terminal_turn_status
+         FROM agent_sessions
+         WHERE last_terminal_turn_id IS NOT NULL
+           AND last_terminal_turn_status IN ('completed', 'cancelled', 'failed')",
+    );
+    if project_slug.is_some() {
+        sql.push_str(" AND project_slug = ?1");
+    }
+    sql.push_str(" ORDER BY last_terminal_turn_at DESC, updated_at DESC LIMIT 64");
+    let mut stmt = conn.prepare(&sql).map_err(|err| err.to_string())?;
+    let mut rows = if let Some(project_slug) = project_slug {
+        stmt.query(rusqlite::params![project_slug])
+    } else {
+        stmt.query([])
+    }
+    .map_err(|err| err.to_string())?;
+    let mut options = Vec::new();
+    while let Some(row) = rows.next().map_err(|err| err.to_string())? {
+        options.push(BrowseOption::Session {
+            session_id: row.get(0).map_err(|err| err.to_string())?,
+            terminal_turn_id: row.get(1).map_err(|err| err.to_string())?,
+            terminal_turn_status: row.get(2).map_err(|err| err.to_string())?,
+        });
+    }
+    Ok(options)
+}
+
+fn render_browse(state: &BrowseState, heading: &str) -> String {
+    let mut lines = vec![format!("**{heading}**")];
+    let page = browse::page_slice(state);
+    if page.is_empty() {
+        lines.push("此层级暂无可选项。".to_string());
+    } else {
+        for (index, option) in page.iter().enumerate() {
+            lines.push(format!("{}. {}", index + 1, browse_option_label(option)));
+        }
+    }
+    lines.push(format!(
+        "第 {}/{} 页 · `/next` `/prev` · `/0` 返回",
+        state.page + 1,
+        browse::page_count(state)
+    ));
+    lines.join("\n")
+}
+
+fn browse_heading(state: &BrowseState) -> &str {
+    match state.level {
+        BrowseLevel::Project => "项目",
+        BrowseLevel::Session => "已结束会话",
+    }
+}
+
+fn browse_option_label(option: &BrowseOption) -> String {
+    match option {
+        BrowseOption::Project {
+            workspace_id,
+            project_slug,
+            name,
+        } => workspace_id
+            .as_deref()
+            .map(|workspace| format!("{project_slug} · {name}（工作区：{workspace}）"))
+            .unwrap_or_else(|| format!("{project_slug} · {name}")),
+        BrowseOption::Session {
+            session_id,
+            terminal_turn_id,
+            terminal_turn_status,
+        } => {
+            format!(
+                "{session_id} · 结束回合 `{terminal_turn_id}`（{}）",
+                terminal_turn_status_label(terminal_turn_status)
+            )
+        }
+    }
+}
+
+fn terminal_turn_status_label(status: &str) -> &str {
+    match status {
+        "completed" => "已完成",
+        "cancelled" => "已取消",
+        "failed" => "失败",
+        _ => "未知状态",
+    }
+}
+
 
 async fn handle_model_command(
     state: &AgentAppState,

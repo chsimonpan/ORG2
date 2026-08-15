@@ -398,7 +398,8 @@ impl KeyService {
             | ModelType::VllmApi
             | ModelType::AzureOpenaiApi
             | ModelType::AzureAnthropicApi
-            | ModelType::OrgiiOrchestrator => {
+            | ModelType::OrgiiOrchestrator
+            | ModelType::EmbeddingApi => {
                 // The outer match already pinned `agent_type` to one of
                 // the API-provider variants below, so the inner match
                 // is exhaustive in practice. Use `unreachable!` for the
@@ -426,6 +427,7 @@ impl KeyService {
                     ModelType::CherryinApi => "CHERRYIN_API_KEY",
                     ModelType::BedrockApi => "AWS_BEARER_TOKEN_BEDROCK",
                     ModelType::CustomApi => "CUSTOM_API_KEY",
+                    ModelType::EmbeddingApi => "EMBEDDING_API_KEY",
                     ModelType::OpenrouterApi => "OPENROUTER_API_KEY",
                     ModelType::ZenmuxApi => "ZENMUX_API_KEY",
                     ModelType::VllmApi => "VLLM_API_KEY",
@@ -567,7 +569,8 @@ impl KeyService {
             | ModelType::VllmApi
             | ModelType::AzureOpenaiApi
             | ModelType::AzureAnthropicApi
-            | ModelType::OrgiiOrchestrator => {
+            | ModelType::OrgiiOrchestrator
+            | ModelType::EmbeddingApi => {
                 // Same fail-loud principle as the non-proxy builder above:
                 // the outer match pins `agent_type` to API-provider
                 // variants, so the inner match is exhaustive. Use
@@ -594,6 +597,7 @@ impl KeyService {
                     ModelType::CherryinApi => "CHERRYIN_API_KEY",
                     ModelType::BedrockApi => "AWS_BEARER_TOKEN_BEDROCK",
                     ModelType::CustomApi => "CUSTOM_API_KEY",
+                    ModelType::EmbeddingApi => "EMBEDDING_API_KEY",
                     ModelType::OpenrouterApi => "OPENROUTER_API_KEY",
                     ModelType::ZenmuxApi => "ZENMUX_API_KEY",
                     ModelType::VllmApi => "VLLM_API_KEY",

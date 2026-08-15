@@ -384,6 +384,82 @@ pub fn load_llm_history(session_id: &str) -> SqliteResult<Vec<serde_json::Value>
     shared::load_llm_history(SESSION_TABLE_PREFIX, session_id)
 }
 
+fn append_parent_handoff_capsules(
+    journey: &crate::core::journey_lifecycle::SessionJourney,
+    mut prompt: Vec<serde_json::Value>,
+) -> Vec<serde_json::Value> {
+    prompt.extend(
+        journey
+            .parent_handoff_capsules(&journey.active_branch_id)
+            .into_iter()
+            .map(crate::core::journey_lifecycle::HandoffCapsule::synthetic_prompt_message),
+    );
+    prompt
+}
+
+/// Load provider history through the Journey visibility boundary when this is
+/// a Journey session. Legacy sessions, including ones with no memberships,
+/// retain the existing history semantics exactly.
+pub fn load_llm_history_for_active_journey(
+    session_id: &str,
+) -> SqliteResult<Vec<serde_json::Value>> {
+    let conn = get_connection()?;
+    let Some(journey) =
+        crate::core::journey_lifecycle::SqliteJourneyRepository::load(&conn, session_id)
+            .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?
+    else {
+        return load_llm_history(session_id);
+    };
+    let mut statement = conn.prepare(
+        "SELECT message_id, sequence, branch_id, task_id
+         FROM session_journey_memberships WHERE session_id = ?1",
+    )?;
+    let memberships = statement
+        .query_map([session_id], |row| {
+            Ok(
+                crate::session::journey_context_visibility::JourneyMessageMembership {
+                    message_id: row.get(0)?,
+                    sequence: row.get::<_, i64>(1)? as u64,
+                    branch_id: row.get(2)?,
+                    task_id: row.get(3)?,
+                },
+            )
+        })?
+        .collect::<SqliteResult<Vec<_>>>()?;
+    if memberships.is_empty() {
+        return load_llm_history(session_id);
+    }
+
+    let messages = shared::visible_rows(&shared::load_messages(SESSION_TABLE_PREFIX, session_id)?);
+    let persisted = messages
+        .iter()
+        .filter(|message| message.sequence >= 0)
+        .map(
+            |message| crate::session::journey_context_visibility::PersistedContextMessage {
+                message_id: message.id.clone(),
+                sequence: message.sequence as u64,
+            },
+        )
+        .collect::<Vec<_>>();
+    let visible_ids = crate::session::journey_context_visibility::project_prompt_message_ids(
+        &journey,
+        &journey.active_branch_id,
+        &persisted,
+        &memberships,
+    )
+    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+    let visible = messages
+        .into_iter()
+        .filter(|message| visible_ids.contains(&message.id))
+        .collect::<Vec<_>>();
+    let prompt = shared::reconstruct(&visible);
+    // This is the sole parent prompt assembly boundary. Capsules are appended
+    // after reconstruction so every persisted parent message retains its exact
+    // serialized order and bytes; fork transcript rows never enter `visible`.
+    Ok(append_parent_handoff_capsules(&journey, prompt))
+}
+
+
 /// Map "keep the last `tail_len` LLM messages visible" onto a durable
 /// sequence cutoff for [`append_compact_boundary`].
 pub fn compact_cutoff_sequence(session_id: &str, tail_len: usize) -> SqliteResult<i64> {

@@ -1,0 +1,1702 @@
+[prepare-sidecars] cargo build -p orgtrack-pm-cli --bin org2-pm
+    Updating `rsproxy-sparse` index
+ Downloading crates ...
+  Downloaded alloc-no-stdlib v2.0.4 (registry `rsproxy-sparse`)
+  Downloaded mac v0.1.1 (registry `rsproxy-sparse`)
+  Downloaded rand_pcg v0.2.1 (registry `rsproxy-sparse`)
+  Downloaded rand_core v0.5.1 (registry `rsproxy-sparse`)
+  Downloaded num-conv v0.2.2 (registry `rsproxy-sparse`)
+  Downloaded memmap2 v0.9.10 (registry `rsproxy-sparse`)
+  Downloaded rand_core v0.6.4 (registry `rsproxy-sparse`)
+  Downloaded log v0.4.32 (registry `rsproxy-sparse`)
+  Downloaded allocator-api2 v0.2.21 (registry `rsproxy-sparse`)
+  Downloaded ahash v0.8.12 (registry `rsproxy-sparse`)
+  Downloaded libloading v0.7.4 (registry `rsproxy-sparse`)
+  Downloaded libappindicator v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded libappindicator-sys v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded lru v0.12.5 (registry `rsproxy-sparse`)
+  Downloaded libgit2-sys v0.18.5+1.9.4 (registry `rsproxy-sparse`)
+  Downloaded markup5ever v0.14.1 (registry `rsproxy-sparse`)
+  Downloaded lock_api v0.4.14 (registry `rsproxy-sparse`)
+  Downloaded phf_codegen v0.8.0 (registry `rsproxy-sparse`)
+  Downloaded proc-macro-hack v0.5.20+deprecated (registry `rsproxy-sparse`)
+  Downloaded serde_core v1.0.228 (registry `rsproxy-sparse`)
+  Downloaded once_cell v1.21.4 (registry `rsproxy-sparse`)
+  Downloaded semver v1.0.28 (registry `rsproxy-sparse`)
+  Downloaded alloc-stdlib v0.2.2 (registry `rsproxy-sparse`)
+  Downloaded serde_with v3.21.0 (registry `rsproxy-sparse`)
+  Downloaded libsqlite3-sys v0.30.1 (registry `rsproxy-sparse`)
+  Downloaded blake3 v1.8.5 (registry `rsproxy-sparse`)
+  Downloaded socket2 v0.6.4 (registry `rsproxy-sparse`)
+  Downloaded toml_datetime v0.6.3 (registry `rsproxy-sparse`)
+  Downloaded smallvec v1.15.2 (registry `rsproxy-sparse`)
+  Downloaded rayon v1.12.0 (registry `rsproxy-sparse`)
+  Downloaded muda v0.17.2 (registry `rsproxy-sparse`)
+  Downloaded libc v0.2.186 (registry `rsproxy-sparse`)
+  Downloaded proc-macro-error v1.0.4 (registry `rsproxy-sparse`)
+  Downloaded zbus_names v4.3.2 (registry `rsproxy-sparse`)
+  Downloaded markup5ever v0.38.0 (registry `rsproxy-sparse`)
+  Downloaded memoffset v0.9.1 (registry `rsproxy-sparse`)
+  Downloaded num-traits v0.2.19 (registry `rsproxy-sparse`)
+  Downloaded ordered-stream v0.2.0 (registry `rsproxy-sparse`)
+  Downloaded kuchikiki v0.8.8-speedreader (registry `rsproxy-sparse`)
+  Downloaded soup3 v0.5.0 (registry `rsproxy-sparse`)
+  Downloaded notify-types v2.1.0 (registry `rsproxy-sparse`)
+  Downloaded scopeguard v1.2.0 (registry `rsproxy-sparse`)
+  Downloaded flate2 v1.1.9 (registry `rsproxy-sparse`)
+  Downloaded match_token v0.1.0 (registry `rsproxy-sparse`)
+  Downloaded raw-window-handle v0.6.2 (registry `rsproxy-sparse`)
+  Downloaded linux-raw-sys v0.12.1 (registry `rsproxy-sparse`)
+  Downloaded rustls-webpki v0.103.13 (registry `rsproxy-sparse`)
+  Downloaded tauri-build v2.6.2 (registry `rsproxy-sparse`)
+  Downloaded pin-project-lite v0.2.17 (registry `rsproxy-sparse`)
+  Downloaded idna_adapter v1.2.2 (registry `rsproxy-sparse`)
+  Downloaded same-file v1.0.6 (registry `rsproxy-sparse`)
+  Downloaded string_cache v0.8.9 (registry `rsproxy-sparse`)
+  Downloaded aho-corasick v1.1.4 (registry `rsproxy-sparse`)
+  Downloaded serialize-to-javascript-impl v0.1.2 (registry `rsproxy-sparse`)
+  Downloaded serde_path_to_error v0.1.20 (registry `rsproxy-sparse`)
+  Downloaded async-lock v3.4.2 (registry `rsproxy-sparse`)
+  Downloaded libz-sys v1.1.29 (registry `rsproxy-sparse`)
+  Downloaded siphasher v1.0.3 (registry `rsproxy-sparse`)
+  Downloaded ppv-lite86 v0.2.21 (registry `rsproxy-sparse`)
+  Downloaded rand v0.7.3 (registry `rsproxy-sparse`)
+  Downloaded tauri-runtime v2.10.1 (registry `rsproxy-sparse`)
+  Downloaded schemars v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded phf v0.10.1 (registry `rsproxy-sparse`)
+  Downloaded phf v0.13.1 (registry `rsproxy-sparse`)
+  Downloaded notify v8.2.0 (registry `rsproxy-sparse`)
+  Downloaded proc-macro-crate v2.0.2 (registry `rsproxy-sparse`)
+  Downloaded png v0.18.1 (registry `rsproxy-sparse`)
+  Downloaded serde_spanned v1.1.1 (registry `rsproxy-sparse`)
+  Downloaded adler2 v2.0.1 (registry `rsproxy-sparse`)
+  Downloaded rand_core v0.9.5 (registry `rsproxy-sparse`)
+  Downloaded string_cache_codegen v0.6.1 (registry `rsproxy-sparse`)
+  Downloaded target-lexicon v0.12.16 (registry `rsproxy-sparse`)
+  Downloaded tinystr v0.8.3 (registry `rsproxy-sparse`)
+  Downloaded parking v2.2.1 (registry `rsproxy-sparse`)
+  Downloaded tendril v0.4.3 (registry `rsproxy-sparse`)
+  Downloaded proc-macro-crate v1.3.1 (registry `rsproxy-sparse`)
+  Downloaded open v5.3.5 (registry `rsproxy-sparse`)
+  Downloaded serde_urlencoded v0.7.1 (registry `rsproxy-sparse`)
+  Downloaded tauri-plugin-opener v2.5.4 (registry `rsproxy-sparse`)
+  Downloaded quote v1.0.45 (registry `rsproxy-sparse`)
+  Downloaded rand v0.8.6 (registry `rsproxy-sparse`)
+  Downloaded ref-cast v1.0.25 (registry `rsproxy-sparse`)
+  Downloaded openssl-probe v0.2.1 (registry `rsproxy-sparse`)
+  Downloaded sha2 v0.10.9 (registry `rsproxy-sparse`)
+  Downloaded png v0.17.16 (registry `rsproxy-sparse`)
+  Downloaded thiserror-impl v2.0.18 (registry `rsproxy-sparse`)
+  Downloaded parking_lot v0.12.5 (registry `rsproxy-sparse`)
+  Downloaded serde_spanned v0.6.9 (registry `rsproxy-sparse`)
+  Downloaded webkit2gtk v2.0.2 (registry `rsproxy-sparse`)
+  Downloaded time-core v0.1.8 (registry `rsproxy-sparse`)
+  Downloaded ctor-proc-macro v0.0.7 (registry `rsproxy-sparse`)
+  Downloaded mio v1.2.1 (registry `rsproxy-sparse`)
+  Downloaded proc-macro2 v1.0.106 (registry `rsproxy-sparse`)
+  Downloaded rand_chacha v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded tracing-attributes v0.1.31 (registry `rsproxy-sparse`)
+  Downloaded rand_chacha v0.2.2 (registry `rsproxy-sparse`)
+  Downloaded phf_generator v0.13.1 (registry `rsproxy-sparse`)
+  Downloaded phf_shared v0.12.1 (registry `rsproxy-sparse`)
+  Downloaded potential_utf v0.1.5 (registry `rsproxy-sparse`)
+  Downloaded powerfmt v0.2.0 (registry `rsproxy-sparse`)
+  Downloaded serde_derive v1.0.228 (registry `rsproxy-sparse`)
+  Downloaded soup3-sys v0.5.0 (registry `rsproxy-sparse`)
+  Downloaded matchit v0.8.4 (registry `rsproxy-sparse`)
+  Downloaded proc-macro-error-attr v1.0.4 (registry `rsproxy-sparse`)
+  Downloaded phf v0.11.3 (registry `rsproxy-sparse`)
+  Downloaded pango-sys v0.18.0 (registry `rsproxy-sparse`)
+  Downloaded phf_generator v0.8.0 (registry `rsproxy-sparse`)
+  Downloaded pkg-config v0.3.33 (registry `rsproxy-sparse`)
+  Downloaded rand_chacha v0.3.1 (registry `rsproxy-sparse`)
+  Downloaded phf_generator v0.11.3 (registry `rsproxy-sparse`)
+  Downloaded ring v0.17.14 (registry `rsproxy-sparse`)
+  Downloaded shlex v2.0.1 (registry `rsproxy-sparse`)
+  Downloaded ctor v0.8.0 (registry `rsproxy-sparse`)
+  Downloaded pathdiff v0.2.3 (registry `rsproxy-sparse`)
+  Downloaded serde_with_macros v3.21.0 (registry `rsproxy-sparse`)
+  Downloaded crossbeam-utils v0.8.21 (registry `rsproxy-sparse`)
+  Downloaded tower-http v0.6.11 (registry `rsproxy-sparse`)
+  Downloaded enumflags2_derive v0.7.12 (registry `rsproxy-sparse`)
+  Downloaded rustc_version v0.4.1 (registry `rsproxy-sparse`)
+  Downloaded serde_repr v0.1.20 (registry `rsproxy-sparse`)
+  Downloaded servo_arc v0.2.0 (registry `rsproxy-sparse`)
+  Downloaded system-deps v6.2.2 (registry `rsproxy-sparse`)
+  Downloaded petgraph v0.6.5 (registry `rsproxy-sparse`)
+  Downloaded tao v0.34.8 (registry `rsproxy-sparse`)
+  Downloaded percent-encoding v2.3.2 (registry `rsproxy-sparse`)
+  Downloaded matches v0.1.10 (registry `rsproxy-sparse`)
+  Downloaded plist v1.9.0 (registry `rsproxy-sparse`)
+  Downloaded synstructure v0.13.2 (registry `rsproxy-sparse`)
+  Downloaded version-compare v0.2.1 (registry `rsproxy-sparse`)
+  Downloaded cairo-sys-rs v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded signal-hook-registry v1.4.8 (registry `rsproxy-sparse`)
+  Downloaded pxfm v0.1.29 (registry `rsproxy-sparse`)
+  Downloaded new_debug_unreachable v1.0.6 (registry `rsproxy-sparse`)
+  Downloaded phf_shared v0.11.3 (registry `rsproxy-sparse`)
+  Downloaded option-ext v0.2.0 (registry `rsproxy-sparse`)
+  Downloaded string_cache_codegen v0.5.4 (registry `rsproxy-sparse`)
+  Downloaded phf_shared v0.10.0 (registry `rsproxy-sparse`)
+  Downloaded crossbeam-epoch v0.9.18 (registry `rsproxy-sparse`)
+  Downloaded tokio-util v0.7.18 (registry `rsproxy-sparse`)
+  Downloaded piper v0.2.5 (registry `rsproxy-sparse`)
+  Downloaded futures-util v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded dtoa-short v0.3.5 (registry `rsproxy-sparse`)
+  Downloaded phf_shared v0.8.0 (registry `rsproxy-sparse`)
+  Downloaded tauri v2.10.3 (registry `rsproxy-sparse`)
+  Downloaded phf_codegen v0.11.3 (registry `rsproxy-sparse`)
+  Downloaded tree-sitter v0.24.7 (registry `rsproxy-sparse`)
+  Downloaded rustls-pki-types v1.14.1 (registry `rsproxy-sparse`)
+  Downloaded rand v0.9.4 (registry `rsproxy-sparse`)
+  Downloaded dlopen2_derive v0.4.3 (registry `rsproxy-sparse`)
+  Downloaded hashbrown v0.17.1 (registry `rsproxy-sparse`)
+  Downloaded serde_derive_internals v0.29.1 (registry `rsproxy-sparse`)
+  Downloaded serde-untagged v0.1.9 (registry `rsproxy-sparse`)
+  Downloaded phf_generator v0.10.0 (registry `rsproxy-sparse`)
+  Downloaded chrono-tz v0.10.4 (registry `rsproxy-sparse`)
+  Downloaded rayon-core v1.13.0 (registry `rsproxy-sparse`)
+  Downloaded quick-xml v0.39.4 (registry `rsproxy-sparse`)
+  Downloaded tauri-winres v0.3.6 (registry `rsproxy-sparse`)
+  Downloaded siphasher v0.3.11 (registry `rsproxy-sparse`)
+  Downloaded memchr v2.8.2 (registry `rsproxy-sparse`)
+  Downloaded subtle v2.6.1 (registry `rsproxy-sparse`)
+  Downloaded nodrop v0.1.14 (registry `rsproxy-sparse`)
+  Downloaded regex-automata v0.4.14 (registry `rsproxy-sparse`)
+  Downloaded tray-icon v0.21.3 (registry `rsproxy-sparse`)
+  Downloaded zerofrom v0.1.8 (registry `rsproxy-sparse`)
+  Downloaded tauri-runtime-wry v2.10.1 (registry `rsproxy-sparse`)
+  Downloaded tauri-codegen v2.6.2 (registry `rsproxy-sparse`)
+  Downloaded stable_deref_trait v1.2.1 (registry `rsproxy-sparse`)
+  Downloaded schemars_derive v0.8.22 (registry `rsproxy-sparse`)
+  Downloaded tauri-macros v2.5.5 (registry `rsproxy-sparse`)
+  Downloaded cpufeatures v0.3.0 (registry `rsproxy-sparse`)
+  Downloaded bit-set v0.8.0 (registry `rsproxy-sparse`)
+  Downloaded regex-syntax v0.8.11 (registry `rsproxy-sparse`)
+  Downloaded rustls-native-certs v0.8.4 (registry `rsproxy-sparse`)
+  Downloaded toml_writer v1.1.1+spec-1.1.0 (registry `rsproxy-sparse`)
+  Downloaded regex v1.12.4 (registry `rsproxy-sparse`)
+  Downloaded bs58 v0.5.1 (registry `rsproxy-sparse`)
+  Downloaded reqwest v0.13.4 (registry `rsproxy-sparse`)
+  Downloaded phf v0.8.0 (registry `rsproxy-sparse`)
+  Downloaded litemap v0.8.2 (registry `rsproxy-sparse`)
+  Downloaded derive_more v2.1.1 (registry `rsproxy-sparse`)
+  Downloaded servo_arc v0.4.3 (registry `rsproxy-sparse`)
+  Downloaded pango v0.18.3 (registry `rsproxy-sparse`)
+  Downloaded phf_macros v0.10.0 (registry `rsproxy-sparse`)
+  Downloaded cssparser v0.29.6 (registry `rsproxy-sparse`)
+  Downloaded glib v0.18.5 (registry `rsproxy-sparse`)
+  Downloaded serde_json v1.0.150 (registry `rsproxy-sparse`)
+  Downloaded schemars v0.8.22 (registry `rsproxy-sparse`)
+  Downloaded sync_wrapper v1.0.2 (registry `rsproxy-sparse`)
+  Downloaded unsafe-libyaml v0.2.11 (registry `rsproxy-sparse`)
+  Downloaded crypto-common v0.1.7 (registry `rsproxy-sparse`)
+  Downloaded mime_guess v2.0.5 (registry `rsproxy-sparse`)
+  Downloaded phf_shared v0.13.1 (registry `rsproxy-sparse`)
+  Downloaded zerovec-derive v0.11.3 (registry `rsproxy-sparse`)
+  Downloaded tendril v0.5.0 (registry `rsproxy-sparse`)
+  Downloaded time v0.3.47 (registry `rsproxy-sparse`)
+  Downloaded block-buffer v0.10.4 (registry `rsproxy-sparse`)
+  Downloaded miniz_oxide v0.8.9 (registry `rsproxy-sparse`)
+  Downloaded sha1 v0.10.6 (registry `rsproxy-sparse`)
+  Downloaded endi v1.1.1 (registry `rsproxy-sparse`)
+  Downloaded cfb v0.7.3 (registry `rsproxy-sparse`)
+  Downloaded tauri-utils v2.9.2 (registry `rsproxy-sparse`)
+  Downloaded hyper-util v0.1.20 (registry `rsproxy-sparse`)
+  Downloaded unic-char-property v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded zvariant v5.12.0 (registry `rsproxy-sparse`)
+  Downloaded walkdir v2.5.0 (registry `rsproxy-sparse`)
+  Downloaded urlencoding v2.1.3 (registry `rsproxy-sparse`)
+  Downloaded camino v1.2.2 (registry `rsproxy-sparse`)
+  Downloaded digest v0.10.7 (registry `rsproxy-sparse`)
+  Downloaded tree-sitter-typescript v0.23.2 (registry `rsproxy-sparse`)
+  Downloaded bytemuck v1.25.0 (registry `rsproxy-sparse`)
+  Downloaded tinyvec_macros v0.1.1 (registry `rsproxy-sparse`)
+  Downloaded thiserror v2.0.18 (registry `rsproxy-sparse`)
+  Downloaded gtk v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded typenum v1.20.1 (registry `rsproxy-sparse`)
+  Downloaded moxcms v0.8.1 (registry `rsproxy-sparse`)
+  Downloaded serialize-to-javascript v0.1.2 (registry `rsproxy-sparse`)
+  Downloaded proc-macro-crate v3.5.0 (registry `rsproxy-sparse`)
+  Downloaded selectors v0.36.1 (registry `rsproxy-sparse`)
+  Downloaded tokio v1.52.3 (registry `rsproxy-sparse`)
+  Downloaded toml_edit v0.20.2 (registry `rsproxy-sparse`)
+  Downloaded hashbrown v0.14.5 (registry `rsproxy-sparse`)
+  Downloaded string_cache v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded is-wsl v0.4.0 (registry `rsproxy-sparse`)
+  Downloaded glib-sys v0.18.1 (registry `rsproxy-sparse`)
+  Downloaded tower-layer v0.3.3 (registry `rsproxy-sparse`)
+  Downloaded webkit2gtk-sys v2.0.2 (registry `rsproxy-sparse`)
+  Downloaded schemars v1.2.1 (registry `rsproxy-sparse`)
+  Downloaded parking_lot_core v0.9.12 (registry `rsproxy-sparse`)
+  Downloaded writeable v0.6.3 (registry `rsproxy-sparse`)
+  Downloaded tinyvec v1.11.0 (registry `rsproxy-sparse`)
+  Downloaded simd-adler32 v0.3.9 (registry `rsproxy-sparse`)
+  Downloaded futures-sink v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded gtk3-macros v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded zerovec v0.11.6 (registry `rsproxy-sparse`)
+  Downloaded hex v0.4.3 (registry `rsproxy-sparse`)
+  Downloaded serde v1.0.228 (registry `rsproxy-sparse`)
+  Downloaded yoke-derive v0.8.2 (registry `rsproxy-sparse`)
+  Downloaded concurrent-queue v2.5.0 (registry `rsproxy-sparse`)
+  Downloaded thiserror-impl v1.0.69 (registry `rsproxy-sparse`)
+  Downloaded thiserror v1.0.69 (registry `rsproxy-sparse`)
+  Downloaded selectors v0.24.0 (registry `rsproxy-sparse`)
+  Downloaded syn v2.0.117 (registry `rsproxy-sparse`)
+  Downloaded web_atoms v0.2.4 (registry `rsproxy-sparse`)
+  Downloaded cargo_toml v0.22.3 (registry `rsproxy-sparse`)
+  Downloaded strsim v0.11.1 (registry `rsproxy-sparse`)
+  Downloaded rustls v0.23.40 (registry `rsproxy-sparse`)
+  Downloaded http-body v1.0.1 (registry `rsproxy-sparse`)
+  Downloaded phf_codegen v0.13.1 (registry `rsproxy-sparse`)
+  Downloaded precomputed-hash v0.1.1 (registry `rsproxy-sparse`)
+  Downloaded rusqlite v0.32.1 (registry `rsproxy-sparse`)
+  Downloaded syn v1.0.109 (registry `rsproxy-sparse`)
+  Downloaded fxhash v0.2.1 (registry `rsproxy-sparse`)
+  Downloaded toml_datetime v1.1.1+spec-1.1.0 (registry `rsproxy-sparse`)
+  Downloaded getrandom v0.1.16 (registry `rsproxy-sparse`)
+  Downloaded iana-time-zone v0.1.65 (registry `rsproxy-sparse`)
+  Downloaded base64 v0.22.1 (registry `rsproxy-sparse`)
+  Downloaded winnow v0.5.40 (registry `rsproxy-sparse`)
+  Downloaded futf v0.1.5 (registry `rsproxy-sparse`)
+  Downloaded dtoa v1.0.11 (registry `rsproxy-sparse`)
+  Downloaded async-process v2.5.0 (registry `rsproxy-sparse`)
+  Downloaded data-encoding v2.11.0 (registry `rsproxy-sparse`)
+  Downloaded autocfg v1.5.1 (registry `rsproxy-sparse`)
+  Downloaded mime v0.3.17 (registry `rsproxy-sparse`)
+  Downloaded h2 v0.4.14 (registry `rsproxy-sparse`)
+  Downloaded streaming-iterator v0.1.9 (registry `rsproxy-sparse`)
+  Downloaded icu_properties v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded axum v0.8.9 (registry `rsproxy-sparse`)
+  Downloaded icu_normalizer_data v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded toml_datetime v0.7.5+spec-1.1.0 (registry `rsproxy-sparse`)
+  Downloaded http v1.4.2 (registry `rsproxy-sparse`)
+  Downloaded polling v3.11.0 (registry `rsproxy-sparse`)
+  Downloaded hyper-rustls v0.27.9 (registry `rsproxy-sparse`)
+  Downloaded tauri-plugin v2.6.2 (registry `rsproxy-sparse`)
+  Downloaded gtk-sys v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded rustc-hash v2.1.2 (registry `rsproxy-sparse`)
+  Downloaded rustls-platform-verifier v0.7.0 (registry `rsproxy-sparse`)
+  Downloaded getrandom v0.3.4 (registry `rsproxy-sparse`)
+  Downloaded tokio-macros v2.7.0 (registry `rsproxy-sparse`)
+  Downloaded fallible-streaming-iterator v0.1.9 (registry `rsproxy-sparse`)
+  Downloaded x11 v2.21.0 (registry `rsproxy-sparse`)
+  Downloaded tungstenite v0.29.0 (registry `rsproxy-sparse`)
+  Downloaded tree-sitter-rust v0.23.3 (registry `rsproxy-sparse`)
+  Downloaded croner v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded glob v0.3.3 (registry `rsproxy-sparse`)
+  Downloaded uuid v1.23.3 (registry `rsproxy-sparse`)
+  Downloaded chrono v0.4.45 (registry `rsproxy-sparse`)
+  Downloaded utf8_iter v1.0.4 (registry `rsproxy-sparse`)
+  Downloaded darling v0.23.0 (registry `rsproxy-sparse`)
+  Downloaded ryu v1.0.23 (registry `rsproxy-sparse`)
+  Downloaded json-patch v3.0.1 (registry `rsproxy-sparse`)
+  Downloaded ref-cast-impl v1.0.25 (registry `rsproxy-sparse`)
+  Downloaded urlpattern v0.3.0 (registry `rsproxy-sparse`)
+  Downloaded time-macros v0.2.27 (registry `rsproxy-sparse`)
+  Downloaded phf v0.12.1 (registry `rsproxy-sparse`)
+  Downloaded bit-vec v0.8.0 (registry `rsproxy-sparse`)
+  Downloaded derive_more v0.99.20 (registry `rsproxy-sparse`)
+  Downloaded rustix v1.1.4 (registry `rsproxy-sparse`)
+  Downloaded dtor-proc-macro v0.0.6 (registry `rsproxy-sparse`)
+  Downloaded unicode-segmentation v1.13.3 (registry `rsproxy-sparse`)
+  Downloaded phf_macros v0.13.1 (registry `rsproxy-sparse`)
+  Downloaded http-body-util v0.1.3 (registry `rsproxy-sparse`)
+  Downloaded is-docker v0.2.0 (registry `rsproxy-sparse`)
+  Downloaded getrandom v0.4.2 (registry `rsproxy-sparse`)
+  Downloaded futures-core v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded yoke v0.8.3 (registry `rsproxy-sparse`)
+  Downloaded vcpkg v0.2.15 (registry `rsproxy-sparse`)
+  Downloaded atomic-waker v1.1.2 (registry `rsproxy-sparse`)
+  Downloaded deranged v0.5.8 (registry `rsproxy-sparse`)
+  Downloaded slab v0.4.12 (registry `rsproxy-sparse`)
+  Downloaded toml v0.8.2 (registry `rsproxy-sparse`)
+  Downloaded ident_case v1.0.1 (registry `rsproxy-sparse`)
+  Downloaded tokio-tungstenite v0.29.0 (registry `rsproxy-sparse`)
+  Downloaded nucleo-matcher v0.3.1 (registry `rsproxy-sparse`)
+  Downloaded cfg-expr v0.15.8 (registry `rsproxy-sparse`)
+  Downloaded toml v0.9.12+spec-1.1.0 (registry `rsproxy-sparse`)
+  Downloaded byteorder-lite v0.1.0 (registry `rsproxy-sparse`)
+  Downloaded unic-ucd-version v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded zmij v1.0.21 (registry `rsproxy-sparse`)
+  Downloaded ignore v0.4.26 (registry `rsproxy-sparse`)
+  Downloaded tokio-rustls v0.26.4 (registry `rsproxy-sparse`)
+  Downloaded arrayvec v0.7.6 (registry `rsproxy-sparse`)
+  Downloaded fdeflate v0.3.7 (registry `rsproxy-sparse`)
+  Downloaded errno v0.3.14 (registry `rsproxy-sparse`)
+  Downloaded toml v1.1.2+spec-1.1.0 (registry `rsproxy-sparse`)
+  Downloaded gdkx11-sys v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded brotli v8.0.3 (registry `rsproxy-sparse`)
+  Downloaded dunce v1.0.5 (registry `rsproxy-sparse`)
+  Downloaded jsonptr v0.6.3 (registry `rsproxy-sparse`)
+  Downloaded glib-macros v0.18.5 (registry `rsproxy-sparse`)
+  Downloaded serde_yaml v0.9.34+deprecated (registry `rsproxy-sparse`)
+  Downloaded displaydoc v0.2.6 (registry `rsproxy-sparse`)
+  Downloaded x11-dl v2.21.0 (registry `rsproxy-sparse`)
+  Downloaded zvariant_derive v5.12.0 (registry `rsproxy-sparse`)
+  Downloaded unic-common v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded toml_parser v1.1.2+spec-1.1.0 (registry `rsproxy-sparse`)
+  Downloaded tower v0.5.3 (registry `rsproxy-sparse`)
+  Downloaded cc v1.2.63 (registry `rsproxy-sparse`)
+  Downloaded gdkx11 v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded event-listener-strategy v0.5.4 (registry `rsproxy-sparse`)
+  Downloaded foldhash v0.1.5 (registry `rsproxy-sparse`)
+  Downloaded utf-8 v0.7.6 (registry `rsproxy-sparse`)
+  Downloaded bytes v1.11.1 (registry `rsproxy-sparse`)
+  Downloaded unicase v2.9.0 (registry `rsproxy-sparse`)
+  Downloaded cargo-platform v0.1.9 (registry `rsproxy-sparse`)
+  Downloaded axum-core v0.5.6 (registry `rsproxy-sparse`)
+  Downloaded infer v0.19.0 (registry `rsproxy-sparse`)
+  Downloaded httparse v1.10.1 (registry `rsproxy-sparse`)
+  Downloaded foldhash v0.2.0 (registry `rsproxy-sparse`)
+  Downloaded gdk-pixbuf-sys v0.18.0 (registry `rsproxy-sparse`)
+  Downloaded tree-sitter-python v0.23.6 (registry `rsproxy-sparse`)
+  Downloaded unicode-ident v1.0.24 (registry `rsproxy-sparse`)
+  Downloaded enumflags2 v0.7.12 (registry `rsproxy-sparse`)
+  Downloaded field-offset v0.3.6 (registry `rsproxy-sparse`)
+  Downloaded zbus_macros v5.16.0 (registry `rsproxy-sparse`)
+  Downloaded unic-char-range v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded darling_core v0.23.0 (registry `rsproxy-sparse`)
+  Downloaded try-lock v0.2.5 (registry `rsproxy-sparse`)
+  Downloaded grep-searcher v0.1.16 (registry `rsproxy-sparse`)
+  Downloaded cssparser v0.36.0 (registry `rsproxy-sparse`)
+  Downloaded async-signal v0.2.14 (registry `rsproxy-sparse`)
+  Downloaded winnow v0.7.15 (registry `rsproxy-sparse`)
+  Downloaded toml_edit v0.19.15 (registry `rsproxy-sparse`)
+  Downloaded async-executor v1.14.0 (registry `rsproxy-sparse`)
+  Downloaded byteorder v1.5.0 (registry `rsproxy-sparse`)
+  Downloaded crc32fast v1.5.0 (registry `rsproxy-sparse`)
+  Downloaded url v2.5.8 (registry `rsproxy-sparse`)
+  Downloaded async-task v4.7.1 (registry `rsproxy-sparse`)
+  Downloaded futures-macro v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded either v1.16.0 (registry `rsproxy-sparse`)
+  Downloaded derive_more-impl v2.1.1 (registry `rsproxy-sparse`)
+  Downloaded embed-resource v3.0.9 (registry `rsproxy-sparse`)
+  Downloaded dtor v0.3.0 (registry `rsproxy-sparse`)
+  Downloaded hashbrown v0.12.3 (registry `rsproxy-sparse`)
+  Downloaded fastrand v2.4.1 (registry `rsproxy-sparse`)
+  Downloaded async-recursion v1.1.1 (registry `rsproxy-sparse`)
+  Downloaded wry v0.54.4 (registry `rsproxy-sparse`)
+  Downloaded inotify-sys v0.1.5 (registry `rsproxy-sparse`)
+  Downloaded tracing v0.1.44 (registry `rsproxy-sparse`)
+  Downloaded typeid v1.0.3 (registry `rsproxy-sparse`)
+  Downloaded tree-sitter-language v0.1.7 (registry `rsproxy-sparse`)
+  Downloaded icu_normalizer v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded gdk-sys v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded form_urlencoded v1.2.2 (registry `rsproxy-sparse`)
+  Downloaded javascriptcore-rs v1.1.2 (registry `rsproxy-sparse`)
+  Downloaded fnv v1.0.7 (registry `rsproxy-sparse`)
+  Downloaded httpdate v1.0.3 (registry `rsproxy-sparse`)
+  Downloaded winnow v1.0.3 (registry `rsproxy-sparse`)
+  Downloaded zerotrie v0.2.4 (registry `rsproxy-sparse`)
+  Downloaded dirs-sys v0.5.0 (registry `rsproxy-sparse`)
+  Downloaded html5ever v0.38.0 (registry `rsproxy-sparse`)
+  Downloaded bstr v1.12.1 (registry `rsproxy-sparse`)
+  Downloaded dirs v6.0.0 (registry `rsproxy-sparse`)
+  Downloaded gdk-pixbuf v0.18.5 (registry `rsproxy-sparse`)
+  Downloaded async-io v2.6.0 (registry `rsproxy-sparse`)
+  Downloaded want v0.3.1 (registry `rsproxy-sparse`)
+  Downloaded globset v0.4.18 (registry `rsproxy-sparse`)
+  Downloaded itoa v1.0.18 (registry `rsproxy-sparse`)
+  Downloaded unic-ucd-ident v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded cookie v0.18.1 (registry `rsproxy-sparse`)
+  Downloaded tracing-core v0.1.36 (registry `rsproxy-sparse`)
+  Downloaded zerofrom-derive v0.1.7 (registry `rsproxy-sparse`)
+  Downloaded version_check v0.9.5 (registry `rsproxy-sparse`)
+  Downloaded constant_time_eq v0.4.2 (registry `rsproxy-sparse`)
+  Downloaded gio-sys v0.18.1 (registry `rsproxy-sparse`)
+  Downloaded fallible-iterator v0.3.0 (registry `rsproxy-sparse`)
+  Downloaded generic-array v0.14.7 (registry `rsproxy-sparse`)
+  Downloaded cpufeatures v0.2.17 (registry `rsproxy-sparse`)
+  Downloaded futures-lite v2.6.1 (registry `rsproxy-sparse`)
+  Downloaded inotify v0.11.2 (registry `rsproxy-sparse`)
+  Downloaded icu_properties_data v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded grep-matcher v0.1.8 (registry `rsproxy-sparse`)
+  Downloaded futures-task v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded image v0.25.10 (registry `rsproxy-sparse`)
+  Downloaded hmac v0.12.1 (registry `rsproxy-sparse`)
+  Downloaded zbus v5.16.0 (registry `rsproxy-sparse`)
+  Downloaded find-msvc-tools v0.1.9 (registry `rsproxy-sparse`)
+  Downloaded brotli-decompressor v5.0.1 (registry `rsproxy-sparse`)
+  Downloaded idna v1.1.0 (registry `rsproxy-sparse`)
+  Downloaded untrusted v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded zerocopy v0.8.52 (registry `rsproxy-sparse`)
+  Downloaded async-channel v2.5.0 (registry `rsproxy-sparse`)
+  Downloaded http-range v0.1.5 (registry `rsproxy-sparse`)
+  Downloaded bitflags v2.13.0 (registry `rsproxy-sparse`)
+  Downloaded cfg-if v1.0.4 (registry `rsproxy-sparse`)
+  Downloaded futures-io v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded gdk v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded heck v0.5.0 (registry `rsproxy-sparse`)
+  Downloaded zvariant_utils v3.4.0 (registry `rsproxy-sparse`)
+  Downloaded dyn-clone v1.0.20 (registry `rsproxy-sparse`)
+  Downloaded darling_macro v0.23.0 (registry `rsproxy-sparse`)
+  Downloaded hashbrown v0.15.5 (registry `rsproxy-sparse`)
+  Downloaded icu_locale_core v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded icu_provider v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded bitflags v1.3.2 (registry `rsproxy-sparse`)
+  Downloaded git2 v0.20.4 (registry `rsproxy-sparse`)
+  Downloaded futures-channel v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded gdkwayland-sys v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded dlopen2 v0.8.2 (registry `rsproxy-sparse`)
+  Downloaded icu_collections v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded arrayref v0.3.9 (registry `rsproxy-sparse`)
+  Downloaded equivalent v1.0.2 (registry `rsproxy-sparse`)
+  Downloaded keyboard-types v0.7.0 (registry `rsproxy-sparse`)
+  Downloaded crossbeam-channel v0.5.15 (registry `rsproxy-sparse`)
+  Downloaded getrandom v0.2.17 (registry `rsproxy-sparse`)
+  Downloaded async-broadcast v0.7.2 (registry `rsproxy-sparse`)
+  Downloaded hyper v1.10.1 (registry `rsproxy-sparse`)
+  Downloaded cssparser-macros v0.6.1 (registry `rsproxy-sparse`)
+  Downloaded encoding_rs_io v0.1.7 (registry `rsproxy-sparse`)
+  Downloaded cairo-rs v0.18.5 (registry `rsproxy-sparse`)
+  Downloaded tree-sitter-javascript v0.23.1 (registry `rsproxy-sparse`)
+  Downloaded toml_edit v0.25.12+spec-1.1.0 (registry `rsproxy-sparse`)
+  Downloaded zeroize v1.8.2 (registry `rsproxy-sparse`)
+  Downloaded gobject-sys v0.18.0 (registry `rsproxy-sparse`)
+  Downloaded crossbeam-deque v0.8.6 (registry `rsproxy-sparse`)
+  Downloaded blocking v1.6.2 (registry `rsproxy-sparse`)
+  Downloaded cargo_metadata v0.19.2 (registry `rsproxy-sparse`)
+  Downloaded fixedbitset v0.4.2 (registry `rsproxy-sparse`)
+  Downloaded jobserver v0.1.34 (registry `rsproxy-sparse`)
+  Downloaded ico v0.5.0 (registry `rsproxy-sparse`)
+  Downloaded erased-serde v0.4.10 (registry `rsproxy-sparse`)
+  Downloaded atk v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded indexmap v1.9.3 (registry `rsproxy-sparse`)
+  Downloaded convert_case v0.4.0 (registry `rsproxy-sparse`)
+  Downloaded futures-executor v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded atk-sys v0.18.2 (registry `rsproxy-sparse`)
+  Downloaded html5ever v0.29.1 (registry `rsproxy-sparse`)
+  Downloaded anyhow v1.0.102 (registry `rsproxy-sparse`)
+  Downloaded dom_query v0.27.0 (registry `rsproxy-sparse`)
+  Downloaded javascriptcore-rs-sys v1.1.1 (registry `rsproxy-sparse`)
+  Downloaded event-listener v5.4.1 (registry `rsproxy-sparse`)
+  Downloaded indexmap v2.14.0 (registry `rsproxy-sparse`)
+  Downloaded dpi v0.1.2 (registry `rsproxy-sparse`)
+  Downloaded heck v0.4.1 (registry `rsproxy-sparse`)
+  Downloaded ipnet v2.12.0 (registry `rsproxy-sparse`)
+  Downloaded tower-service v0.3.3 (registry `rsproxy-sparse`)
+  Downloaded hashlink v0.9.1 (registry `rsproxy-sparse`)
+  Downloaded grep-regex v0.1.14 (registry `rsproxy-sparse`)
+  Downloaded gio v0.18.4 (registry `rsproxy-sparse`)
+  Downloaded async-trait v0.1.89 (registry `rsproxy-sparse`)
+  Downloaded encoding_rs v0.8.35 (registry `rsproxy-sparse`)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.47s
+[prepare-sidecars] staged /work/src-tauri/binaries/org2-pm-x86_64-unknown-linux-gnu
+ Downloading crates ...
+  Downloaded arboard v3.6.1 (registry `rsproxy-sparse`)
+  Downloaded asn1-rs-impl v0.2.0 (registry `rsproxy-sparse`)
+  Downloaded pdf-extract v0.7.12 (registry `rsproxy-sparse`)
+  Downloaded pem-rfc7468 v0.7.0 (registry `rsproxy-sparse`)
+  Downloaded asn1-rs v0.6.2 (registry `rsproxy-sparse`)
+  Downloaded pest_generator v2.8.6 (registry `rsproxy-sparse`)
+  Downloaded sqlx-core v0.8.6 (registry `rsproxy-sparse`)
+  Downloaded pest_derive v2.8.6 (registry `rsproxy-sparse`)
+  Downloaded portable-pty v0.9.0 (registry `rsproxy-sparse`)
+  Downloaded rmcp-macros v1.7.0 (registry `rsproxy-sparse`)
+  Downloaded rusticata-macros v4.1.0 (registry `rsproxy-sparse`)
+  Downloaded prost-build v0.14.4 (registry `rsproxy-sparse`)
+  Downloaded pkcs1 v0.7.5 (registry `rsproxy-sparse`)
+  Downloaded aes v0.8.4 (registry `rsproxy-sparse`)
+  Downloaded async-stream v0.3.6 (registry `rsproxy-sparse`)
+  Downloaded postscript v0.14.1 (registry `rsproxy-sparse`)
+  Downloaded adobe-cmap-parser v0.4.1 (registry `rsproxy-sparse`)
+  Downloaded shell-words v1.1.1 (registry `rsproxy-sparse`)
+  Downloaded pkcs8 v0.10.2 (registry `rsproxy-sparse`)
+  Downloaded rmcp v1.7.0 (registry `rsproxy-sparse`)
+  Downloaded pom v1.1.0 (registry `rsproxy-sparse`)
+  Downloaded prost-types v0.14.4 (registry `rsproxy-sparse`)
+  Downloaded prost-derive v0.14.4 (registry `rsproxy-sparse`)
+  Downloaded rangemap v1.7.1 (registry `rsproxy-sparse`)
+  Downloaded base64ct v1.8.3 (registry `rsproxy-sparse`)
+  Downloaded unicode-bidi v0.3.18 (registry `rsproxy-sparse`)
+  Downloaded quick-error v2.0.1 (registry `rsproxy-sparse`)
+  Downloaded asn1-rs-derive v0.5.1 (registry `rsproxy-sparse`)
+  Downloaded pest_meta v2.8.6 (registry `rsproxy-sparse`)
+  Downloaded pest v2.8.6 (registry `rsproxy-sparse`)
+  Downloaded serde-value v0.7.0 (registry `rsproxy-sparse`)
+  Downloaded quinn-proto v0.11.14 (registry `rsproxy-sparse`)
+  Downloaded prettyplease v0.2.37 (registry `rsproxy-sparse`)
+  Downloaded rust-ini v0.21.3 (registry `rsproxy-sparse`)
+  Downloaded typed-path v0.12.3 (registry `rsproxy-sparse`)
+  Downloaded tauri-plugin-notification v2.3.3 (registry `rsproxy-sparse`)
+  Downloaded atoi_simd v0.17.0 (registry `rsproxy-sparse`)
+  Downloaded prost v0.14.4 (registry `rsproxy-sparse`)
+  Downloaded xz2 v0.1.7 (registry `rsproxy-sparse`)
+  Downloaded zstd-safe v7.2.4 (registry `rsproxy-sparse`)
+  Downloaded thread_local v1.1.9 (registry `rsproxy-sparse`)
+  Downloaded zerocopy-derive v0.8.52 (registry `rsproxy-sparse`)
+  Downloaded crc v3.4.0 (registry `rsproxy-sparse`)
+  Downloaded whoami v1.6.1 (registry `rsproxy-sparse`)
+  Downloaded crc-catalog v2.5.0 (registry `rsproxy-sparse`)
+  Downloaded sqlx-postgres v0.8.6 (registry `rsproxy-sparse`)
+  Downloaded num-iter v0.1.45 (registry `rsproxy-sparse`)
+  Downloaded sysinfo v0.38.4 (registry `rsproxy-sparse`)
+  Downloaded sqlx v0.8.6 (registry `rsproxy-sparse`)
+  Downloaded home v0.5.12 (registry `rsproxy-sparse`)
+  Downloaded prost-reflect v0.16.5 (registry `rsproxy-sparse`)
+  Downloaded nix v0.28.0 (registry `rsproxy-sparse`)
+  Downloaded der v0.7.10 (registry `rsproxy-sparse`)
+  Downloaded const-random v0.1.18 (registry `rsproxy-sparse`)
+  Downloaded quinn-udp v0.5.14 (registry `rsproxy-sparse`)
+  Downloaded ucd-trie v0.1.7 (registry `rsproxy-sparse`)
+  Downloaded value-trait v0.12.1 (registry `rsproxy-sparse`)
+  Downloaded yasna v0.5.2 (registry `rsproxy-sparse`)
+  Downloaded tauri-plugin-updater v2.9.0 (registry `rsproxy-sparse`)
+  Downloaded spki v0.7.3 (registry `rsproxy-sparse`)
+  Downloaded lru-slab v0.1.2 (registry `rsproxy-sparse`)
+  Downloaded hashbrown v0.16.1 (registry `rsproxy-sparse`)
+  Downloaded notify-rust v4.17.0 (registry `rsproxy-sparse`)
+  Downloaded hkdf v0.12.4 (registry `rsproxy-sparse`)
+  Downloaded serial2 v0.2.37 (registry `rsproxy-sparse`)
+  Downloaded which v8.0.3 (registry `rsproxy-sparse`)
+  Downloaded simdutf8 v0.1.5 (registry `rsproxy-sparse`)
+  Downloaded file-id v0.2.3 (registry `rsproxy-sparse`)
+  Downloaded filetime v0.2.29 (registry `rsproxy-sparse`)
+  Downloaded sse-stream v0.2.3 (registry `rsproxy-sparse`)
+  Downloaded async-stream-impl v0.3.6 (registry `rsproxy-sparse`)
+  Downloaded cfg_aliases v0.2.1 (registry `rsproxy-sparse`)
+  Downloaded notify-debouncer-full v0.6.0 (registry `rsproxy-sparse`)
+  Downloaded tauri-plugin-auth-session v0.2.2 (registry `rsproxy-sparse`)
+  Downloaded futures v0.3.32 (registry `rsproxy-sparse`)
+  Downloaded tiff v0.11.3 (registry `rsproxy-sparse`)
+  Downloaded type1-encoding-parser v0.1.1 (registry `rsproxy-sparse`)
+  Downloaded bumpalo v3.20.3 (registry `rsproxy-sparse`)
+  Downloaded bollard v0.21.0 (registry `rsproxy-sparse`)
+  Downloaded hyperlocal v0.9.1 (registry `rsproxy-sparse`)
+  Downloaded tiny-keccak v2.0.2 (registry `rsproxy-sparse`)
+  Downloaded lsp-types v0.97.0 (registry `rsproxy-sparse`)
+  Downloaded unicode-properties v0.1.4 (registry `rsproxy-sparse`)
+  Downloaded float-cmp v0.10.0 (registry `rsproxy-sparse`)
+  Downloaded minisign-verify v0.2.5 (registry `rsproxy-sparse`)
+  Downloaded rfd v0.16.0 (registry `rsproxy-sparse`)
+  Downloaded lzma-sys v0.1.20 (registry `rsproxy-sparse`)
+  Downloaded crossbeam-queue v0.3.12 (registry `rsproxy-sparse`)
+  Downloaded ordered-float v2.10.1 (registry `rsproxy-sparse`)
+  Downloaded bollard-stubs v1.53.1-rc.29.3.1 (registry `rsproxy-sparse`)
+  Downloaded cfg_aliases v0.1.1 (registry `rsproxy-sparse`)
+  Downloaded bit-set v0.5.3 (registry `rsproxy-sparse`)
+  Downloaded minimal-lexical v0.2.1 (registry `rsproxy-sparse`)
+  Downloaded nu-ansi-term v0.50.3 (registry `rsproxy-sparse`)
+  Downloaded xattr v1.6.1 (registry `rsproxy-sparse`)
+  Downloaded similar v2.7.0 (registry `rsproxy-sparse`)
+  Downloaded zip v2.4.2 (registry `rsproxy-sparse`)
+  Downloaded quinn v0.11.9 (registry `rsproxy-sparse`)
+  Downloaded shared_child v1.1.1 (registry `rsproxy-sparse`)
+  Downloaded signature v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded pem v3.0.6 (registry `rsproxy-sparse`)
+  Downloaded euclid v0.20.14 (registry `rsproxy-sparse`)
+  Downloaded zlib-rs v0.6.3 (registry `rsproxy-sparse`)
+  Downloaded tauri-plugin-shell v2.3.5 (registry `rsproxy-sparse`)
+  Downloaded filedescriptor v0.8.3 (registry `rsproxy-sparse`)
+  Downloaded zune-jpeg v0.5.15 (registry `rsproxy-sparse`)
+  Downloaded bzip2-sys v0.1.13+1.0.8 (registry `rsproxy-sparse`)
+  Downloaded libm v0.2.16 (registry `rsproxy-sparse`)
+  Downloaded process-wrap v9.1.0 (registry `rsproxy-sparse`)
+  Downloaded num-bigint v0.4.6 (registry `rsproxy-sparse`)
+  Downloaded csv v1.4.0 (registry `rsproxy-sparse`)
+  Downloaded bit-vec v0.6.3 (registry `rsproxy-sparse`)
+  Downloaded signal-hook v0.3.18 (registry `rsproxy-sparse`)
+  Downloaded der-parser v9.0.0 (registry `rsproxy-sparse`)
+  Downloaded sqlx-macros v0.8.6 (registry `rsproxy-sparse`)
+  Downloaded petgraph v0.8.3 (registry `rsproxy-sparse`)
+  Downloaded weezl v0.1.12 (registry `rsproxy-sparse`)
+  Downloaded rsa v0.9.10 (registry `rsproxy-sparse`)
+  Downloaded symlink v0.1.0 (registry `rsproxy-sparse`)
+  Downloaded futures-intrusive v0.5.0 (registry `rsproxy-sparse`)
+  Downloaded tauri-plugin-deep-link v2.4.9 (registry `rsproxy-sparse`)
+  Downloaded nom v7.1.3 (registry `rsproxy-sparse`)
+  Downloaded os_pipe v1.2.3 (registry `rsproxy-sparse`)
+  Downloaded rcgen v0.13.2 (registry `rsproxy-sparse`)
+  Downloaded cipher v0.4.4 (registry `rsproxy-sparse`)
+  Downloaded sqlx-mysql v0.8.6 (registry `rsproxy-sparse`)
+  Downloaded halfbrown v0.4.0 (registry `rsproxy-sparse`)
+  Downloaded zip v7.2.0 (registry `rsproxy-sparse`)
+  Downloaded downcast-rs v1.2.1 (registry `rsproxy-sparse`)
+  Downloaded oauth2 v5.0.0 (registry `rsproxy-sparse`)
+  Downloaded tauri-plugin-store v2.4.3 (registry `rsproxy-sparse`)
+  Downloaded web_atoms v0.1.3 (registry `rsproxy-sparse`)
+  Downloaded num-bigint-dig v0.8.6 (registry `rsproxy-sparse`)
+  Downloaded html5ever v0.31.0 (registry `rsproxy-sparse`)
+  Downloaded zeroize_derive v1.4.3 (registry `rsproxy-sparse`)
+  Downloaded rustc-hash v1.1.0 (registry `rsproxy-sparse`)
+  Downloaded tauri-plugin-fs v2.4.5 (registry `rsproxy-sparse`)
+  Downloaded tauri-plugin-single-instance v2.4.2 (registry `rsproxy-sparse`)
+  Downloaded oid-registry v0.7.1 (registry `rsproxy-sparse`)
+  Downloaded webpki-roots v1.0.7 (registry `rsproxy-sparse`)
+  Downloaded dotenvy v0.15.7 (registry `rsproxy-sparse`)
+  Downloaded codepage v0.1.2 (registry `rsproxy-sparse`)
+  Downloaded html2text v0.14.4 (registry `rsproxy-sparse`)
+  Downloaded unicode-width v0.2.2 (registry `rsproxy-sparse`)
+  Downloaded utoipa v5.5.0 (registry `rsproxy-sparse`)
+  Downloaded tracing-log v0.2.0 (registry `rsproxy-sparse`)
+  Downloaded csv-core v0.1.13 (registry `rsproxy-sparse`)
+  Downloaded flume v0.11.1 (registry `rsproxy-sparse`)
+  Downloaded sharded-slab v0.1.7 (registry `rsproxy-sparse`)
+  Downloaded deflate64 v0.1.12 (registry `rsproxy-sparse`)
+  Downloaded json5 v0.4.1 (registry `rsproxy-sparse`)
+  Downloaded zune-core v0.5.1 (registry `rsproxy-sparse`)
+  Downloaded num-integer v0.1.46 (registry `rsproxy-sparse`)
+  Downloaded utoipa-gen v5.5.0 (registry `rsproxy-sparse`)
+  Downloaded crunchy v0.2.4 (registry `rsproxy-sparse`)
+  Downloaded instant v0.1.13 (registry `rsproxy-sparse`)
+  Downloaded fast-float2 v0.2.3 (registry `rsproxy-sparse`)
+  Downloaded itertools v0.14.0 (registry `rsproxy-sparse`)
+  Downloaded rustls-pemfile v2.2.0 (registry `rsproxy-sparse`)
+  Downloaded zstd v0.13.3 (registry `rsproxy-sparse`)
+  Downloaded tokio-stream v0.1.18 (registry `rsproxy-sparse`)
+  Downloaded tar v0.4.46 (registry `rsproxy-sparse`)
+  Downloaded ordered-multimap v0.7.3 (registry `rsproxy-sparse`)
+  Downloaded gethostname v1.1.0 (registry `rsproxy-sparse`)
+  Downloaded fax v0.2.7 (registry `rsproxy-sparse`)
+  Downloaded fluent-uri v0.1.4 (registry `rsproxy-sparse`)
+  Downloaded hashlink v0.10.0 (registry `rsproxy-sparse`)
+  Downloaded nix v0.31.3 (registry `rsproxy-sparse`)
+  Downloaded pbkdf2 v0.12.2 (registry `rsproxy-sparse`)
+  Downloaded inout v0.1.4 (registry `rsproxy-sparse`)
+  Downloaded unicode-normalization v0.1.25 (registry `rsproxy-sparse`)
+  Downloaded constant_time_eq v0.3.1 (registry `rsproxy-sparse`)
+  Downloaded spin v0.9.8 (registry `rsproxy-sparse`)
+  Downloaded markup5ever v0.16.2 (registry `rsproxy-sparse`)
+  Downloaded lopdf v0.34.0 (registry `rsproxy-sparse`)
+  Downloaded tauri-plugin-dialog v2.6.0 (registry `rsproxy-sparse`)
+  Downloaded fixedbitset v0.5.7 (registry `rsproxy-sparse`)
+  Downloaded bzip2 v0.5.2 (registry `rsproxy-sparse`)
+  Downloaded md-5 v0.10.6 (registry `rsproxy-sparse`)
+  Downloaded tauri-plugin-oauth v2.0.0 (registry `rsproxy-sparse`)
+  Downloaded zstd-sys v2.0.16+zstd.1.5.7 (registry `rsproxy-sparse`)
+  Downloaded x509-parser v0.16.0 (registry `rsproxy-sparse`)
+  Downloaded pastey v0.2.3 (registry `rsproxy-sparse`)
+  Downloaded x11rb v0.13.2 (registry `rsproxy-sparse`)
+  Downloaded dlv-list v0.5.2 (registry `rsproxy-sparse`)
+  Downloaded fancy-regex v0.13.0 (registry `rsproxy-sparse`)
+  Downloaded drag v2.1.1 (registry `rsproxy-sparse`)
+  Downloaded sqlx-macros-core v0.8.6 (registry `rsproxy-sparse`)
+  Downloaded tauri-plugin-process v2.3.1 (registry `rsproxy-sparse`)
+  Downloaded lzma-rs v0.3.0 (registry `rsproxy-sparse`)
+  Downloaded calamine v0.35.0 (registry `rsproxy-sparse`)
+  Downloaded tiktoken-rs v0.9.1 (registry `rsproxy-sparse`)
+  Downloaded sigchld v0.2.4 (registry `rsproxy-sparse`)
+  Downloaded const-oid v0.9.6 (registry `rsproxy-sparse`)
+  Downloaded tauri-plugin-drag v2.1.1 (registry `rsproxy-sparse`)
+  Downloaded backoff v0.4.0 (registry `rsproxy-sparse`)
+  Downloaded reqwest v0.12.28 (registry `rsproxy-sparse`)
+  Downloaded sqlx-sqlite v0.8.6 (registry `rsproxy-sparse`)
+  Downloaded tempfile v3.27.0 (registry `rsproxy-sparse`)
+  Downloaded const-random-macro v0.1.16 (registry `rsproxy-sparse`)
+  Downloaded matchers v0.2.0 (registry `rsproxy-sparse`)
+  Downloaded multimap v0.10.1 (registry `rsproxy-sparse`)
+  Downloaded debug_unsafe v0.1.4 (registry `rsproxy-sparse`)
+  Downloaded image-webp v0.2.4 (registry `rsproxy-sparse`)
+  Downloaded stringprep v0.1.5 (registry `rsproxy-sparse`)
+  Downloaded rust_xlsxwriter v0.95.0 (registry `rsproxy-sparse`)
+  Downloaded lazy_static v1.5.0 (registry `rsproxy-sparse`)
+  Downloaded webpki-roots v0.26.11 (registry `rsproxy-sparse`)
+  Downloaded zopfli v0.8.3 (registry `rsproxy-sparse`)
+  Downloaded schemars_derive v1.2.1 (registry `rsproxy-sparse`)
+  Downloaded tracing-subscriber v0.3.23 (registry `rsproxy-sparse`)
+  Downloaded x11rb-protocol v0.13.2 (registry `rsproxy-sparse`)
+  Downloaded half v2.7.1 (registry `rsproxy-sparse`)
+  Downloaded atoi v2.0.0 (registry `rsproxy-sparse`)
+  Downloaded tracing-appender v0.2.5 (registry `rsproxy-sparse`)
+  Downloaded simd-json v0.17.0 (registry `rsproxy-sparse`)
+warning: variable does not need to be mutable
+   --> crates/integrations/src/github/detect.rs:117:9
+    |
+117 |     let mut executables = vec![PathBuf::from("gh")];
+    |         ----^^^^^^^^^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unreachable expression
+  --> crates/integrations/src/proxy/cert_install.rs:44:5
+   |
+29 |         return ca_path.exists() || ca_path_rh.exists();
+   |         ---------------------------------------------- any code following this expression is unreachable
+...
+44 |     false
+   |     ^^^^^ unreachable expression
+   |
+   = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `integrations` (lib) generated 2 warnings (run `cargo fix --lib -p integrations` to apply 1 suggestion)
+warning: function `get_process_name_ps` is never used
+   --> crates/terminal/src/pty_commands/pty.rs:906:4
+    |
+906 | fn get_process_name_ps(pid: u32) -> Option<String> {
+    |    ^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `terminal` (lib) generated 1 warning
+    Checking agent_core v0.1.0 (/work/src-tauri/crates/agent-core)
+   Compiling org2 v0.1.0 (/work/src-tauri)
+warning: unused import: `std::process::Command`
+ --> crates/system-services/src/network.rs:6:5
+  |
+6 | use std::process::Command;
+  |     ^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `COMMAND_TIMEOUT_MS` is never used
+  --> crates/system-services/src/workspace_ports/scanner.rs:18:7
+   |
+18 | const COMMAND_TIMEOUT_MS: u64 = 4_000;
+   |       ^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `COMMAND_OUTPUT_LIMIT_BYTES` is never used
+  --> crates/system-services/src/workspace_ports/scanner.rs:19:7
+   |
+19 | const COMMAND_OUTPUT_LIMIT_BYTES: usize = 2 * 1024 * 1024;
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: associated functions `new` and `timeout` are never used
+   --> crates/system-services/src/workspace_ports/scanner.rs:327:8
+    |
+326 | impl ScanError {
+    | -------------- associated functions in this implementation
+327 |     fn new(message: impl Into<String>) -> Self {
+    |        ^^^
+...
+334 |     fn timeout(message: impl Into<String>) -> Self {
+    |        ^^^^^^^
+
+warning: function `run_command` is never used
+   --> crates/system-services/src/workspace_ports/scanner.rs:374:4
+    |
+374 | fn run_command(program: &str, args: &[&str]) -> Result<String, ScanError> {
+    |    ^^^^^^^^^^^
+
+warning: function `parse_address_with_port` is never used
+   --> crates/system-services/src/workspace_ports/scanner.rs:568:4
+    |
+568 | fn parse_address_with_port(value: &str) -> Option<ParsedAddress> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `system_services` (lib) generated 6 warnings (run `cargo fix --lib -p system_services` to apply 1 suggestion)
+error[E0432]: unresolved import `super::slash::handle_browse_selection`
+  --> crates/agent-core/src/state/commands/channel_handler/dispatch.rs:22:20
+   |
+22 | use super::slash::{handle_browse_selection, handle_command};
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^ no `handle_browse_selection` in `state::commands::channel_handler::slash`
+
+error[E0425]: cannot find function `load_llm_history_for_active_journey` in module `unified_persistence`
+   --> crates/agent-core/src/core/session/compaction/manual.rs:144:30
+    |
+144 |         unified_persistence::load_llm_history_for_active_journey(&sid_for_load)
+    |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in `unified_persistence`
+
+error[E0425]: cannot find function `create_provider_for_protocol` in module `crate::providers::factory`
+   --> crates/agent-core/src/core/session/journey_review_queue.rs:667:53
+    |
+667 |     let provider = match crate::providers::factory::create_provider_for_protocol(
+    |                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in `crate::providers::factory`
+
+error[E0425]: cannot find function `load_llm_history_for_active_journey` in module `crate::session::persistence`
+   --> crates/agent-core/src/core/tools/impls/orchestration/agent/messages.rs:119:38
+    |
+119 |         crate::session::persistence::load_llm_history_for_active_journey(resume_id)
+    |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in `crate::session::persistence`
+
+error[E0425]: cannot find function `load_context_snapshots` in module `unified_persistence`
+   --> crates/agent-core/src/state/commands/session/debug/context_cache.rs:112:46
+    |
+112 |         let snapshots = unified_persistence::load_context_snapshots(&session_id_for_block)
+    |                                              ^^^^^^^^^^^^^^^^^^^^^^ not found in `unified_persistence`
+
+error[E0425]: cannot find function `load_latest_turn_cache_layout_stats` in module `unified_persistence`
+   --> crates/agent-core/src/state/commands/session/debug/context_cache.rs:119:34
+    |
+119 |             unified_persistence::load_latest_turn_cache_layout_stats(&session_id_for_block)
+    |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not found in `unified_persistence`
+
+error[E0425]: cannot find function `load_session_embedding_state` in module `unified_persistence`
+   --> crates/agent-core/src/state/commands/session/debug/context_cache.rs:125:34
+    |
+125 |             unified_persistence::load_session_embedding_state(&embedding_namespace)
+    |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+   ::: crates/agent-core/src/core/session/persistence/messages.rs:896:1
+    |
+896 | pub fn load_session_memory_state(session_id: &str) -> SqliteResult<PersistedSessionMemoryState> {
+    | ----------------------------------------------------------------------------------------------- similarly named function `load_session_memory_state` defined here
+    |
+help: a function with a similar name exists
+    |
+125 -             unified_persistence::load_session_embedding_state(&embedding_namespace)
+125 +             unified_persistence::load_session_memory_state(&embedding_namespace)
+    |
+
+error[E0124]: field `worktree_path` is already declared
+  --> crates/agent-core/src/foundation/session_bridge.rs:56:5
+   |
+50 |     pub worktree_path: Option<String>,
+   |     --------------------------------- `worktree_path` first declared here
+...
+56 |     pub worktree_path: Option<String>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field already declared
+
+error[E0053]: method `chat` has an incompatible type for trait
+   --> crates/agent-core/src/core/providers/cursor_native/provider.rs:312:21
+    |
+312 |         max_tokens: Option<u32>,
+    |                     ^^^^^^^^^^^ expected `u32`, found `std::option::Option<u32>`
+    |
+note: type in trait
+   --> crates/agent-core/src/core/providers/traits.rs:459:21
+    |
+459 |         max_tokens: u32,
+    |                     ^^^
+    = note: expected signature `fn(&'life0 CursorNativeProvider, &'life1 _, std::option::Option<_>, &'life3 _, u32, _) -> Pin<_>`
+               found signature `fn(&'life0 CursorNativeProvider, &'life1 _, std::option::Option<_>, &'life3 _, std::option::Option<u32>, _) -> Pin<_>`
+help: change the parameter type to match the trait
+    |
+312 -         max_tokens: Option<u32>,
+312 +         max_tokens: u32,
+    |
+
+error[E0053]: method `chat_streaming` has an incompatible type for trait
+   --> crates/agent-core/src/core/providers/cursor_native/provider.rs:325:22
+    |
+325 |         _max_tokens: Option<u32>,
+    |                      ^^^^^^^^^^^ expected `u32`, found `std::option::Option<u32>`
+    |
+note: type in trait
+   --> crates/agent-core/src/core/providers/traits.rs:477:21
+    |
+477 |         max_tokens: u32,
+    |                     ^^^
+    = note: expected signature `fn(&'life0 CursorNativeProvider, &'life1 _, std::option::Option<_>, &'life3 _, u32, _, &'life4 _, std::option::Option<_>) -> Pin<_>`
+               found signature `fn(&'life0 CursorNativeProvider, &'life1 _, std::option::Option<_>, &'life3 _, std::option::Option<u32>, _, &'life4 _, std::option::Option<_>) -> Pin<_>`
+help: change the parameter type to match the trait
+    |
+325 -         _max_tokens: Option<u32>,
+325 +         _max_tokens: u32,
+    |
+
+error[E0053]: method `chat` has an incompatible type for trait
+   --> crates/agent-core/src/core/providers/e2e_fake.rs:144:22
+    |
+144 |         _max_tokens: Option<u32>,
+    |                      ^^^^^^^^^^^ expected `u32`, found `std::option::Option<u32>`
+    |
+note: type in trait
+   --> crates/agent-core/src/core/providers/traits.rs:459:21
+    |
+459 |         max_tokens: u32,
+    |                     ^^^
+    = note: expected signature `fn(&'life0 E2eFakeProvider, &'life1 _, std::option::Option<_>, &'life3 _, u32, _) -> Pin<_>`
+               found signature `fn(&'life0 E2eFakeProvider, &'life1 _, std::option::Option<_>, &'life3 _, std::option::Option<u32>, _) -> Pin<_>`
+help: change the parameter type to match the trait
+    |
+144 -         _max_tokens: Option<u32>,
+144 +         _max_tokens: u32,
+    |
+
+error[E0053]: method `chat_streaming` has an incompatible type for trait
+   --> crates/agent-core/src/core/providers/e2e_fake.rs:190:21
+    |
+190 |         max_tokens: Option<u32>,
+    |                     ^^^^^^^^^^^ expected `u32`, found `std::option::Option<u32>`
+    |
+note: type in trait
+   --> crates/agent-core/src/core/providers/traits.rs:477:21
+    |
+477 |         max_tokens: u32,
+    |                     ^^^
+    = note: expected signature `fn(&'life0 E2eFakeProvider, &'life1 _, std::option::Option<_>, &'life3 _, u32, _, &'life4 _, std::option::Option<_>) -> Pin<_>`
+               found signature `fn(&'life0 E2eFakeProvider, &'life1 _, std::option::Option<_>, &'life3 _, std::option::Option<u32>, _, &'life4 _, std::option::Option<_>) -> Pin<_>`
+help: change the parameter type to match the trait
+    |
+190 -         max_tokens: Option<u32>,
+190 +         max_tokens: u32,
+    |
+
+error[E0053]: method `chat` has an incompatible type for trait
+   --> crates/agent-core/src/core/providers/openai_adaptive.rs:115:21
+    |
+115 |         max_tokens: Option<u32>,
+    |                     ^^^^^^^^^^^ expected `u32`, found `std::option::Option<u32>`
+    |
+note: type in trait
+   --> crates/agent-core/src/core/providers/traits.rs:459:21
+    |
+459 |         max_tokens: u32,
+    |                     ^^^
+    = note: expected signature `fn(&'life0 OpenAiAdaptiveClient, &'life1 _, std::option::Option<_>, &'life3 _, u32, _) -> Pin<_>`
+               found signature `fn(&'life0 OpenAiAdaptiveClient, &'life1 _, std::option::Option<_>, &'life3 _, std::option::Option<u32>, _) -> Pin<_>`
+help: change the parameter type to match the trait
+    |
+115 -         max_tokens: Option<u32>,
+115 +         max_tokens: u32,
+    |
+
+error[E0053]: method `chat_streaming` has an incompatible type for trait
+   --> crates/agent-core/src/core/providers/openai_adaptive.rs:155:21
+    |
+155 |         max_tokens: Option<u32>,
+    |                     ^^^^^^^^^^^ expected `u32`, found `std::option::Option<u32>`
+    |
+note: type in trait
+   --> crates/agent-core/src/core/providers/traits.rs:477:21
+    |
+477 |         max_tokens: u32,
+    |                     ^^^
+    = note: expected signature `fn(&'life0 OpenAiAdaptiveClient, &'life1 _, std::option::Option<_>, &'life3 _, u32, _, &'life4 _, std::option::Option<_>) -> Pin<_>`
+               found signature `fn(&'life0 OpenAiAdaptiveClient, &'life1 _, std::option::Option<_>, &'life3 _, std::option::Option<u32>, _, &'life4 _, std::option::Option<_>) -> Pin<_>`
+help: change the parameter type to match the trait
+    |
+155 -         max_tokens: Option<u32>,
+155 +         max_tokens: u32,
+    |
+
+error[E0053]: method `chat` has an incompatible type for trait
+   --> crates/agent-core/src/core/providers/openai_compat/streaming/mod.rs:61:21
+    |
+ 61 |         max_tokens: Option<u32>,
+    |                     ^^^^^^^^^^^ expected `u32`, found `std::option::Option<u32>`
+    |
+note: type in trait
+   --> crates/agent-core/src/core/providers/traits.rs:459:21
+    |
+459 |         max_tokens: u32,
+    |                     ^^^
+    = note: expected signature `fn(&'life0 OpenAICompatClient, &'life1 _, std::option::Option<_>, &'life3 _, u32, _) -> Pin<_>`
+               found signature `fn(&'life0 OpenAICompatClient, &'life1 _, std::option::Option<_>, &'life3 _, std::option::Option<u32>, _) -> Pin<_>`
+help: change the parameter type to match the trait
+    |
+ 61 -         max_tokens: Option<u32>,
+ 61 +         max_tokens: u32,
+    |
+
+error[E0053]: method `chat_streaming` has an incompatible type for trait
+   --> crates/agent-core/src/core/providers/openai_compat/streaming/mod.rs:72:21
+    |
+ 72 |         max_tokens: Option<u32>,
+    |                     ^^^^^^^^^^^ expected `u32`, found `std::option::Option<u32>`
+    |
+note: type in trait
+   --> crates/agent-core/src/core/providers/traits.rs:477:21
+    |
+477 |         max_tokens: u32,
+    |                     ^^^
+    = note: expected signature `fn(&'life0 OpenAICompatClient, &'life1 _, std::option::Option<_>, &'life3 _, u32, _, &'life4 _, std::option::Option<_>) -> Pin<_>`
+               found signature `fn(&'life0 OpenAICompatClient, &'life1 _, std::option::Option<_>, &'life3 _, std::option::Option<u32>, _, &'life4 _, std::option::Option<_>) -> Pin<_>`
+help: change the parameter type to match the trait
+    |
+ 72 -         max_tokens: Option<u32>,
+ 72 +         max_tokens: u32,
+    |
+
+error[E0053]: method `chat` has an incompatible type for trait
+   --> crates/agent-core/src/core/providers/openai_responses/streaming.rs:27:21
+    |
+ 27 |         max_tokens: Option<u32>,
+    |                     ^^^^^^^^^^^ expected `u32`, found `std::option::Option<u32>`
+    |
+note: type in trait
+   --> crates/agent-core/src/core/providers/traits.rs:459:21
+    |
+459 |         max_tokens: u32,
+    |                     ^^^
+    = note: expected signature `fn(&'life0 OpenAIResponsesClient, &'life1 _, std::option::Option<_>, &'life3 _, u32, _) -> Pin<_>`
+               found signature `fn(&'life0 OpenAIResponsesClient, &'life1 _, std::option::Option<_>, &'life3 _, std::option::Option<u32>, _) -> Pin<_>`
+help: change the parameter type to match the trait
+    |
+ 27 -         max_tokens: Option<u32>,
+ 27 +         max_tokens: u32,
+    |
+
+error[E0053]: method `chat_streaming` has an incompatible type for trait
+   --> crates/agent-core/src/core/providers/openai_responses/streaming.rs:83:21
+    |
+ 83 |         max_tokens: Option<u32>,
+    |                     ^^^^^^^^^^^ expected `u32`, found `std::option::Option<u32>`
+    |
+note: type in trait
+   --> crates/agent-core/src/core/providers/traits.rs:477:21
+    |
+477 |         max_tokens: u32,
+    |                     ^^^
+    = note: expected signature `fn(&'life0 OpenAIResponsesClient, &'life1 _, std::option::Option<_>, &'life3 _, u32, _, &'life4 _, std::option::Option<_>) -> Pin<_>`
+               found signature `fn(&'life0 OpenAIResponsesClient, &'life1 _, std::option::Option<_>, &'life3 _, std::option::Option<u32>, _, &'life4 _, std::option::Option<_>) -> Pin<_>`
+help: change the parameter type to match the trait
+    |
+ 83 -         max_tokens: Option<u32>,
+ 83 +         max_tokens: u32,
+    |
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/core/session/goal_loop.rs:369:67
+    |
+369 |     let judge_call = provider.chat(&messages, None, &input.model, Some(512), 0.0);
+    |                               ----                                ^^^^^^^^^ expected `u32`, found `Option<{integer}>`
+    |                               |
+    |                               arguments to this method are incorrect
+    |
+    = note: expected type `u32`
+               found enum `std::option::Option<{integer}>`
+note: method defined here
+   --> crates/agent-core/src/core/providers/traits.rs:454:14
+    |
+454 |     async fn chat(
+    |              ^^^^
+...
+459 |         max_tokens: u32,
+    |         ----------
+
+error[E0062]: field `worktree_path` specified more than once
+   --> crates/agent-core/src/core/session/launch/launch_org.rs:263:17
+    |
+259 |                 worktree_path: None,
+    |                 ------------------- first use of `worktree_path`
+...
+263 |                 worktree_path: None,
+    |                 ^^^^^^^^^^^^^ used more than once
+
+error[E0063]: missing fields `cache_read_tokens`, `cache_write_tokens`, `context_tokens` and 3 other fields in initializer of `ProcessingResult`
+    --> crates/agent-core/src/core/session/turn/processor/mod.rs:1090:12
+     |
+1090 |         Ok(ProcessingResult {
+     |            ^^^^^^^^^^^^^^^^ missing `cache_read_tokens`, `cache_write_tokens`, `context_tokens` and 3 other fields
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/specialization/memory/reflection/extract.rs:97:52
+    |
+ 97 |         .chat_streaming(&messages, None, model_id, Some(1024), 0.2, &|_| {}, None)
+    |          --------------                            ^^^^^^^^^^ expected `u32`, found `Option<{integer}>`
+    |          |
+    |          arguments to this method are incorrect
+    |
+    = note: expected type `u32`
+               found enum `std::option::Option<{integer}>`
+note: method defined here
+   --> crates/agent-core/src/core/providers/traits.rs:472:14
+    |
+472 |     async fn chat_streaming(
+    |              ^^^^^^^^^^^^^^
+...
+477 |         max_tokens: u32,
+    |         ---------------
+
+error[E0308]: mismatched types
+  --> crates/agent-core/src/specialization/memory/reflection/active_learning/extract.rs:64:21
+   |
+64 |         max_tokens: Some(512),
+   |                     ^^^^^^^^^ expected `u32`, found `Option<{integer}>`
+   |
+   = note: expected type `u32`
+              found enum `std::option::Option<{integer}>`
+
+error[E0063]: missing field `session_org_id` in initializer of `ToolDeps`
+   --> crates/agent-core/src/init/mod.rs:477:21
+    |
+477 |     let tool_deps = ToolDeps {
+    |                     ^^^^^^^^ missing `session_org_id`
+
+error[E0308]: mismatched types
+  --> crates/agent-core/src/core/session/title.rs:84:25
+   |
+84 |             max_tokens: Some(128),
+   |                         ^^^^^^^^^ expected `u32`, found `Option<{integer}>`
+   |
+   = note: expected type `u32`
+              found enum `std::option::Option<{integer}>`
+
+error[E0063]: missing field `model` in initializer of `ForkProviderSpec`
+  --> crates/agent-core/src/core/session/turn/processor/post_turn_dispatch.rs:94:29
+   |
+94 |         let fork_provider = post_turn_jobs::ForkProviderSpec {
+   |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `model`
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/core/session/turn/processor/prefetch.rs:325:13
+    |
+325 |           let (provider, model) = match self.side_query_provider(session_id, "skill-prefetch").await {
+    |  _____________^^^^^^^^^^^^^^^^^___-
+    | |             |
+    | |             expected `Arc<dyn LLMProvider>`, found `(_, _)`
+326 | |             Ok(route) => route,
+327 | |             Err(err) => {
+328 | |                 warn!(
+...   |
+335 | |         };
+    | |_________- this expression has type `Arc<dyn LLMProvider>`
+    |
+    = note: expected struct `Arc<dyn LLMProvider>`
+                found tuple `(_, _)`
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/core/session/turn/processor/prefetch.rs:371:13
+    |
+371 |           let (provider, side_query_model) = match self
+    |  _____________^^^^^^^^^^^^^^^^^^^^^^^^^^^^___-
+    | |             |
+    | |             expected `Arc<dyn LLMProvider>`, found `(_, _)`
+372 | |             .side_query_provider(session_id, "memory-prefetch")
+373 | |             .await
+...   |
+384 | |         };
+    | |_________- this expression has type `Arc<dyn LLMProvider>`
+    |
+    = note: expected struct `Arc<dyn LLMProvider>`
+                found tuple `(_, _)`
+
+error[E0063]: missing field `global_permitted_paths` in initializer of `SystemPromptConfig`
+   --> crates/agent-core/src/core/session/turn/processor/prompt.rs:150:29
+    |
+150 |         let prompt_config = SystemPromptConfig {
+    |                             ^^^^^^^^^^^^^^^^^^ missing `global_permitted_paths`
+
+error[E0063]: missing field `workspace_id` in initializer of `ProjectMeta`
+   --> crates/agent-core/src/foundation/tool_infra/project/projects.rs:140:20
+    |
+140 |         let meta = ProjectMeta {
+    |                    ^^^^^^^^^^^ missing `workspace_id`
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/specialization/memory/consolidation/batch.rs:211:25
+    |
+211 |             max_tokens: Some(800),
+    |                         ^^^^^^^^^ expected `u32`, found `Option<{integer}>`
+    |
+    = note: expected type `u32`
+               found enum `std::option::Option<{integer}>`
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/specialization/skills/prefetch.rs:152:21
+    |
+152 |         max_tokens: Some(SELECTION_MAX_TOKENS),
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `u32`, found `Option<u32>`
+    |
+    = note: expected type `u32`
+               found enum `std::option::Option<u32>`
+
+error[E0560]: struct `AgentRunLaunchRequest` has no field named `journey_workspace_id`
+   --> crates/agent-core/src/state/commands/session/launch.rs:362:13
+    |
+362 |             journey_workspace_id: params.journey_workspace_id,
+    |             ^^^^^^^^^^^^^^^^^^^^ `AgentRunLaunchRequest` does not have this field
+    |
+    = note: all struct fields are already assigned
+
+error[E0560]: struct `AgentRunLaunchRequest` has no field named `journey_topic_tags`
+   --> crates/agent-core/src/state/commands/session/launch.rs:363:13
+    |
+363 |             journey_topic_tags: params.journey_topic_tags,
+    |             ^^^^^^^^^^^^^^^^^^ `AgentRunLaunchRequest` does not have this field
+    |
+    = note: all struct fields are already assigned
+
+error[E0062]: field `worktree_path` specified more than once
+   --> crates/agent-core/src/state/commands/session/launch.rs:484:9
+    |
+480 |         worktree_path: params.worktree_path,
+    |         ----------------------------------- first use of `worktree_path`
+...
+484 |         worktree_path: params.worktree_path.clone(),
+    |         ^^^^^^^^^^^^^ used more than once
+
+error[E0004]: non-exhaustive patterns: `PromptCacheInvalidationReason::GlobalPathExemptionsChanged` not covered
+   --> crates/agent-core/src/state/session_runtime.rs:343:15
+    |
+343 |         match reason {
+    |               ^^^^^^ pattern `PromptCacheInvalidationReason::GlobalPathExemptionsChanged` not covered
+    |
+note: `PromptCacheInvalidationReason` defined here
+   --> crates/agent-core/src/core/session/prompt/cache.rs:29:10
+    |
+ 29 | pub enum PromptCacheInvalidationReason {
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+ 35 |     GlobalPathExemptionsChanged,
+    |     --------------------------- not covered
+    = note: the matched value is of type `PromptCacheInvalidationReason`
+help: ensure that all possible cases are being handled by adding a match arm with a wildcard pattern or an explicit pattern as shown
+    |
+366 ~             },
+367 +             PromptCacheInvalidationReason::GlobalPathExemptionsChanged => todo!()
+    |
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/core/providers/cursor_native/provider.rs:316:53
+    |
+316 |         self.chat_streaming(messages, tools, model, max_tokens, temperature, &noop, None)
+    |              --------------                         ^^^^^^^^^^ expected `u32`, found `Option<u32>`
+    |              |
+    |              arguments to this method are incorrect
+    |
+    = note: expected type `u32`
+               found enum `std::option::Option<u32>`
+note: method defined here
+   --> crates/agent-core/src/core/providers/traits.rs:472:14
+    |
+472 |     async fn chat_streaming(
+    |              ^^^^^^^^^^^^^^
+...
+477 |         max_tokens: u32,
+    |         ---------------
+help: consider using `Option::expect` to unwrap the `std::option::Option<u32>` value, panicking if the value is an `Option::None`
+    |
+316 |         self.chat_streaming(messages, tools, model, max_tokens.expect("REASON"), temperature, &noop, None)
+    |                                                               +++++++++++++++++
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/core/providers/e2e_fake.rs:200:43
+    |
+200 |             .chat(messages, tools, model, max_tokens, temperature)
+    |              ----                         ^^^^^^^^^^ expected `u32`, found `Option<u32>`
+    |              |
+    |              arguments to this method are incorrect
+    |
+    = note: expected type `u32`
+               found enum `std::option::Option<u32>`
+note: method defined here
+   --> crates/agent-core/src/core/providers/traits.rs:454:14
+    |
+454 |     async fn chat(
+    |              ^^^^
+...
+459 |         max_tokens: u32,
+    |         ----------
+help: consider using `Option::expect` to unwrap the `std::option::Option<u32>` value, panicking if the value is an `Option::None`
+    |
+200 |             .chat(messages, tools, model, max_tokens.expect("REASON"), temperature)
+    |                                                     +++++++++++++++++
+
+error[E0599]: no associated function or constant named `new_with_account` found for struct `OpenAIResponsesClient` in the current scope
+  --> crates/agent-core/src/core/providers/openai_adaptive.rs:49:54
+   |
+49 |             responses_client: OpenAIResponsesClient::new_with_account(
+   |                                                      ^^^^^^^^^^^^^^^^ associated function or constant not found in `OpenAIResponsesClient`
+   |
+  ::: crates/agent-core/src/core/providers/openai_responses/client.rs:23:1
+   |
+23 | pub struct OpenAIResponsesClient {
+   | -------------------------------- associated function or constant `new_with_account` not found for this struct
+   |
+note: if you're trying to build a new `OpenAIResponsesClient`, consider using `OpenAIResponsesClient::new` which returns `OpenAIResponsesClient`
+  --> crates/agent-core/src/core/providers/openai_responses/client.rs:30:5
+   |
+30 |     pub fn new(config: ProviderConfig, default_model: String) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/core/providers/openai_adaptive.rs:121:51
+    |
+121 |                     .chat(messages, tools, model, max_tokens, temperature)
+    |                      ----                         ^^^^^^^^^^ expected `u32`, found `Option<u32>`
+    |                      |
+    |                      arguments to this method are incorrect
+    |
+    = note: expected type `u32`
+               found enum `std::option::Option<u32>`
+note: method defined here
+   --> crates/agent-core/src/core/providers/traits.rs:454:14
+    |
+454 |     async fn chat(
+    |              ^^^^
+...
+459 |         max_tokens: u32,
+    |         ----------
+help: consider using `Option::expect` to unwrap the `std::option::Option<u32>` value, panicking if the value is an `Option::None`
+    |
+121 |                     .chat(messages, tools, model, max_tokens.expect("REASON"), temperature)
+    |                                                             +++++++++++++++++
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/core/providers/openai_adaptive.rs:126:47
+    |
+126 |                 .chat(messages, tools, model, max_tokens, temperature)
+    |                  ----                         ^^^^^^^^^^ expected `u32`, found `Option<u32>`
+    |                  |
+    |                  arguments to this method are incorrect
+    |
+    = note: expected type `u32`
+               found enum `std::option::Option<u32>`
+note: method defined here
+   --> crates/agent-core/src/core/providers/traits.rs:454:14
+    |
+454 |     async fn chat(
+    |              ^^^^
+...
+459 |         max_tokens: u32,
+    |         ----------
+help: consider using `Option::expect` to unwrap the `std::option::Option<u32>` value, panicking if the value is an `Option::None`
+    |
+126 |                 .chat(messages, tools, model, max_tokens.expect("REASON"), temperature)
+    |                                                         +++++++++++++++++
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/core/providers/openai_adaptive.rs:134:55
+    |
+134 |                         .chat(messages, tools, model, max_tokens, temperature)
+    |                          ----                         ^^^^^^^^^^ expected `u32`, found `Option<u32>`
+    |                          |
+    |                          arguments to this method are incorrect
+    |
+    = note: expected type `u32`
+               found enum `std::option::Option<u32>`
+note: method defined here
+   --> crates/agent-core/src/core/providers/traits.rs:454:14
+    |
+454 |     async fn chat(
+    |              ^^^^
+...
+459 |         max_tokens: u32,
+    |         ----------
+help: consider using `Option::expect` to unwrap the `std::option::Option<u32>` value, panicking if the value is an `Option::None`
+    |
+134 |                         .chat(messages, tools, model, max_tokens.expect("REASON"), temperature)
+    |                                                                 +++++++++++++++++
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/core/providers/openai_adaptive.rs:140:55
+    |
+140 |                         .chat(messages, tools, model, max_tokens, temperature)
+    |                          ----                         ^^^^^^^^^^ expected `u32`, found `Option<u32>`
+    |                          |
+    |                          arguments to this method are incorrect
+    |
+    = note: expected type `u32`
+               found enum `std::option::Option<u32>`
+note: method defined here
+   --> crates/agent-core/src/core/providers/traits.rs:454:14
+    |
+454 |     async fn chat(
+    |              ^^^^
+...
+459 |         max_tokens: u32,
+    |         ----------
+help: consider using `Option::expect` to unwrap the `std::option::Option<u32>` value, panicking if the value is an `Option::None`
+    |
+140 |                         .chat(messages, tools, model, max_tokens.expect("REASON"), temperature)
+    |                                                                 +++++++++++++++++
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/core/providers/openai_adaptive.rs:167:25
+    |
+163 |                     .chat_streaming(
+    |                      -------------- arguments to this method are incorrect
+...
+167 |                         max_tokens,
+    |                         ^^^^^^^^^^ expected `u32`, found `Option<u32>`
+    |
+    = note: expected type `u32`
+               found enum `std::option::Option<u32>`
+note: method defined here
+   --> crates/agent-core/src/core/providers/traits.rs:472:14
+    |
+472 |     async fn chat_streaming(
+    |              ^^^^^^^^^^^^^^
+...
+477 |         max_tokens: u32,
+    |         ---------------
+help: consider using `Option::expect` to unwrap the `std::option::Option<u32>` value, panicking if the value is an `Option::None`
+    |
+167 |                         max_tokens.expect("REASON"),
+    |                                   +++++++++++++++++
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/core/providers/openai_adaptive.rs:180:21
+    |
+176 |                 .chat_streaming(
+    |                  -------------- arguments to this method are incorrect
+...
+180 |                     max_tokens,
+    |                     ^^^^^^^^^^ expected `u32`, found `Option<u32>`
+    |
+    = note: expected type `u32`
+               found enum `std::option::Option<u32>`
+note: method defined here
+   --> crates/agent-core/src/core/providers/traits.rs:472:14
+    |
+472 |     async fn chat_streaming(
+    |              ^^^^^^^^^^^^^^
+...
+477 |         max_tokens: u32,
+    |         ---------------
+help: consider using `Option::expect` to unwrap the `std::option::Option<u32>` value, panicking if the value is an `Option::None`
+    |
+180 |                     max_tokens.expect("REASON"),
+    |                               +++++++++++++++++
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/core/providers/openai_adaptive.rs:196:29
+    |
+192 |                         .chat_streaming(
+    |                          -------------- arguments to this method are incorrect
+...
+196 |                             max_tokens,
+    |                             ^^^^^^^^^^ expected `u32`, found `Option<u32>`
+    |
+    = note: expected type `u32`
+               found enum `std::option::Option<u32>`
+note: method defined here
+   --> crates/agent-core/src/core/providers/traits.rs:472:14
+    |
+472 |     async fn chat_streaming(
+    |              ^^^^^^^^^^^^^^
+...
+477 |         max_tokens: u32,
+    |         ---------------
+help: consider using `Option::expect` to unwrap the `std::option::Option<u32>` value, panicking if the value is an `Option::None`
+    |
+196 |                             max_tokens.expect("REASON"),
+    |                                       +++++++++++++++++
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/core/providers/openai_adaptive.rs:210:29
+    |
+206 |                         .chat_streaming(
+    |                          -------------- arguments to this method are incorrect
+...
+210 |                             max_tokens,
+    |                             ^^^^^^^^^^ expected `u32`, found `Option<u32>`
+    |
+    = note: expected type `u32`
+               found enum `std::option::Option<u32>`
+note: method defined here
+   --> crates/agent-core/src/core/providers/traits.rs:472:14
+    |
+472 |     async fn chat_streaming(
+    |              ^^^^^^^^^^^^^^
+...
+477 |         max_tokens: u32,
+    |         ---------------
+help: consider using `Option::expect` to unwrap the `std::option::Option<u32>` value, panicking if the value is an `Option::None`
+    |
+210 |                             max_tokens.expect("REASON"),
+    |                                       +++++++++++++++++
+
+error[E0308]: mismatched types
+  --> crates/agent-core/src/core/providers/openai_compat/streaming/mod.rs:64:54
+   |
+64 |         chat::run_chat(self, messages, tools, model, max_tokens, temperature).await
+   |         --------------                               ^^^^^^^^^^ expected `u32`, found `Option<u32>`
+   |         |
+   |         arguments to this function are incorrect
+   |
+   = note: expected type `u32`
+              found enum `std::option::Option<u32>`
+note: function defined here
+  --> crates/agent-core/src/core/providers/openai_compat/streaming/chat.rs:20:21
+   |
+20 | pub(super) async fn run_chat(
+   |                     ^^^^^^^^
+...
+25 |     max_tokens: u32,
+   |     ---------------
+help: consider using `Option::expect` to unwrap the `std::option::Option<u32>` value, panicking if the value is an `Option::None`
+   |
+64 |         chat::run_chat(self, messages, tools, model, max_tokens.expect("REASON"), temperature).await
+   |                                                                +++++++++++++++++
+
+error[E0308]: mismatched types
+  --> crates/agent-core/src/core/providers/openai_compat/streaming/mod.rs:82:13
+   |
+77 |         sse_stream::run_chat_streaming(
+   |         ------------------------------ arguments to this function are incorrect
+...
+82 |             max_tokens,
+   |             ^^^^^^^^^^ expected `u32`, found `Option<u32>`
+   |
+   = note: expected type `u32`
+              found enum `std::option::Option<u32>`
+note: function defined here
+  --> crates/agent-core/src/core/providers/openai_compat/streaming/sse_stream.rs:55:21
+   |
+55 | pub(super) async fn run_chat_streaming(
+   |                     ^^^^^^^^^^^^^^^^^^
+...
+60 |     max_tokens: u32,
+   |     ---------------
+help: consider using `Option::expect` to unwrap the `std::option::Option<u32>` value, panicking if the value is an `Option::None`
+   |
+82 |             max_tokens.expect("REASON"),
+   |                       +++++++++++++++++
+
+error[E0609]: no field `account_id` on type `&OpenAIResponsesClient`
+  --> crates/agent-core/src/core/providers/openai_responses/streaming.rs:37:18
+   |
+37 |             self.account_id.as_deref(),
+   |                  ^^^^^^^^^^ unknown field
+   |
+   = note: available fields are: `client`, `config`, `default_model`
+
+error[E0061]: this function takes 6 arguments but 7 arguments were supplied
+  --> crates/agent-core/src/core/providers/openai_responses/streaming.rs:30:28
+   |
+30 |         let request_body = Self::build_responses_request(
+   |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+37 |             self.account_id.as_deref(),
+   |             -------------------------- unexpected argument #7
+   |
+note: expected `u32`, found `Option<u32>`
+  --> crates/agent-core/src/core/providers/openai_responses/streaming.rs:34:13
+   |
+34 |             max_tokens,
+   |             ^^^^^^^^^^
+   = note: expected type `u32`
+              found enum `std::option::Option<u32>`
+note: associated function defined here
+  --> crates/agent-core/src/core/providers/openai_responses/client.rs:73:19
+   |
+73 |     pub(crate) fn build_responses_request(
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^
+...
+77 |         max_tokens: u32,
+   |         ---------------
+help: consider using `Option::expect` to unwrap the `std::option::Option<u32>` value, panicking if the value is an `Option::None`
+   |
+34 |             max_tokens.expect("REASON"),
+   |                       +++++++++++++++++
+help: remove the extra argument
+   |
+34 ~             /* u32 */,
+35 |             _temperature,
+36 ~             false,
+   |
+
+error[E0609]: no field `account_id` on type `&OpenAIResponsesClient`
+  --> crates/agent-core/src/core/providers/openai_responses/streaming.rs:97:18
+   |
+97 |             self.account_id.as_deref(),
+   |                  ^^^^^^^^^^ unknown field
+   |
+   = note: available fields are: `client`, `config`, `default_model`
+
+error[E0061]: this function takes 6 arguments but 7 arguments were supplied
+  --> crates/agent-core/src/core/providers/openai_responses/streaming.rs:90:28
+   |
+90 |         let request_body = Self::build_responses_request(
+   |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+97 |             self.account_id.as_deref(),
+   |             -------------------------- unexpected argument #7
+   |
+note: expected `u32`, found `Option<u32>`
+  --> crates/agent-core/src/core/providers/openai_responses/streaming.rs:94:13
+   |
+94 |             max_tokens,
+   |             ^^^^^^^^^^
+   = note: expected type `u32`
+              found enum `std::option::Option<u32>`
+note: associated function defined here
+  --> crates/agent-core/src/core/providers/openai_responses/client.rs:73:19
+   |
+73 |     pub(crate) fn build_responses_request(
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^
+...
+77 |         max_tokens: u32,
+   |         ---------------
+help: consider using `Option::expect` to unwrap the `std::option::Option<u32>` value, panicking if the value is an `Option::None`
+   |
+94 |             max_tokens.expect("REASON"),
+   |                       +++++++++++++++++
+help: remove the extra argument
+   |
+94 ~             /* u32 */,
+95 |             _temperature,
+96 ~             true,
+   |
+
+error[E0609]: no field `text_only_wire` on type `ModelCapabilities`
+  --> crates/agent-core/src/core/providers/wire_sanitize.rs:96:65
+   |
+96 |         || super::model_capabilities::resolve(wire_model, None).text_only_wire
+   |                                                                 ^^^^^^^^^^^^^^ unknown field
+   |
+   = note: available fields are: `context_window`, `thinking`, `omit_temperature_with_thinking`
+
+error[E0560]: struct `UnifiedSessionRecord` has no field named `parent_session_relation`
+   --> crates/agent-core/src/core/session/compaction/fork.rs:369:9
+    |
+369 |         parent_session_relation: Some(
+    |         ^^^^^^^^^^^^^^^^^^^^^^^ `UnifiedSessionRecord` does not have this field
+    |
+    = note: available fields are: `native_harness_type`, `total_tokens`, `org_id`, `project_id`, `project_name` ... and 15 others
+
+error[E0308]: mismatched types
+   --> crates/agent-core/src/core/session/journey_review_queue.rs:514:21
+    |
+514 |         max_tokens: None,
+    |                     ^^^^ expected `u32`, found `Option<_>`
+    |
+    = note: expected type `u32`
+               found enum `std::option::Option<_>`
+
+error[E0063]: missing field `session_org_id` in initializer of `ToolDeps`
+   --> crates/agent-core/src/core/tools/impls/orchestration/agent/mod.rs:380:25
+    |
+380 |         let tool_deps = ToolDeps {
+    |                         ^^^^^^^^ missing `session_org_id`
+
+error[E0062]: field `worktree_path` specified more than once
+  --> crates/agent-core/src/foundation/session_bridge.rs:56:5
+   |
+50 |     pub worktree_path: Option<String>,
+   |     --------------------------------- first use of `worktree_path`
+...
+56 |     pub worktree_path: Option<String>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ used more than once
+
+error[E0599]: no variant, associated function, or constant named `EmbeddingApi` found for enum `ModelType` in the current scope
+  --> crates/agent-core/src/specialization/memory/embeddings/auto.rs:96:49
+   |
+96 |             .get_all_keys_for_agent(&ModelType::EmbeddingApi)
+   |                                                 ^^^^^^^^^^^^ variant, associated function, or constant not found in `ModelType`
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+   --> crates/agent-core/src/state/commands/channel_handler/dispatch.rs:132:21
+    |
+132 |                 let reply_text = handle_browse_selection(&state, &session_key, number).await;
+    |                     ^^^^^^^^^^ doesn't have a size known at compile-time
+    |
+    = help: the trait `Sized` is not implemented for `str`
+    = note: all local variables must have a statically known size
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+   --> crates/agent-core/src/state/commands/channel_handler/dispatch.rs:132:34
+    |
+132 |                 let reply_text = handle_browse_selection(&state, &session_key, number).await;
+    |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ doesn't have a size known at compile-time
+    |
+    = help: the trait `Sized` is not implemented for `str`
+    = note: all local variables must have a statically known size
+
+error[E0277]: the size for values of type `str` cannot be known at compilation time
+   --> crates/agent-core/src/state/commands/channel_handler/dispatch.rs:132:88
+    |
+132 |                 let reply_text = handle_browse_selection(&state, &session_key, number).await;
+    |                                                                                        ^^^^^ doesn't have a size known at compile-time
+    |
+    = help: the trait `Sized` is not implemented for `str`
+note: required by an implicit `Sized` bound in `Poll`
+   --> /rustc/8bab26f4f68e0e26f0bb7960be334d5b520ea452/library/core/src/task/poll.rs:14:0
+
+error[E0560]: struct `AgentRunLaunchRequest` has no field named `journey_workspace_id`
+   --> crates/agent-core/src/state/commands/routines.rs:604:9
+    |
+604 |         journey_workspace_id: None,
+    |         ^^^^^^^^^^^^^^^^^^^^ `AgentRunLaunchRequest` does not have this field
+    |
+    = note: all struct fields are already assigned
+
+error[E0560]: struct `AgentRunLaunchRequest` has no field named `journey_topic_tags`
+   --> crates/agent-core/src/state/commands/routines.rs:605:9
+    |
+605 |         journey_topic_tags: Vec::new(),
+    |         ^^^^^^^^^^^^^^^^^^ `AgentRunLaunchRequest` does not have this field
+    |
+    = note: all struct fields are already assigned
+
+Some errors have detailed explanations: E0004, E0053, E0061, E0062, E0063, E0124, E0277, E0308, E0425...
+For more information about an error, try `rustc --explain E0004`.
+error: could not compile `agent_core` (lib) due to 64 previous errors

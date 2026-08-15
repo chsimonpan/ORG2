@@ -43,6 +43,8 @@ export interface SearchResult {
   score: number;
   /** Text snippet with match highlighted */
   snippet: string;
+  /** Stable owning turn, derived from the nearest preceding user event. */
+  turnKey: string;
 }
 
 interface RustSearchResult {
@@ -167,6 +169,7 @@ export function useChatSearch(
         const rustResults = await invoke<RustSearchResult[]>(
           "es_search_chat_events",
           {
+            sessionId: chatHistory[0]?.sessionId ?? null,
             options: {
               query: trimmedQuery,
               caseSensitive: isCaseSensitive,
@@ -185,11 +188,20 @@ export function useChatSearch(
         for (const rustResult of rustResults) {
           const historyIndex = chunkIndex.get(rustResult.eventId);
           if (historyIndex !== undefined) {
+            let turnKey = `event:${rustResult.eventId}`;
+            for (let index = historyIndex; index >= 0; index -= 1) {
+              const candidate = chatHistory[index];
+              if (candidate.source === "user" && candidate.id) {
+                turnKey = `turn:${candidate.id}`;
+                break;
+              }
+            }
             searchResults.push({
               item: chatHistory[historyIndex],
               index: historyIndex,
               score: rustResult.score,
               snippet: rustResult.snippet,
+              turnKey,
             });
           }
         }

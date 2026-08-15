@@ -1,0 +1,17 @@
+src/engines/ChatPanel/ChatHistory/__tests__/chatMinimap.test.ts(6,3): error TS2614: Module '"../index"' has no exported member 'ChatMinimap'. Did you mean to use 'import ChatMinimap from "../index"' instead?
+src/engines/ChatPanel/ChatHistory/__tests__/chatMinimap.test.ts(7,3): error TS2614: Module '"../index"' has no exported member 'buildChatMinimapItems'. Did you mean to use 'import buildChatMinimapItems from "../index"' instead?
+src/engines/ChatPanel/ChatHistory/__tests__/chatMinimap.test.ts(8,3): error TS2614: Module '"../index"' has no exported member 'buildChatMinimapItemsFromSession'. Did you mean to use 'import buildChatMinimapItemsFromSession from "../index"' instead?
+src/engines/ChatPanel/ChatHistory/__tests__/chatMinimap.test.ts(9,3): error TS2614: Module '"../index"' has no exported member 'buildChatMinimapJumpRequest'. Did you mean to use 'import buildChatMinimapJumpRequest from "../index"' instead?
+src/engines/ChatPanel/ChatHistory/__tests__/chatMinimap.test.ts(10,3): error TS2614: Module '"../index"' has no exported member 'resolveChatMinimapActiveMarkerIndex'. Did you mean to use 'import resolveChatMinimapActiveMarkerIndex from "../index"' instead?
+src/engines/ChatPanel/ChatHistory/__tests__/chatMinimap.test.ts(113,41): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/engines/ChatPanel/ChatHistory/__tests__/chatMinimap.test.ts(121,41): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/engines/ChatPanel/ChatHistory/__tests__/chatMinimap.test.ts(154,33): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/engines/ChatPanel/ChatHistory/__tests__/chatMinimap.test.ts(157,33): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/engines/ChatPanel/ChatHistory/__tests__/chatMinimap.test.ts(163,10): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/engines/ChatPanel/ChatHistory/__tests__/chatMinimap.test.ts(166,31): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/engines/ChatPanel/ChatHistory/__tests__/chatMinimap.test.ts(200,30): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/engines/ChatPanel/ChatHistory/__tests__/chatMinimap.test.ts(220,38): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/engines/ChatPanel/ChatHistory/__tests__/chatMinimap.test.ts(307,30): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/engines/ChatPanel/ChatHistory/__tests__/chatMinimap.test.ts(308,30): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/engines/ChatPanel/ChatHistory/__tests__/chatMinimap.test.ts(315,28): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/engines/ChatPanel/blocks/ToolCallBlock/index.tsx(53,3): error TS2305: Module '"./helpers"' has no exported member 'parseContextImportCardResult'.

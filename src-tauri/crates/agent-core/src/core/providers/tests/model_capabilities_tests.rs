@@ -417,6 +417,8 @@ fn variant_with_context(model: &str, ctx: Option<u64>) -> ModelVariant {
         reasoning: None,
         fast: false,
         context_window: ctx,
+        context_window_override: None,
+        reasoning_effort_override: None,
     }
 }
 

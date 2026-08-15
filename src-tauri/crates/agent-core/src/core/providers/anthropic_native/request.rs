@@ -14,6 +14,8 @@ use super::messages::extract_system;
 use super::thinking::build_thinking_params;
 use super::tools::convert_tools;
 use super::types::MessagesRequest;
+
+const ANTHROPIC_REQUIRED_DEFAULT_MAX_TOKENS: u32 = 4096;
 /// All inputs to a Messages API request, post-resolution.
 ///
 /// The caller has already resolved the model alias and run the messages
@@ -40,7 +42,7 @@ pub(super) fn prepare_request(
     messages: &[Value],
     tools: Option<&[Value]>,
     model: &str,
-    max_tokens: u32,
+    max_tokens: Option<u32>,
     temperature: f32,
     stream: bool,
     skip_cache_write: bool,
@@ -80,7 +82,7 @@ pub(super) fn prepare_request(
         parsed.thinking,
         directive,
         &caps,
-        max_tokens,
+        max_tokens.unwrap_or(ANTHROPIC_REQUIRED_DEFAULT_MAX_TOKENS),
         temperature,
     );
     let thinking = outcome.thinking;
