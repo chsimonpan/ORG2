@@ -112,13 +112,16 @@ export interface UseChatSearchReturn {
 // SessionEvent index by event id (for Rust → TS mapping)
 // ============================================
 
-function buildChunkIdIndex(chatHistory: SessionEvent[]): Map<string, number> {
+export function buildChatSearchEventIndex(
+  chatHistory: SessionEvent[]
+): Map<string, number> {
   const index = new Map<string, number>();
   for (let idx = 0; idx < chatHistory.length; idx++) {
-    const eventId = chatHistory[idx].id;
-    if (eventId) {
-      index.set(eventId, idx);
-    }
+    const event = chatHistory[idx];
+    if (event.id) index.set(event.id, idx);
+    // Rust deliberately returns chunk_id when present. Indexing only `id`
+    // silently discarded those results, leaving nothing clickable/navigable.
+    if (event.chunk_id) index.set(event.chunk_id, idx);
   }
   return index;
 }
@@ -182,7 +185,7 @@ export function useChatSearch(
 
         if (currentSearchId !== searchIdRef.current) return;
 
-        const chunkIndex = buildChunkIdIndex(chatHistory);
+        const chunkIndex = buildChatSearchEventIndex(chatHistory);
         const searchResults: SearchResult[] = [];
 
         for (const rustResult of rustResults) {

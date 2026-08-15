@@ -34,6 +34,10 @@ import {
 import type { OptimizedChatItem } from "../chatItemPipeline/types";
 import { NewEventDivider } from "../components/NewEventDivider";
 import TurnMetadataFooterSlot from "../components/TurnMetadataFooterSlot";
+import {
+  type ChatSearchRole,
+  getChatSearchEventIds,
+} from "../components/chatSearchPresentation";
 import { CHAT_FOOTER_SPACER } from "../config/chatFooterSpacer";
 import { getUnloadedTurnMeta, isTurnPreviewItem } from "../hooks/useChatGroups";
 import { ChatItemRenderer } from "./ChatItemRenderer";
@@ -191,7 +195,11 @@ function areGroupItemRendererPropsEqual(
     previous.onSubmit === next.onSubmit &&
     previous.onSkip === next.onSkip &&
     previous.onEditUserMessage === next.onEditUserMessage &&
-    previous.newEventDividerLabel === next.newEventDividerLabel
+    previous.newEventDividerLabel === next.newEventDividerLabel &&
+    previous.searchResultEventIds === next.searchResultEventIds &&
+    previous.activeSearchResultEventId === next.activeSearchResultEventId &&
+    previous.onSearchResultClick === next.onSearchResultClick &&
+    previous.searchRoleClassNames === next.searchRoleClassNames
   );
 }
 
@@ -318,6 +326,10 @@ export interface GroupItemRendererProps {
    * divider off (default).
    */
   newEventDividerLabel?: string | null;
+  searchResultEventIds?: ReadonlySet<string>;
+  activeSearchResultEventId?: string | null;
+  onSearchResultClick?: (eventIds: string[]) => void;
+  searchRoleClassNames?: Record<ChatSearchRole, string>;
 }
 
 /**
@@ -354,6 +366,10 @@ export const GroupItemRenderer: React.FC<GroupItemRendererProps> = memo(
     onSkip,
     onEditUserMessage,
     newEventDividerLabel = null,
+    searchResultEventIds,
+    activeSearchResultEventId,
+    onSearchResultClick,
+    searchRoleClassNames,
   }) => {
     const { t } = useTranslation("sessions");
     const groupChat = useGroupChatContext();
@@ -514,9 +530,34 @@ export const GroupItemRenderer: React.FC<GroupItemRendererProps> = memo(
       !isStructuralUnloadedTurnItem &&
       !isStructuralOnlyItem;
 
+    const representedEventIds = chatItem ? getChatSearchEventIds(chatItem) : [];
+    const isSearchResult = representedEventIds.some((id) =>
+      searchResultEventIds?.has(id)
+    );
+    const isActiveSearchResult = representedEventIds.includes(
+      activeSearchResultEventId ?? ""
+    );
+    const searchRole: ChatSearchRole =
+      event?.source === "user" ? "user" : "assistant";
+    const searchResultClassName = isSearchResult
+      ? `chat-search-result ${searchRoleClassNames?.[searchRole] ?? ""} ${
+          isActiveSearchResult ? "chat-search-result--active" : ""
+        }`.trim()
+      : undefined;
+
     return (
       <AgentTurnContext.Provider value={turnContext}>
-        <div style={{ minHeight: 1, ...turnGapStyle }}>
+        <div
+          style={{ minHeight: 1, ...turnGapStyle }}
+          className={searchResultClassName}
+          data-chat-search-role={isSearchResult ? searchRole : undefined}
+          data-chat-search-active={isActiveSearchResult || undefined}
+          onClick={
+            isSearchResult && onSearchResultClick
+              ? () => onSearchResultClick(representedEventIds)
+              : undefined
+          }
+        >
           {showNewEventDivider && (
             <NewEventDivider label={newEventDividerLabel as string} />
           )}

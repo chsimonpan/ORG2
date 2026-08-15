@@ -46,6 +46,14 @@ export interface UseChatSearchIntegrationReturn {
   handleCloseSearch: () => void;
 }
 
+export function closeChatSearch(
+  clearSearch: () => void,
+  setVisible: (visible: boolean) => void
+): void {
+  clearSearch();
+  setVisible(false);
+}
+
 // ============================================
 // Hook
 // ============================================
@@ -208,26 +216,14 @@ export function useChatSearchIntegration({
     };
   }, [search.query, search.isSearchActive, chatContainerRef]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && isSearchVisible) {
-        event.preventDefault();
-        event.stopPropagation();
-        setIsSearchVisible(false);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [isSearchVisible]);
-
   const handleOpenSearch = useCallback(() => {
     setIsSearchVisible(true);
   }, []);
 
+  const { clearSearch } = search;
   const handleCloseSearch = useCallback(() => {
-    setIsSearchVisible(false);
-  }, []);
+    closeChatSearch(clearSearch, setIsSearchVisible);
+  }, [clearSearch]);
 
   return {
     search,

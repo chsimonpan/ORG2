@@ -28,6 +28,7 @@ import PlanningIndicatorBridge from "./PlanningIndicatorBridge";
 import RevertConfirmDialog from "./RevertConfirmDialog";
 import TurnMetadataLoader from "./TurnMetadataLoader";
 import TurnPageList from "./TurnPageList";
+import { findChatSearchResultIndex } from "./chatSearchPresentation";
 
 type ProjectionModel = ReturnType<typeof useChatHistoryProjectionModel>;
 type NavigationModel = ReturnType<typeof useChatNavigationController>;
@@ -199,6 +200,62 @@ const ChatHistoryView: React.FC<ChatHistoryViewProps> = ({
     searchBarRef,
     handleCloseSearch,
   } = search;
+
+  const searchResultEventIds = useMemo(
+    () =>
+      isSearchVisible
+        ? new Set(searchState.results.map((result) => result.item.id))
+        : new Set<string>(),
+    [isSearchVisible, searchState.results]
+  );
+  const activeSearchResultEventId = isSearchVisible
+    ? searchState.getResultEventId(searchState.currentResultIndex)
+    : null;
+  const handleSearchResultClick = useCallback(
+    (eventIds: string[]) => {
+      const resultIndex = findChatSearchResultIndex(
+        searchState.results,
+        eventIds
+      );
+      if (resultIndex >= 0) searchState.navigateToResult(resultIndex);
+    },
+    [searchState]
+  );
+  const searchRoleClassNames = useMemo(
+    () => ({
+      user: "chat-search-result--user",
+      assistant: "chat-search-result--assistant",
+    }),
+    []
+  );
+  const userSearchResultIndexByGroup = useMemo(() => {
+    const indexes = new Map<number, number>();
+    searchState.results.forEach((result, resultIndex) => {
+      if (result.item.source !== "user") return;
+      const displayGroupIndex = displayGroupHeaders.findIndex(
+        (header) => header?.event?.id === result.item.id
+      );
+      if (displayGroupIndex >= 0) indexes.set(displayGroupIndex, resultIndex);
+    });
+    return indexes;
+  }, [displayGroupHeaders, searchState.results]);
+  const searchUserResultGroupIndices = useMemo(
+    () => new Set(userSearchResultIndexByGroup.keys()),
+    [userSearchResultIndexByGroup]
+  );
+  const activeSearchUserGroupIndex = useMemo(() => {
+    for (const [groupIndex, resultIndex] of userSearchResultIndexByGroup) {
+      if (resultIndex === searchState.currentResultIndex) return groupIndex;
+    }
+    return null;
+  }, [searchState.currentResultIndex, userSearchResultIndexByGroup]);
+  const handleSearchUserResultClick = useCallback(
+    (groupIndex: number) => {
+      const resultIndex = userSearchResultIndexByGroup.get(groupIndex);
+      if (resultIndex !== undefined) searchState.navigateToResult(resultIndex);
+    },
+    [searchState, userSearchResultIndexByGroup]
+  );
 
   const getIsWpGeneWorking = useCallback(
     () => isWpGeneWorkingRef.current ?? false,
@@ -498,6 +555,15 @@ const ChatHistoryView: React.FC<ChatHistoryViewProps> = ({
                       virtualScrollerRef={virtuosoScrollerRef}
                       staticScrollerRef={staticScrollerRef}
                       newEventDividerLabel={newEventDividerLabel}
+                      searchResultEventIds={searchResultEventIds}
+                      activeSearchResultEventId={activeSearchResultEventId}
+                      onSearchResultClick={handleSearchResultClick}
+                      searchRoleClassNames={searchRoleClassNames}
+                      searchUserResultGroupIndices={
+                        searchUserResultGroupIndices
+                      }
+                      activeSearchUserGroupIndex={activeSearchUserGroupIndex}
+                      onSearchUserResultClick={handleSearchUserResultClick}
                     />
                   </>
                 ) : (

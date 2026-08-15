@@ -13,6 +13,7 @@ import type { PlanningFooterMode } from "@src/engines/ChatPanel/blocks/primitive
 
 import type { OptimizedChatItem } from "../chatItemPipeline/types";
 import type { GroupHeaderRenderPart } from "../renderers/GroupHeaderRenderer";
+import type { ChatSearchRole } from "./chatSearchPresentation";
 
 export type EventSummary = NonNullable<OptimizedChatItem["event"]>;
 
@@ -90,6 +91,15 @@ export interface ChatHistoryListProps {
    * keeps the divider off (default for the main chat panel).
    */
   newEventDividerLabel?: string | null;
+  /** Current find-in-chat match ids; empty when search is closed/inactive. */
+  searchResultEventIds?: ReadonlySet<string>;
+  activeSearchResultEventId?: string | null;
+  onSearchResultClick?: (eventIds: string[]) => void;
+  /** Role colors are applied to both the full-history and per-turn list paths. */
+  searchRoleClassNames?: Record<ChatSearchRole, string>;
+  searchUserResultGroupIndices?: ReadonlySet<number>;
+  activeSearchUserGroupIndex?: number | null;
+  onSearchUserResultClick?: (groupIndex: number) => void;
 }
 
 export interface VirtualGroup {

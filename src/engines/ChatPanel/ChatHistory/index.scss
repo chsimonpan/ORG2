@@ -343,3 +343,25 @@ mark.search-text-highlight {
   border-radius: 2px;
   box-shadow: 0 0 0 1px rgba(255, 213, 0, 0.3);
 }
+
+// Search-result row surfaces remain role-distinct in both full-history and
+// per-turn rendering. Rows are clickable navigation targets.
+.chat-search-result {
+  cursor: pointer;
+  border-radius: 8px;
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.chat-search-result--user {
+  background-color: color-mix(in srgb, var(--color-primary-5) 12%, transparent);
+}
+
+.chat-search-result--assistant {
+  background-color: color-mix(in srgb, var(--color-fill-3) 72%, transparent);
+}
+
+.chat-search-result--active {
+  box-shadow: inset 0 0 0 1px var(--color-primary-5);
+}

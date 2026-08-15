@@ -250,6 +250,35 @@ export function sameChatHistoryListProps(
       "newEventDividerLabel",
       previous.newEventDividerLabel === next.newEventDividerLabel,
     ],
+    [
+      "searchResultEventIds",
+      previous.searchResultEventIds === next.searchResultEventIds,
+    ],
+    [
+      "activeSearchResultEventId",
+      previous.activeSearchResultEventId === next.activeSearchResultEventId,
+    ],
+    [
+      "onSearchResultClick",
+      previous.onSearchResultClick === next.onSearchResultClick,
+    ],
+    [
+      "searchRoleClassNames",
+      previous.searchRoleClassNames === next.searchRoleClassNames,
+    ],
+    [
+      "searchUserResultGroupIndices",
+      previous.searchUserResultGroupIndices ===
+        next.searchUserResultGroupIndices,
+    ],
+    [
+      "activeSearchUserGroupIndex",
+      previous.activeSearchUserGroupIndex === next.activeSearchUserGroupIndex,
+    ],
+    [
+      "onSearchUserResultClick",
+      previous.onSearchUserResultClick === next.onSearchUserResultClick,
+    ],
   ];
   return checks.every(([, same]) => same);
 }

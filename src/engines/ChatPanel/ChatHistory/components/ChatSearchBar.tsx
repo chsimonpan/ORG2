@@ -148,8 +148,8 @@ export const ChatSearchBar = forwardRef<
         onCaseSensitiveToggle={toggleCaseSensitive}
         onWholeWordToggle={toggleWholeWord}
         onRegexToggle={toggleRegex}
-        onPrevious={prevResult}
-        onNext={nextResult}
+        onPrevious={resultCount > 0 ? prevResult : undefined}
+        onNext={resultCount > 0 ? nextResult : undefined}
         onSubmit={handleSubmit}
         inputRef={inputRef as RefObject<HTMLInputElement>}
         hideChevron

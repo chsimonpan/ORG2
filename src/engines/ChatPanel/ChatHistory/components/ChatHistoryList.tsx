@@ -92,6 +92,13 @@ const ChatHistoryList: React.FC<ChatHistoryListProps> = memo(
     virtualScrollerRef,
     staticScrollerRef,
     newEventDividerLabel = null,
+    searchResultEventIds,
+    activeSearchResultEventId,
+    onSearchResultClick,
+    searchRoleClassNames,
+    searchUserResultGroupIndices,
+    activeSearchUserGroupIndex,
+    onSearchUserResultClick,
   }) => {
     // Planning indicator state in refs so polling ticks don't invalidate
     // renderGroupItem's useCallback (Root Cause 2 fix).
@@ -361,6 +368,10 @@ const ChatHistoryList: React.FC<ChatHistoryListProps> = memo(
             onSkip={onSkip}
             onEditUserMessage={onEditUserMessage}
             newEventDividerLabel={newEventDividerLabel}
+            searchResultEventIds={searchResultEventIds}
+            activeSearchResultEventId={activeSearchResultEventId}
+            onSearchResultClick={onSearchResultClick}
+            searchRoleClassNames={searchRoleClassNames}
           />
         );
       },
@@ -373,6 +384,10 @@ const ChatHistoryList: React.FC<ChatHistoryListProps> = memo(
         onSkip,
         onEditUserMessage,
         newEventDividerLabel,
+        searchResultEventIds,
+        activeSearchResultEventId,
+        onSearchResultClick,
+        searchRoleClassNames,
       ]
     );
 
@@ -413,7 +428,29 @@ const ChatHistoryList: React.FC<ChatHistoryListProps> = memo(
                 className="relative"
                 data-chat-group-index={groupIndex}
               >
-                <div data-chat-group-header>
+                <div
+                  data-chat-group-header
+                  className={
+                    searchUserResultGroupIndices?.has(groupIndex)
+                      ? `chat-search-result ${searchRoleClassNames?.user ?? ""} ${
+                          activeSearchUserGroupIndex === groupIndex
+                            ? "chat-search-result--active"
+                            : ""
+                        }`.trim()
+                      : undefined
+                  }
+                  data-chat-search-role={
+                    searchUserResultGroupIndices?.has(groupIndex)
+                      ? "user"
+                      : undefined
+                  }
+                  onClick={
+                    searchUserResultGroupIndices?.has(groupIndex) &&
+                    onSearchUserResultClick
+                      ? () => onSearchUserResultClick(groupIndex)
+                      : undefined
+                  }
+                >
                   <div className="relative z-[30]">
                     {renderGroupHeaderProp(groupIndex, "user")}
                   </div>
@@ -454,6 +491,10 @@ const ChatHistoryList: React.FC<ChatHistoryListProps> = memo(
                       onSkip={onSkip}
                       onEditUserMessage={onEditUserMessage}
                       newEventDividerLabel={newEventDividerLabel}
+                      searchResultEventIds={searchResultEventIds}
+                      activeSearchResultEventId={activeSearchResultEventId}
+                      onSearchResultClick={onSearchResultClick}
+                      searchRoleClassNames={searchRoleClassNames}
                     />
                   );
                 })}
@@ -503,7 +544,29 @@ const ChatHistoryList: React.FC<ChatHistoryListProps> = memo(
                   transform: `translateY(${virtualItem.start}px)`,
                 }}
               >
-                <div data-chat-group-header>
+                <div
+                  data-chat-group-header
+                  className={
+                    searchUserResultGroupIndices?.has(group.groupIndex)
+                      ? `chat-search-result ${searchRoleClassNames?.user ?? ""} ${
+                          activeSearchUserGroupIndex === group.groupIndex
+                            ? "chat-search-result--active"
+                            : ""
+                        }`.trim()
+                      : undefined
+                  }
+                  data-chat-search-role={
+                    searchUserResultGroupIndices?.has(group.groupIndex)
+                      ? "user"
+                      : undefined
+                  }
+                  onClick={
+                    searchUserResultGroupIndices?.has(group.groupIndex) &&
+                    onSearchUserResultClick
+                      ? () => onSearchUserResultClick(group.groupIndex)
+                      : undefined
+                  }
+                >
                   <div className="relative z-[30]">
                     {renderGroupHeaderProp(group.groupIndex, "user")}
                   </div>
