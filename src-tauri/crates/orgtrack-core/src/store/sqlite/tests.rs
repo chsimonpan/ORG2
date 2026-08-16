@@ -108,6 +108,7 @@ fn init_tables_backfills_parent_identity_before_creating_parent_index() {
         org_member_id: None,
         collaboration_origin: None,
         metadata: AgentMetadata::default(),
+        journey: Default::default(),
     };
     let child_payload = serde_json::to_string(&child).expect("serialize child");
     conn.execute(
@@ -361,6 +362,7 @@ fn file_resource_interaction_pages_keep_root_and_child_sessions_together() {
                 org_member_id: None,
                 collaboration_origin: None,
                 metadata: AgentMetadata::default(),
+                journey: Default::default(),
             })
             .expect("upsert paged session");
     }
