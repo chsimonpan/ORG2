@@ -37,6 +37,48 @@ async fn resolve_gateway_model_and_account(
     (account_id, model)
 }
 
+/// Resolve launch settings without ever pairing a persisted model with a
+/// different account. A selected session owns its durable model variant (and
+/// therefore its encoded reasoning effort); gateway settings are defaults for
+/// a brand-new row or an older row that did not persist a model yet.
+fn resolve_channel_launch_overrides(
+    persisted: Option<&crate::session::persistence::UnifiedSessionRecord>,
+    gateway_account: Option<String>,
+    gateway_model: Option<String>,
+) -> Result<(Option<String>, Option<String>), String> {
+    let Some(record) = persisted else {
+        return Ok((gateway_account, gateway_model));
+    };
+    let Some(model) = record
+        .model
+        .as_deref()
+        .filter(|model| !model.trim().is_empty())
+    else {
+        return Ok((gateway_account, gateway_model));
+    };
+    let account_id = record
+        .account_id
+        .as_deref()
+        .filter(|account| !account.trim().is_empty())
+        .ok_or_else(|| {
+            format!(
+                "session '{}' has persisted model '{}' but no persisted account_id; refusing gateway-account fallback",
+                record.session_id, model
+            )
+        })?;
+    Ok((Some(account_id.to_string()), Some(model.to_string())))
+}
+
+async fn load_persisted_channel_session(
+    session_id: &str,
+) -> Result<Option<crate::session::persistence::UnifiedSessionRecord>, String> {
+    let session_id = session_id.to_string();
+    tokio::task::spawn_blocking(move || crate::session::persistence::get_session(&session_id))
+        .await
+        .map_err(|err| format!("failed to load channel session persistence: {err}"))?
+        .map_err(|err| format!("failed to load channel session persistence: {err}"))
+}
+
 /// Inbound handler: direct routing to the per-chat OS session.
 ///
 /// ```text
@@ -336,7 +378,21 @@ async fn dispatch_to_session(
     _permission_manager: &Arc<AgentPermissionManager>,
 ) -> Result<Option<OutboundMessage>, String> {
     let (gw_account, gw_model) = resolve_gateway_model_and_account(state).await;
-    let effective_account = account_id.or(gw_account.as_deref());
+    let persisted = load_persisted_channel_session(target_session_id).await?;
+    // An explicitly injected account is only a new-session hint. Once a
+    // target has a durable model it must be launched under the account that
+    // selected that model, never the currently active gateway account.
+    let gateway_account = if persisted
+        .as_ref()
+        .and_then(|record| record.model.as_deref())
+        .is_some_and(|model| !model.trim().is_empty())
+    {
+        gw_account
+    } else {
+        account_id.map(str::to_string).or(gw_account)
+    };
+    let (effective_account, effective_model) =
+        resolve_channel_launch_overrides(persisted.as_ref(), gateway_account, gw_model)?;
 
     // SDE sessions have a session-specific `workspace_path` that MUST NOT
     // be overwritten by the generic `channels.workspace_path()`. Route
@@ -356,14 +412,14 @@ async fn dispatch_to_session(
         match persisted_workspace {
             Some(path_str) if !path_str.is_empty() => {
                 let workspace_path = std::path::PathBuf::from(&path_str);
-                let model = gw_model
+                let model = effective_model
                     .as_deref()
-                    .ok_or_else(|| "gateway.model not configured".to_string())?;
+                    .ok_or_else(|| "no persisted or gateway model configured".to_string())?;
                 crate::session::init_workspace_session(
                     state,
                     target_session_id,
                     model,
-                    effective_account,
+                    effective_account.as_deref(),
                     &workspace_path,
                 )
                 .await?
@@ -375,8 +431,8 @@ async fn dispatch_to_session(
                 super::lifecycle::init_channel_session(
                     state,
                     target_session_id,
-                    effective_account,
-                    gw_model.as_deref(),
+                    effective_account.as_deref(),
+                    effective_model.as_deref(),
                 )
                 .await?
             }
@@ -385,8 +441,8 @@ async fn dispatch_to_session(
         super::lifecycle::init_channel_session(
             state,
             target_session_id,
-            effective_account,
-            gw_model.as_deref(),
+            effective_account.as_deref(),
+            effective_model.as_deref(),
         )
         .await?
     };
@@ -528,4 +584,70 @@ pub(super) fn build_inbound_deps(state: &AgentAppState) -> Result<InboundProcess
     Ok(InboundProcessorDeps {
         handler: Arc::new(handler),
     })
+}
+
+#[cfg(test)]
+mod channel_launch_override_tests {
+    use super::resolve_channel_launch_overrides;
+    use crate::session::persistence::UnifiedSessionRecord;
+
+    fn durable_session(model: Option<&str>, account_id: Option<&str>) -> UnifiedSessionRecord {
+        UnifiedSessionRecord {
+            session_id: "selected-session".to_string(),
+            model: model.map(str::to_string),
+            account_id: account_id.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn existing_channel_session_restores_its_account_bound_model_variant() {
+        let persisted = durable_session(
+            Some("openai/gpt-5.5-high:openai"),
+            Some("account-picked-in-session"),
+        );
+
+        let (account, model) = resolve_channel_launch_overrides(
+            Some(&persisted),
+            Some("gateway-default-account".to_string()),
+            Some("anthropic/claude-sonnet-4-6:anthropic".to_string()),
+        )
+        .expect("persisted session should restore");
+
+        assert_eq!(account.as_deref(), Some("account-picked-in-session"));
+        assert_eq!(model.as_deref(), Some("openai/gpt-5.5-high:openai"));
+    }
+
+    #[test]
+    fn new_or_legacy_session_without_model_uses_gateway_default() {
+        let gateway_account = Some("gateway-default-account".to_string());
+        let gateway_model = Some("anthropic/claude-sonnet-4-6:anthropic".to_string());
+
+        assert_eq!(
+            resolve_channel_launch_overrides(None, gateway_account.clone(), gateway_model.clone())
+                .expect("new session uses gateway defaults"),
+            (gateway_account.clone(), gateway_model.clone())
+        );
+        assert_eq!(
+            resolve_channel_launch_overrides(
+                Some(&durable_session(None, Some("historical-account"))),
+                gateway_account.clone(),
+                gateway_model.clone(),
+            )
+            .expect("old row without a model uses gateway defaults"),
+            (gateway_account, gateway_model)
+        );
+    }
+
+    #[test]
+    fn persisted_model_without_account_does_not_cross_bind_to_gateway_account() {
+        let err = resolve_channel_launch_overrides(
+            Some(&durable_session(Some("openai/gpt-5.5-high:openai"), None)),
+            Some("gateway-default-account".to_string()),
+            Some("anthropic/claude-sonnet-4-6:anthropic".to_string()),
+        )
+        .expect_err("a persisted model cannot be launched with another account");
+
+        assert!(err.contains("no persisted account_id"), "{err}");
+    }
 }

@@ -34,6 +34,15 @@ pub fn create_provider(
     create_provider_with_reliability(model, account_id, &ReliabilityConfig::default())
 }
 
+/// Resolve the exact account protocol without constructing a provider.
+/// Journey review enqueue persists this as strict runtime provenance so a
+/// later credential change cannot silently route a queued review elsewhere.
+pub fn resolve_account_protocol(model: &str, account_id: &str) -> Result<String, ProviderError> {
+    let spec = resolve_spec_for_account(model, Some(account_id))?;
+    let resolved = resolve_credentials(spec, Some(account_id))?;
+    Ok(resolved.protocol.as_str().to_string())
+}
+
 /// Create a provider pinned to the account's exact protocol. Used by Journey review
 /// jobs so persisted routing provenance cannot silently change.
 pub fn create_provider_for_protocol(
@@ -46,7 +55,8 @@ pub fn create_provider_for_protocol(
     if resolved.protocol.as_str() != expected_protocol {
         return Err(ProviderError::AuthError(format!(
             "review protocol locked to '{}', account currently resolves to '{}'",
-            expected_protocol, resolved.protocol.as_str()
+            expected_protocol,
+            resolved.protocol.as_str()
         )));
     }
     let reliability = ReliabilityConfig::default();

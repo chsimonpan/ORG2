@@ -1,15 +1,15 @@
-//! Slash command handling (`/help`, `/new`, `/status`, `/model`, `/compact`) for
+//! Slash command handling (`/help`, `/new`, `/status`, `/compact`) for
 //! channel-bound chats.
 
 use crate::bus::{InboundMessage, OutboundMessage};
-use crate::gateway::{GatewayCommand, SessionKey};
 use crate::definitions::OS_AGENT_ID;
+use crate::gateway::{GatewayCommand, SessionKey};
 use crate::integrations::gateway::browse::{self, BrowseLevel, BrowseOption, BrowseState};
 use crate::session::session_id::{next_version_for, os_session_id_base, with_version};
+use crate::state::AgentAppState;
 use crate::tools::impls::orchestration::channel::REINJECT_CHANNEL;
 use core_types::key_source::KeySource;
 use rusqlite::OptionalExtension;
-use crate::state::AgentAppState;
 use tracing::info;
 
 #[cfg(debug_assertions)]
@@ -25,10 +25,77 @@ pub(super) async fn handle_command(
     cmd: GatewayCommand,
 ) -> Result<Option<OutboundMessage>, String> {
     let reply_text = match cmd {
+        GatewayCommand::JourneyInvalid(message) => message,
+        GatewayCommand::Journey(command) => match state.gateway_bindings.get(session_key).await {
+            None => "当前聊天尚未绑定会话，无法执行 Journey 命令。".to_string(),
+            Some(binding) => {
+                let session_id = binding.target_session_id;
+                match tokio::task::spawn_blocking(move || {
+                    let provenance = if matches!(
+                        command,
+                        crate::core::journey_lifecycle::JourneyCommand::ForkClose { .. }
+                    ) {
+                        let record = crate::session::persistence::get_session(&session_id)
+                            .map_err(|error| error.to_string())?
+                            .ok_or_else(|| "未找到当前绑定会话，无法解析审核路由。".to_string())?;
+                        let model_id = record.model.ok_or_else(|| {
+                            "当前会话没有固定模型，禁止关闭分叉后 fallback。".to_string()
+                        })?;
+                        let account_id = record.account_id.ok_or_else(|| {
+                            "当前会话没有固定账户，禁止关闭分叉后 fallback。".to_string()
+                        })?;
+                        let protocol = crate::providers::factory::resolve_account_protocol(
+                            &model_id,
+                            &account_id,
+                        )
+                        .map_err(|error| format!("无法解析当前会话协议：{error}"))?;
+                        Some(crate::core::journey_lifecycle::RuntimeProvenance {
+                            model_id,
+                            account_id,
+                            protocol,
+                        })
+                    } else {
+                        None
+                    };
+                    database::db::with_sessions_writer(|| {
+                        let mut conn =
+                            database::db::get_connection().map_err(|error| error.to_string())?;
+                        execute_bound_journey_command(&mut conn, &session_id, command, provenance)
+                    })
+                })
+                .await
+                {
+                    Ok(Ok(reply)) => reply,
+                    Ok(Err(error)) => format!("会话旅程操作未完成：{error}"),
+                    Err(error) => format!("会话旅程操作未完成：{error}"),
+                }
+            }
+        },
         GatewayCommand::NewSession => {
             state.gateway_bindings.clear(session_key).await;
             info!("[gateway] Cleared binding for {}", session_key.as_str());
             "Conversation reset. The next message starts a fresh session.".to_string()
+        }
+        GatewayCommand::SessionCurrent => build_session_current(state, session_key).await,
+        GatewayCommand::SessionList => build_session_list(state, session_key).await,
+        GatewayCommand::SessionTree => start_browse_tree(session_key).await,
+        GatewayCommand::SessionRecent => start_browse_recent(session_key).await,
+        GatewayCommand::BrowseNext => move_browse_page(session_key, true).await,
+        GatewayCommand::BrowsePrev => move_browse_page(session_key, false).await,
+        GatewayCommand::BrowseBack => browse_back(session_key).await,
+        GatewayCommand::SessionSwitch(target) => switch_session(state, session_key, &target).await,
+        GatewayCommand::SessionNew => {
+            create_and_switch_session(state, msg, session_key, None).await
+        }
+        GatewayCommand::SessionNewNamed(name) => {
+            create_and_switch_session(state, msg, session_key, name).await
+        }
+        GatewayCommand::NewSessionWithPrompt { name, prompt } => {
+            create_switch_and_maybe_prompt(state, msg, session_key, name, prompt).await
+        }
+        GatewayCommand::SessionSearch(query) => search_session_context(&query).await,
+        GatewayCommand::SessionBind { target, value } => {
+            bind_active_context(state, session_key, &target, &value).await
         }
         GatewayCommand::Model(requested) => {
             handle_model_command(state, msg, session_key, requested.as_deref()).await
@@ -59,8 +126,6 @@ pub(super) async fn handle_command(
                 run_manual_compact, ManualCompactResult, MIN_HISTORY_FOR_MANUAL_COMPACT,
             };
 
-            // Resolve the bound session for this chat. If the chat has no
-            // binding there's no session to compact yet.
             let target_sid = match state.gateway_bindings.get(session_key).await {
                 Some(b) => b.target_session_id,
                 None => {
@@ -121,16 +186,24 @@ pub(super) async fn handle_command(
         let bus = state.bus.lock().await;
         bus.publish_outbound(reply.clone());
     }
-    // E2E observability: slash replies previously lived only on the
-    // outbound bus, which has no buffered subscribers in the dev
-    // harness — so `outbound-snapshot` could not verify the reply
-    // text. Mirror the `prepend_reset_notice` pattern and keep a
-    // copy in the debug buffer.
     #[cfg(debug_assertions)]
     push_debug_outbound(state, &reply).await;
     Ok(None)
 }
 
+/// Execute a parsed Journey command at the gateway boundary. This is kept
+/// separate from binding lookup and outbound delivery so every channel uses
+/// the same provider-free lifecycle path.
+fn execute_bound_journey_command(
+    conn: &mut rusqlite::Connection,
+    session_id: &str,
+    command: crate::core::journey_lifecycle::JourneyCommand,
+    provenance: Option<crate::core::journey_lifecycle::RuntimeProvenance>,
+) -> Result<String, String> {
+    crate::core::journey_lifecycle::JourneyApplicationService::execute_with_provenance(
+        conn, session_id, None, command, provenance,
+    )
+}
 pub(super) async fn handle_browse_selection(
     state: &AgentAppState,
     session_key: &SessionKey,
@@ -432,10 +505,22 @@ fn browse_option_label(option: &BrowseOption) -> String {
             terminal_turn_id,
             terminal_turn_status,
         } => {
-            format!(
-                "{session_id} · 结束回合 `{terminal_turn_id}`（{}）",
-                terminal_turn_status_label(terminal_turn_status)
-            )
+            let durable = crate::session::persistence::get_session(session_id)
+                .ok()
+                .flatten();
+            match durable {
+                Some(record) => format!(
+                    "{} · {} · 结束回合 `{}`（{}）",
+                    human_session_title(&record),
+                    human_session_context(&record),
+                    terminal_turn_id,
+                    terminal_turn_status_label(terminal_turn_status)
+                ),
+                None => format!(
+                    "{session_id} · 结束回合 `{terminal_turn_id}`（{}）",
+                    terminal_turn_status_label(terminal_turn_status)
+                ),
+            }
         }
     }
 }
@@ -449,7 +534,548 @@ fn terminal_turn_status_label(status: &str) -> &str {
     }
 }
 
+async fn build_session_current(state: &AgentAppState, session_key: &SessionKey) -> String {
+    match state.gateway_bindings.get(session_key).await {
+        Some(binding) => {
+            let meta = session_meta_line(&binding.target_session_id);
+            format!(
+                "**Current channel session**\n• Binding: `{}` → `{}`\n{}",
+                session_key.as_str(),
+                binding.target_session_id,
+                meta
+            )
+        }
+        None => "**Current channel session**\n• No active session yet (send a message or use `/session new`).".to_string(),
+    }
+}
 
+async fn build_session_list(_state: &AgentAppState, session_key: &SessionKey) -> String {
+    // `/session list` starts the established durable project/session browse
+    // flow; selection, paging and leaf binding remain scoped to that snapshot.
+    start_browse_tree(session_key).await
+}
+
+fn human_session_title(s: &crate::session::persistence::UnifiedSessionRecord) -> String {
+    // A persisted user rename is the canonical title; project/work-item fields
+    // provide context only and must never hide that rename.
+    let name = s.name.trim();
+    if !name.is_empty() && name != s.session_id {
+        return crate::utils::safe_truncate_chars_to_string(name, 48);
+    }
+    if let Some(item) = s
+        .work_item_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return format!("任务 {item}");
+    }
+    if let Some(project) = authoritative_project_label(s) {
+        return format!("项目 {project}");
+    }
+    if let Some(title) = recent_user_title(&s.session_id) {
+        return title;
+    }
+    if let Some(channel) = s
+        .channel
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return format!("{} 讨论", compact_channel_name(channel));
+    }
+    "未命名会话".to_string()
+}
+
+fn compact_channel_name(channel: &str) -> String {
+    channel.split(':').next().unwrap_or(channel).to_string()
+}
+
+/// A workspace path, channel slug, and session id are never project authority.
+fn authoritative_project_label(
+    s: &crate::session::persistence::UnifiedSessionRecord,
+) -> Option<&str> {
+    s.project_name
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            s.project_slug
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+        })
+}
+
+fn human_session_model(s: &crate::session::persistence::UnifiedSessionRecord) -> String {
+    match s.model.as_deref().filter(|model| !model.trim().is_empty()) {
+        Some(model) => format!(
+            "模型：{}",
+            crate::utils::safe_truncate_chars_to_string(model, 36)
+        ),
+        None => "模型：未持久化".to_string(),
+    }
+}
+
+fn human_session_context(s: &crate::session::persistence::UnifiedSessionRecord) -> String {
+    let mut parts = Vec::new();
+    if let Some(project) = authoritative_project_label(s) {
+        parts.push(format!(
+            "项目：{}",
+            crate::utils::safe_truncate_chars_to_string(project, 32)
+        ));
+    }
+    if let Some(item) = s
+        .work_item_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        parts.push(format!(
+            "任务：{}",
+            crate::utils::safe_truncate_chars_to_string(item, 24)
+        ));
+    }
+    if let Some(channel) = s
+        .channel
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        parts.push(format!("来源：{}", compact_channel_name(channel)));
+    }
+    parts.push(format!("状态：{}", s.status));
+    parts.push(human_session_model(s));
+    parts.push(format!("更新：{}", human_time_hint(&s.updated_at)));
+    parts.join(" · ")
+}
+
+fn human_session_relation(
+    s: &crate::session::persistence::UnifiedSessionRecord,
+    _recent: &str,
+) -> String {
+    let mut parts = Vec::new();
+    if let Some(project_name) = s.project_name.as_deref().filter(|x| !x.trim().is_empty()) {
+        let project_id = s.project_id.as_deref().filter(|x| !x.trim().is_empty());
+        parts.push(match project_id {
+            Some(id) => format!("项目 `{}` · journey project_id `{}`", project_name, id),
+            None => format!("项目 `{}`（未绑定 journey project_id）", project_name),
+        });
+    } else if let Some(project_id) = s.project_id.as_deref().filter(|x| !x.trim().is_empty()) {
+        parts.push(format!("journey project_id `{}`", project_id));
+    }
+    if let Some(item) = s.work_item_id.as_deref().filter(|x| !x.trim().is_empty()) {
+        parts.push(format!("任务 `{}`", item));
+    }
+    if parts.is_empty() {
+        parts.push("未绑定项目/任务（拒绝从消息、路径或 slug 推断）".to_string());
+    }
+    parts.join(" · ")
+}
+
+fn human_time_hint(ts: &str) -> String {
+    ts.split('T')
+        .nth(1)
+        .and_then(|tail| tail.get(0..5))
+        .map(|hhmm| hhmm.to_string())
+        .unwrap_or_else(|| ts.to_string())
+}
+
+fn recent_user_title(session_id: &str) -> Option<String> {
+    crate::session::persistence::load_messages(session_id)
+        .ok()?
+        .into_iter()
+        .rev()
+        .find(|row| row.role == "user" && !row.content.trim().is_empty())
+        .map(|row| {
+            let text = row.content.replace('\n', " ");
+            crate::utils::safe_truncate_chars_to_string(text.trim(), 32)
+        })
+        .filter(|s| !s.trim().is_empty())
+}
+
+fn recent_session_preview(session_id: &str) -> String {
+    match crate::session::persistence::load_messages(session_id) {
+        Ok(rows) => rows
+            .into_iter()
+            .rev()
+            .find_map(|row| {
+                let text = row.content.replace('\n', " ");
+                let text = text.trim();
+                if text.is_empty() {
+                    None
+                } else {
+                    Some(format!(
+                        "最近：{}：{}",
+                        role_label(&row.role),
+                        crate::utils::safe_truncate_chars_to_string(text, 88)
+                    ))
+                }
+            })
+            .unwrap_or_else(|| "最近：暂无文本消息".to_string()),
+        Err(_) => "最近：不可用".to_string(),
+    }
+}
+
+fn role_label(role: &str) -> &str {
+    match role {
+        "user" => "用户",
+        "assistant" => "助手",
+        "system" => "系统",
+        other => other,
+    }
+}
+
+async fn switch_session(state: &AgentAppState, session_key: &SessionKey, target: &str) -> String {
+    let sid = target.trim().to_string();
+    let exists = tokio::task::spawn_blocking({
+        let sid = sid.clone();
+        move || crate::session::persistence::get_session(&sid).map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())
+    .and_then(|x| x);
+
+    match exists {
+        Ok(Some(record)) => {
+            state
+                .gateway_bindings
+                .set_with_activity(session_key.clone(), sid.clone(), record.updated_at.clone())
+                .await;
+            format!(
+                "Switched this chat to `{}`.\n{}\n\n{}",
+                sid,
+                session_meta_line(&sid),
+                recent_session_summary(&sid, 6)
+            )
+        }
+        Ok(None) => format!("Session not found: `{}`", sid),
+        Err(err) => format!("Could not switch session: {}", err),
+    }
+}
+
+async fn create_and_switch_session(
+    state: &AgentAppState,
+    msg: &InboundMessage,
+    session_key: &SessionKey,
+    requested_name: Option<String>,
+) -> String {
+    let base = os_session_id_base(&msg.channel, &msg.chat_id);
+    let sid = tokio::task::spawn_blocking(move || {
+        next_version_for(&base)
+            .map(|n| with_version(&base, n))
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())
+    .and_then(|x| x);
+
+    let Ok(sid) = sid else {
+        return "Could not create a fresh channel session.".to_string();
+    };
+    super::dispatch::ensure_os_session_registered(state, &sid).await;
+    let display_name = requested_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let persist_sid = sid.clone();
+    let persist_channel = msg.channel.clone();
+    let persist_chat_id = msg.chat_id.clone();
+    let persist_name = display_name
+        .clone()
+        .unwrap_or_else(|| format!("Channel: {}", persist_channel));
+    let _ = tokio::task::spawn_blocking(move || {
+        let now = chrono::Utc::now().to_rfc3339();
+        let record = crate::session::persistence::UnifiedSessionRecord {
+            session_id: persist_sid,
+            name: persist_name,
+            status: crate::session::SessionStatus::Idle.as_str().to_string(),
+            session_type: crate::session::persistence::session_type::DESKTOP.to_string(),
+            channel: Some(persist_channel),
+            chat_id: Some(persist_chat_id),
+            created_at: now.clone(),
+            updated_at: now,
+            key_source: KeySource::OwnKey,
+            ..Default::default()
+        };
+        crate::session::persistence::upsert_session(&record)
+    })
+    .await;
+    state
+        .gateway_bindings
+        .set(session_key.clone(), sid.clone())
+        .await;
+    match display_name {
+        Some(name) => format!(
+            "Created and switched to fresh channel session `{}` named `{}`.\nRecent context is empty; continue with the new topic.",
+            sid, name
+        ),
+        None => format!(
+            "Created and switched to fresh channel session `{}`.\nRecent context is empty; continue with the new topic.",
+            sid
+        ),
+    }
+}
+async fn create_switch_and_maybe_prompt(
+    state: &AgentAppState,
+    msg: &InboundMessage,
+    session_key: &SessionKey,
+    name: String,
+    prompt: Option<String>,
+) -> String {
+    let created = create_and_switch_session(state, msg, session_key, Some(name.clone())).await;
+    let Some(prompt_text) = prompt
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+    else {
+        return created;
+    };
+    let Some(binding) = state.gateway_bindings.get(session_key).await else {
+        return format!(
+            "{}
+
+Created, but could not dispatch prompt: no active binding found.",
+            created
+        );
+    };
+    let target_sid = binding.target_session_id;
+    let sender_placeholder = if msg.sender_id.is_empty() {
+        OS_AGENT_ID
+    } else {
+        msg.sender_id.as_str()
+    };
+    let mut inbound = InboundMessage::new(
+        REINJECT_CHANNEL,
+        sender_placeholder,
+        &target_sid,
+        &prompt_text,
+    );
+    inbound.session_key_override = Some(target_sid.clone());
+    inbound.metadata.insert(
+        "source_channel".to_string(),
+        serde_json::Value::String(msg.channel.clone()),
+    );
+    inbound.metadata.insert(
+        "source_chat_id".to_string(),
+        serde_json::Value::String(msg.chat_id.clone()),
+    );
+    inbound.media = msg.media.clone();
+    let send_result = {
+        let bus = state.bus.lock().await;
+        bus.inbound_sender().send(inbound).await
+    };
+    match send_result {
+        Ok(()) => format!(
+            "{}
+
+Initial prompt dispatched to `{}`.",
+            created, target_sid
+        ),
+        Err(err) => format!(
+            "{}
+
+Created, but failed to dispatch prompt: {}",
+            created, err
+        ),
+    }
+}
+
+async fn search_session_context(query: &str) -> String {
+    // The channel handler must remain usable even before optional Session
+    // Memory indexes are installed. Search durable session metadata only;
+    // users can still switch directly from the returned canonical id.
+    let query = query.trim().to_ascii_lowercase();
+    if query.is_empty() {
+        return "Usage: `/session search <query>`.".to_string();
+    }
+    let found = tokio::task::spawn_blocking(move || {
+        let filter = crate::session::SessionListFilter {
+            limit: Some(64),
+            ..Default::default()
+        };
+        crate::session::persistence::list_sessions(&filter)
+            .map(|sessions| {
+                sessions
+                    .into_iter()
+                    .filter(|session| {
+                        [
+                            session.session_id.as_str(),
+                            session.name.as_str(),
+                            session.project_name.as_deref().unwrap_or(""),
+                            session.project_slug.as_deref().unwrap_or(""),
+                            session.work_item_id.as_deref().unwrap_or(""),
+                        ]
+                        .iter()
+                        .any(|value| value.to_ascii_lowercase().contains(&query))
+                    })
+                    .take(12)
+                    .collect::<Vec<_>>()
+            })
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())
+    .and_then(|result| result);
+
+    match found {
+        Ok(sessions) if sessions.is_empty() => {
+            "No durable session metadata matched that query.".to_string()
+        }
+        Ok(sessions) => {
+            let mut lines = vec!["**Matching sessions**".to_string()];
+            for session in sessions {
+                lines.push(format!(
+                    "• {}\n  `{}`",
+                    human_session_context(&session),
+                    session.session_id
+                ));
+            }
+            lines.push("Use `/session switch <session_id>` to bind this chat.".to_string());
+            lines.join("\n")
+        }
+        Err(error) => format!("Session search failed: {error}"),
+    }
+}
+
+async fn bind_active_context(
+    state: &AgentAppState,
+    session_key: &SessionKey,
+    target: &str,
+    value: &str,
+) -> String {
+    let Some(binding) = state.gateway_bindings.get(session_key).await else {
+        return "No active session yet. Send a message or use `/session new` first.".to_string();
+    };
+    let session_id = binding.target_session_id;
+    match target {
+        "project" => match update_session_project(&session_id, value).await {
+            Ok(()) => format!("Bound current session `{}` to project `{}`.", session_id, value),
+            Err(err) => format!("Could not bind project: {}", err),
+        },
+        "workitem" | "work_item" | "item" => match bind_session_work_item(&session_id, value).await {
+            Ok((project_slug, short_id)) => format!(
+                "Bound current session `{}` to work item `{}` in project `{}`.",
+                session_id, short_id, project_slug
+            ),
+            Err(err) => format!("Could not bind work item: {}", err),
+        },
+        _ => "Unknown bind target. Use `/session bind project <slug>` or `/session bind workitem <id>`.".to_string(),
+    }
+}
+
+async fn update_session_project(session_id: &str, project_slug: &str) -> Result<(), String> {
+    let sid = session_id.to_string();
+    let slug = project_slug.to_string();
+    tokio::task::spawn_blocking(move || {
+        let project = project_management::projects::io::read_project(&slug)?;
+        let ok = crate::session::persistence::update_work_item_link(
+            &sid,
+            &project.meta.org_id,
+            Some(&project.meta.id),
+            Some(&project.meta.name),
+            &slug,
+            "",
+            Some("orchestrator"),
+        )
+        .map_err(|err| err.to_string())?;
+        if ok {
+            Ok(())
+        } else {
+            Err(format!("Session not found: {sid}"))
+        }
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+async fn bind_session_work_item(session_id: &str, value: &str) -> Result<(String, String), String> {
+    let sid = session_id.to_string();
+    let raw = value.to_string();
+    tokio::task::spawn_blocking(move || {
+        let (project_slug, short_id) = resolve_work_item_ref(&raw)?;
+        let project = project_management::projects::io::read_project(&project_slug)?;
+        project_management::projects::io::read_work_item(&project_slug, &short_id)?;
+        let ok = crate::session::persistence::update_work_item_link(
+            &sid,
+            &project.meta.org_id,
+            Some(&project.meta.id),
+            Some(&project.meta.name),
+            &project_slug,
+            &short_id,
+            Some("orchestrator"),
+        )
+        .map_err(|err| err.to_string())?;
+        if !ok {
+            return Err(format!("Session not found: {sid}"));
+        }
+        Ok((project_slug, short_id))
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+fn resolve_work_item_ref(raw: &str) -> Result<(String, String), String> {
+    if let Some((project_slug, short_id)) = raw.split_once(':') {
+        return Ok((project_slug.to_string(), short_id.to_string()));
+    }
+    Err(format!(
+        "Work item binding currently requires <project_slug>:<short_id> (got `{raw}`)"
+    ))
+}
+
+fn session_meta_line(session_id: &str) -> String {
+    match crate::session::persistence::get_session(session_id) {
+        Ok(Some(s)) => format!(
+            "• {}\n• {}{}",
+            human_session_context(&s),
+            session_display_name(&s),
+            session_project_suffix(s.project_slug.as_deref(), s.work_item_id.as_deref())
+        ),
+        _ => "• Metadata unavailable.".to_string(),
+    }
+}
+
+fn session_display_name(s: &crate::session::persistence::UnifiedSessionRecord) -> String {
+    if !s.name.trim().is_empty() {
+        s.name.clone()
+    } else {
+        s.session_id.clone()
+    }
+}
+
+fn session_project_suffix(project_slug: Option<&str>, work_item_id: Option<&str>) -> String {
+    match (project_slug, work_item_id) {
+        (Some(p), Some(w)) if !p.is_empty() && !w.is_empty() => {
+            format!(" · project `{}` · item `{}`", p, w)
+        }
+        (Some(p), _) if !p.is_empty() => format!(" · project `{}`", p),
+        _ => String::new(),
+    }
+}
+
+fn recent_session_summary(session_id: &str, limit: usize) -> String {
+    match crate::session::persistence::load_messages(session_id) {
+        Ok(rows) => {
+            let mut lines =
+                vec!["Recent context (deterministic last-message summary):".to_string()];
+            let selected: Vec<_> = rows.into_iter().rev().take(limit).collect();
+            if selected.is_empty() {
+                return "Recent context: (empty)".to_string();
+            }
+            for row in selected.into_iter().rev() {
+                let role = row.role;
+                let text = crate::utils::safe_truncate_chars_to_string(
+                    &row.content.replace('\n', " "),
+                    160,
+                );
+                if !text.trim().is_empty() {
+                    lines.push(format!("- {}: {}", role, text));
+                }
+            }
+            if lines.len() == 1 {
+                "Recent context: (no text messages)".to_string()
+            } else {
+                lines.join("\n")
+            }
+        }
+        Err(err) => format!("Recent context unavailable: {}", err),
+    }
+}
 async fn handle_model_command(
     state: &AgentAppState,
     _msg: &InboundMessage,
@@ -457,12 +1083,12 @@ async fn handle_model_command(
     requested: Option<&str>,
 ) -> String {
     let Some(binding) = state.gateway_bindings.get(session_key).await else {
-        return "No session is bound to this chat yet. Send a message first, then use `/model <model>`."
+        return "还没有绑定会话。先发一条普通消息创建当前 Feishu 会话后，再用 `/model <模型>` 切换。"
             .to_string();
     };
     let Some(requested) = requested.map(str::trim).filter(|s| !s.is_empty()) else {
         return format!(
-            "Usage: `/model <model>`. Common aliases: gpt-5.5, gpt5.5, fable, sonnet, opus. Current session: `{}`",
+            "用法：`/model <模型>`。常用别名：gpt-5.5、gpt5.5、fable、sonnet、opus。当前会话：`{}`",
             binding.target_session_id
         );
     };
@@ -476,10 +1102,7 @@ async fn handle_model_command(
             .clone()
     });
     let Some((model, account_id)) = resolve_model_target(requested, account_id.as_deref()) else {
-        return format!(
-            "Model `{}` was not found in the configured model list.",
-            requested
-        );
+        return format!("未找到模型 `{}`", requested);
     };
     let sid = binding.target_session_id.clone();
     let model_for_db = model.clone();
@@ -494,8 +1117,9 @@ async fn handle_model_command(
     .await
     {
         Ok(Ok(true)) => {
+            // # 模型切换后必须丢弃旧 runtime；下一轮会用持久化后的 model 重建 provider。
             state.invalidate_session(&binding.target_session_id).await;
-            let note = format!("Model switched to {}", model);
+            let note = format!("已切换到 {}", model);
             let sid_for_note = binding.target_session_id.clone();
             let note_for_db = note.clone();
             let _ = tokio::task::spawn_blocking(move || {
@@ -504,12 +1128,10 @@ async fn handle_model_command(
             .await;
             note
         }
-        Ok(Ok(false)) => format!(
-            "Model switch failed: session {} does not exist",
-            binding.target_session_id
-        ),
-        Ok(Err(err)) => format!("Model switch failed: {}", err),
-        Err(err) => format!("Model switch failed: {}", err),
+
+        Ok(Ok(false)) => format!("切换模型失败：会话 {} 不存在", binding.target_session_id),
+        Ok(Err(err)) => format!("切换模型失败：{}", err),
+        Err(err) => format!("切换模型失败：{}", err),
     }
 }
 
@@ -521,31 +1143,18 @@ fn resolve_model_target(
     let mut candidates: Vec<String> = Vec::new();
     if let Some(account_id) = account_id {
         if let Some(key) = key_vault::key_store::KEY_SERVICE.get_key_by_id(account_id) {
+            // 优先使用 KeyVault 当前账号真实可用的 model id。model_aliases.alias 在
+            // ORG2 里也是可调用 model id，不是 `/model fable` 这种用户输入别名。
             candidates.extend(key.enabled_models.iter().cloned());
             candidates.extend(key.available_models.iter().cloned());
             candidates.extend(key.model_aliases.iter().map(|alias| alias.alias.clone()));
         }
     }
-    candidates.extend(
-        [
-            "openai/gpt-5.5:openai",
-            "gpt-5.5",
-            "claude-sonnet-4-6",
-            "claude-opus-4-6",
-            "claude-fable-5",
-        ]
-        .into_iter()
-        .map(str::to_string),
-    );
+    candidates.extend(DEFAULT_MODEL_TARGETS.iter().copied().map(str::to_string));
     candidates.sort();
     candidates.dedup();
-    let aliases: &[(&str, &[&str])] = &[
-        ("openai/gpt-5.5:openai", &["gpt-5.5", "gpt5.5", "gpt55"]),
-        ("claude-fable-5", &["fable"]),
-        ("claude-sonnet-4-6", &["sonnet"]),
-        ("claude-opus-4-6", &["opus"]),
-    ];
-    for (target, names) in aliases {
+
+    for (target, names) in MODEL_INPUT_ALIASES {
         if names.iter().any(|name| normalize_model_key(name) == needle) {
             return Some((
                 best_candidate_for_alias(&candidates, target)
@@ -566,18 +1175,57 @@ fn resolve_model_target(
         .map(|model| (model, account_id.map(str::to_string)))
 }
 
+const DEFAULT_MODEL_TARGETS: &[&str] = &[
+    "openai/gpt-5.5:openai",
+    "anthropic/claude-fable-5:anthropic",
+    "anthropic/claude-sonnet-4-6:anthropic",
+    "anthropic/claude-opus-4-6:anthropic",
+];
+
+const MODEL_INPUT_ALIASES: &[(&str, &[&str])] = &[
+    ("openai/gpt-5.5:openai", &["gpt-5.5", "gpt5.5", "gpt55"]),
+    ("anthropic/claude-fable-5:anthropic", &["fable"]),
+    ("anthropic/claude-sonnet-4-6:anthropic", &["sonnet"]),
+    ("anthropic/claude-opus-4-6:anthropic", &["opus"]),
+];
+
 fn best_candidate_for_alias(candidates: &[String], canonical_target: &str) -> Option<String> {
     let target_norm = normalize_model_key(canonical_target);
-    candidates
+    let target_base_norm = normalize_model_key(strip_model_route(canonical_target));
+    let mut matches: Vec<&String> = candidates
         .iter()
-        .find(|m| normalize_model_key(m) == target_norm)
-        .or_else(|| {
-            candidates.iter().find(|m| {
-                let norm = normalize_model_key(m);
-                norm.contains(&target_norm) || target_norm.contains(&norm)
-            })
+        .filter(|m| {
+            let norm = normalize_model_key(m);
+            norm == target_norm
+                || norm == target_base_norm
+                || norm.ends_with(&target_base_norm)
+                || norm.contains(&target_base_norm)
         })
-        .cloned()
+        .collect();
+    // 带 provider / route 的完整 id 优先；避免再次把 `claude-fable-5` 写回库。
+    matches.sort_by_key(|m| candidate_rank(m, canonical_target));
+    matches.first().map(|m| (*m).clone())
+}
+
+fn candidate_rank(model: &str, canonical_target: &str) -> (u8, usize) {
+    let norm = normalize_model_key(model);
+    let canonical_norm = normalize_model_key(canonical_target);
+    let has_route = model.contains('/') || model.contains(':');
+    (
+        if norm == canonical_norm {
+            0
+        } else if has_route {
+            1
+        } else {
+            2
+        },
+        model.len(),
+    )
+}
+
+fn strip_model_route(model: &str) -> &str {
+    let without_route = model.split(':').next().unwrap_or(model);
+    without_route.rsplit('/').next().unwrap_or(without_route)
 }
 
 fn normalize_model_key(value: &str) -> String {
@@ -589,52 +1237,113 @@ fn normalize_model_key(value: &str) -> String {
 }
 
 /// Static cheat-sheet for the `/help` slash command.
-///
-/// Hermes parallel: `gateway/run.py:_handle_help_command` →
-/// `hermes_cli.commands.gateway_help_lines()`. Hermes builds the list
-/// dynamically from a `COMMAND_REGISTRY`; we keep the cheat-sheet
-/// hand-maintained in MVP because the surface is small (six commands)
-/// and the source of truth is the `GatewayCommand` enum next door —
-/// the unit test below pins the alignment.
-///
-/// Keep the body short: Telegram's per-message budget is ~4096 chars
-/// and we don't want the LLM to be tempted to repeat this list back to
-/// the user.
 fn build_help_text() -> String {
     [
-        "**Commands**",
-        "`/help` — show this list (alias: `/commands`).",
-        "`/new` — reset this chat; the next message starts a fresh session.",
-        "`/status` — show the current session and anything else running.",
-        "`/model <model>` — switch the bound channel session model.",
-        "`/compact` — compress the current session and continue in a versioned successor.",
+        "**ORG2 commands** (gateway; no LLM tokens)",
+        "**General**",
+        "`/help` (`/commands`) · `/status` · `/new` (`/reset`)",
+        "`/model <model>` · `/compact`",
+        "**Sessions**",
+        "`/session current` (`/ctx current`)",
+        "`/session list` (`/session ls`, `/ctx ls`)",
+        "`/session switch <id>` (`/session use <id>`)",
+        "`/session new [name]` · `/newsession <name> [prompt]`",
+        "`/session search <query>`",
+        "**Journey**",
+        "`/journey` · `/task start <name> [recent|next]`",
+        "`/task checkpoint <name> <exact-message-id>`",
+        "`/task finish <outcome>`",
+        "`/fork start <name> <exact-anchor>` · `/fork close <outcome>` · `/fork compare`",
+        "`/review list` · `/review discard <id>` · `/review confirm ...`",
+        "**Project context**",
+        "`/session bind project <slug>`",
+        "`/session bind workitem <project>:<id>` · `manage_work_item` (`wi`)",
     ]
     .join("\n")
 }
 
 #[cfg(test)]
 mod help_text_tests {
-    use super::{best_candidate_for_alias, build_help_text, normalize_model_key};
+    use super::{
+        best_candidate_for_alias, build_help_text, human_session_context, human_session_title,
+        normalize_model_key, resolve_model_target,
+    };
 
     #[test]
     fn lists_every_supported_slash_command() {
         let text = build_help_text();
-        for cmd in ["/help", "/new", "/status", "/model", "/compact"] {
+        for cmd in [
+            "/help",
+            "/new",
+            "/status",
+            "/compact",
+            "/model",
+            "/session current",
+            "/session switch",
+        ] {
             assert!(text.contains(cmd), "help cheat-sheet missing {cmd}: {text}");
         }
     }
 
-    /// `/switch` and `/agent` were removed after dogfooding surfaced
-    /// that end-users never use them (they'd have to copy/paste an
-    /// opaque `sdeagent-...` session id). The `/help` cheat-sheet must
-    /// not advertise them to avoid discovery + confusion.
     #[test]
-    fn does_not_advertise_removed_commands() {
-        let text = build_help_text();
+    fn renamed_session_is_title_and_canonical_project_is_context() {
+        let session = crate::session::persistence::UnifiedSessionRecord {
+            session_id: "sdeagent-635cbf7c-84eb-435f-91a7-a4e79a06bc22".to_string(),
+            name: "aug".to_string(),
+            project_id: Some("proj-ppcharge".to_string()),
+            project_name: Some("PPCharge".to_string()),
+            project_slug: Some("ppcharge".to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(super::human_session_title(&session), "aug");
+        let relation = super::human_session_relation(&session, "最近：暂无文本消息");
+        assert!(relation.contains("PPCharge"), "{relation}");
+        assert!(relation.contains("proj-ppcharge"), "{relation}");
+        assert!(!relation.contains("可能关联"), "{relation}");
+    }
+
+    #[test]
+    fn recent_session_card_prefers_renamed_title_and_durable_display_context() {
+        let session = crate::session::persistence::UnifiedSessionRecord {
+            session_id: "osagent-feishu-rename".to_string(),
+            name: "Simon renamed this session".to_string(),
+            status: "running".to_string(),
+            model: Some("openai/gpt-5.5-high:openai".to_string()),
+            workspace_path: Some("/workspace/not-an-authoritative-project".to_string()),
+            project_slug: Some("authoritative-project".to_string()),
+            project_name: Some("Authoritative Project".to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(human_session_title(&session), "Simon renamed this session");
+        let card = human_session_context(&session);
+        assert!(card.contains("项目：Authoritative Project"), "{card}");
+        assert!(card.contains("状态：running"), "{card}");
+        assert!(card.contains("模型：openai/gpt-5.5-high:openai"), "{card}");
         assert!(
-            !text.contains("/switch"),
-            "help still mentions /switch: {text}"
+            !card.contains("/workspace/not-an-authoritative-project"),
+            "{card}"
         );
+    }
+
+    #[test]
+    fn recent_session_card_does_not_infer_project_from_workspace() {
+        let session = crate::session::persistence::UnifiedSessionRecord {
+            session_id: "osagent-feishu-slug-looking-id".to_string(),
+            name: "".to_string(),
+            status: "idle".to_string(),
+            workspace_path: Some("/projects/looks-like-a-project".to_string()),
+            ..Default::default()
+        };
+        let card = human_session_context(&session);
+        assert!(!card.contains("looks-like-a-project"), "{card}");
+        assert!(card.contains("状态：idle"), "{card}");
+    }
+
+    #[test]
+    fn does_not_advertise_removed_agent_command() {
+        let text = build_help_text();
         assert!(
             !text.contains("/agent"),
             "help still mentions /agent: {text}"
@@ -642,19 +1351,71 @@ mod help_text_tests {
     }
 
     #[test]
-    fn resolves_model_alias_to_best_configured_candidate() {
+    fn recent_session_card_keeps_rename_and_displays_durable_context() {
+        let session = crate::session::persistence::UnifiedSessionRecord {
+            session_id: "osagent-feishu-rename".to_string(),
+            name: "Simon renamed this session".to_string(),
+            status: "running".to_string(),
+            model: Some("openai/gpt-5.5-high:openai".to_string()),
+            workspace_path: Some("/workspace/not-an-authoritative-project".to_string()),
+            project_slug: Some("authoritative-project".to_string()),
+            project_name: Some("Authoritative Project".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            super::human_session_title(&session),
+            "Simon renamed this session"
+        );
+        let card = super::human_session_context(&session);
+        assert!(card.contains("项目：Authoritative Project"), "{card}");
+        assert!(card.contains("状态：running"), "{card}");
+        assert!(card.contains("模型：openai/gpt-5.5-high:openai"), "{card}");
+        assert!(
+            !card.contains("/workspace/not-an-authoritative-project"),
+            "{card}"
+        );
+    }
+
+    #[test]
+    fn model_aliases_resolve_without_key_vault() {
+        assert_eq!(normalize_model_key("gpt-5.5"), "gpt55");
+        assert_eq!(
+            resolve_model_target("gpt-5.5", None).unwrap().0,
+            "openai/gpt-5.5:openai"
+        );
+        assert_eq!(
+            resolve_model_target("gpt5.5", None).unwrap().0,
+            "openai/gpt-5.5:openai"
+        );
+        assert_eq!(
+            resolve_model_target("sonnet", None).unwrap().0,
+            "anthropic/claude-sonnet-4-6:anthropic"
+        );
+        assert_eq!(
+            resolve_model_target("opus", None).unwrap().0,
+            "anthropic/claude-opus-4-6:anthropic"
+        );
+        assert_eq!(
+            resolve_model_target("fable", None).unwrap().0,
+            "anthropic/claude-fable-5:anthropic"
+        );
+    }
+
+    #[test]
+    fn alias_candidate_prefers_full_model_ids() {
         let candidates = vec![
-            "openai/gpt-5.5:openai".to_string(),
-            "anthropic/claude-fable-5:anthropic".to_string(),
+            "claude-fable-5".to_string(),
+            "anthropic/anthropic/claude-fable-5:anthropic".to_string(),
         ];
         assert_eq!(
-            best_candidate_for_alias(&candidates, "openai/gpt-5.5:openai"),
-            Some("openai/gpt-5.5:openai".to_string())
+            best_candidate_for_alias(&candidates, "anthropic/claude-fable-5:anthropic").unwrap(),
+            "anthropic/anthropic/claude-fable-5:anthropic"
         );
-        assert_eq!(
-            best_candidate_for_alias(&candidates, "claude-fable-5"),
-            Some("anthropic/claude-fable-5:anthropic".to_string())
-        );
+    }
+
+    #[test]
+    fn fits_message_budget() {
+        assert!(build_help_text().len() < 4096);
     }
 
     #[test]
@@ -671,5 +1432,61 @@ mod help_text_tests {
         // Hermes caps at 4096 (Telegram limit). 1KB is plenty of head-room
         // for a static list and forces us to revisit if we balloon.
         assert!(build_help_text().len() < 1024);
+    }
+}
+
+#[cfg(test)]
+mod journey_dispatch_tests {
+    use super::execute_bound_journey_command;
+    use crate::core::session::journey_application_service::{
+        CreateTaskRequest, JourneyApplicationError, SessionJourneyApplicationService,
+        TaskStartPosition,
+    };
+    use crate::gateway::{parse_command, GatewayCommand};
+
+    #[test]
+    fn feishu_journey_inbound_dispatch_uses_no_provider_and_shares_durable_cas() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE agent_sessions (session_id TEXT PRIMARY KEY);
+             CREATE TABLE agent_messages (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user'
+             );
+             INSERT INTO agent_sessions (session_id) VALUES ('feishu:chat-1:user-1');
+             INSERT INTO agent_messages (id, session_id, sequence, role)
+             VALUES ('message-1', 'feishu:chat-1:user-1', 1, 'user');",
+        )
+        .unwrap();
+
+        let GatewayCommand::Journey(command) = parse_command("/task start 飞书核对 recent")
+            .expect("Feishu inbound text must parse as a Journey command")
+        else {
+            panic!("Journey control input must not be routed to a provider");
+        };
+        let reply = execute_bound_journey_command(&mut conn, "feishu:chat-1:user-1", command, None)
+            .expect("Journey dispatch must complete without a configured provider");
+        assert!(reply.contains("最近一条用户消息"));
+
+        let error = SessionJourneyApplicationService::create_task(
+            &mut conn,
+            CreateTaskRequest {
+                session_id: "feishu:chat-1:user-1".into(),
+                expected_revision: 0,
+                task_id: "desktop-stale".into(),
+                name: "桌面旧修订".into(),
+                position: TaskStartPosition::下一条用户消息,
+            },
+        )
+        .expect_err("desktop must observe the revision written by the Feishu adapter");
+        assert!(matches!(
+            error,
+            JourneyApplicationError::修订冲突 {
+                expected: 0,
+                actual: 1
+            }
+        ));
     }
 }
