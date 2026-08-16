@@ -143,6 +143,7 @@ pub(crate) fn runtime_artifact_session_record(session_id: &str) -> Result<Sessio
                 origin: Some(SOURCE_ORGII_RUST_AGENTS.to_string()),
                 ..AgentMetadata::default()
             },
+            journey: Default::default(),
         });
     };
 
@@ -188,5 +189,6 @@ pub(crate) fn runtime_artifact_session_record(session_id: &str) -> Result<Sessio
             display_name: Some(record.name),
             ..AgentMetadata::default()
         },
+        journey: Default::default(),
     })
 }

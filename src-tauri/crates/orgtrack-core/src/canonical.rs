@@ -9,6 +9,8 @@ pub use orgtrack_protocol::{
     RESOURCE_INTERACTION_SCHEMA_VERSION, SESSION_ACTOR_SCHEMA_VERSION,
 };
 
+use core_types::session::ParentSessionRelation;
+
 pub const SOURCE_ORGII_RUST_AGENTS: &str = "orgii_rust_agents";
 pub const SOURCE_ORGII_CLI_SESSIONS: &str = "orgii_cli_sessions";
 pub const SOURCE_ORGII_CLOUD_REPLAY: &str = "orgii_cloud_replay";
@@ -44,6 +46,10 @@ pub struct AgentMetadata {
     pub key_source: Option<String>,
     pub origin: Option<String>,
     pub display_name: Option<String>,
+    /// Explicit evidence for the semantics of `SessionRecord.parent_session_id`.
+    /// `None` is deliberately not inferred from the raw ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_relation: Option<ParentSessionRelation>,
     pub parsed_categories: BTreeMap<String, String>,
 }
 
@@ -81,6 +87,25 @@ pub struct SessionRecord {
     #[serde(default)]
     pub collaboration_origin: Option<CollaborationSessionOrigin>,
     pub metadata: AgentMetadata,
+    /// Explicit Journey associations supplied by the session producer. They
+    /// are never reconstructed from names, paths, branches, or event order.
+    #[serde(default)]
+    pub journey: JourneyMetadata,
+}
+
+/// Optional durable metadata consumed by the read-only Journey projector.
+/// `topic_tags` has no automatic producer yet; it remains empty until an
+/// explicit producer supplies it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct JourneyMetadata {
+    pub project_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub work_item_id: Option<String>,
+    pub agent_identity: Option<String>,
+    pub agent_band: Option<String>,
+    #[serde(default)]
+    pub topic_tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
