@@ -203,6 +203,28 @@ fn model_slug_defaults_empty_and_accepts_only_supported_provider_slugs() {
     assert!(!ModelSlug::is_supported_slug("unsupported-provider"));
 }
 
+#[test]
+fn model_slug_serde_is_backward_compatible_and_round_trips() {
+    let legacy = serde_json::json!({
+        "id": "legacy",
+        "agent_type": "zenmux_api",
+        "created_at": "2026-08-16T00:00:00",
+        "updated_at": "2026-08-16T00:00:00"
+    });
+    let legacy_key: ModelKey = serde_json::from_value(legacy).expect("legacy key deserializes");
+    assert!(legacy_key.model_slugs.is_empty());
+
+    let mut key = ModelKey::new(ModelType::ZenmuxApi);
+    key.model_slugs.push(ModelSlug {
+        model: "deepseek/deepseek-chat".to_string(),
+        slug: "deepseek".to_string(),
+    });
+    let round_trip: ModelKey =
+        serde_json::from_value(serde_json::to_value(&key).expect("model key serializes"))
+            .expect("model key deserializes");
+    assert_eq!(round_trip.model_slugs, key.model_slugs);
+}
+
 // ---------------------------------------------------------------------------
 // ModelKey::mask_api_key edge cases
 // ---------------------------------------------------------------------------

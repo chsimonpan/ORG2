@@ -91,6 +91,7 @@ pub struct KeyInfo {
     pub model_aliases: Vec<ModelAliasInfo>,
     pub model_variants: Vec<ModelVariantInfo>,
     pub default_variants: Vec<DefaultVariantInfo>,
+    pub model_slugs: Vec<crate::key_store::ModelSlug>,
     pub quota_info: Option<serde_json::Value>,
     pub description: Option<String>,
     pub has_local_key: bool,
@@ -833,6 +834,7 @@ impl From<ModelKey> for KeyInfo {
                 .collect(),
             model_variants: model_variants_for_key(&entry),
             default_variants: default_variants_for_key(&entry),
+            model_slugs: entry.model_slugs.clone(),
             quota_info: entry.quota_info.clone(),
             has_local_key: entry.has_local_key,
             is_listed: entry.is_listed,
@@ -890,6 +892,7 @@ pub struct SaveKeyRequest {
     pub model_aliases: Option<Vec<ModelAliasInfo>>,
     pub model_variants: Option<Vec<ModelVariantInfo>>,
     pub default_variants: Option<Vec<DefaultVariantInfo>>,
+    pub model_slugs: Option<Vec<crate::key_store::ModelSlug>>,
     pub quota_info: Option<serde_json::Value>,
     pub has_local_key: Option<bool>,
     pub is_listed: Option<bool>,
@@ -914,6 +917,7 @@ pub struct FullKeyResponse {
     pub model_aliases: Vec<ModelAliasInfo>,
     pub model_variants: Vec<ModelVariantInfo>,
     pub default_variants: Vec<DefaultVariantInfo>,
+    pub model_slugs: Vec<crate::key_store::ModelSlug>,
     pub auth_method: String,
 }
 
@@ -958,6 +962,7 @@ impl From<ModelKey> for FullKeyResponse {
                     model: variant.model,
                 })
                 .collect(),
+            model_slugs: entry.model_slugs,
             auth_method: match entry.auth_method {
                 AuthMethod::ApiKey => "api_key",
                 AuthMethod::Oauth => "oauth",
@@ -1116,6 +1121,28 @@ pub async fn save_key(request: SaveKeyRequest) -> Result<KeyInfo, String> {
                     model: variant.model,
                 })
                 .collect();
+        }
+        if let Some(slugs) = request.model_slugs {
+            if let Some(slug) = slugs
+                .iter()
+                .find(|slug| !crate::key_store::ModelSlug::is_supported_slug(&slug.slug))
+            {
+                return Err(format!(
+                    "Unsupported provider slug '{}'. Supported values: {}",
+                    slug.slug,
+                    crate::key_store::ModelSlug::SUPPORTED_SLUGS.join(", ")
+                ));
+            }
+            // Deduplicate by base model; later entries win while preserving their order.
+            let mut seen = std::collections::HashSet::new();
+            let mut deduplicated: Vec<_> = slugs
+                .into_iter()
+                .rev()
+                .filter(|slug| !slug.model.trim().is_empty() && !slug.slug.trim().is_empty())
+                .filter(|slug| seen.insert(slug.model.clone()))
+                .collect();
+            deduplicated.reverse();
+            entry.model_slugs = deduplicated;
         }
         if let Some(quota) = request.quota_info {
             entry.quota_info = Some(quota);

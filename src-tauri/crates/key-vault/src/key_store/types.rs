@@ -276,6 +276,16 @@ impl ModelType {
         !self.is_cli_agent()
     }
 
+    /// Embedding-only credentials are never valid chat/agent providers.
+    pub fn is_embedding_only(&self) -> bool {
+        matches!(self, ModelType::EmbeddingApi)
+    }
+
+    /// Providers eligible for generation runtimes and model selectors.
+    pub fn supports_generation(&self) -> bool {
+        !self.is_embedding_only()
+    }
+
     /// Returns `true` if this is a CLI-based coding agent.
     pub fn is_cli_agent(&self) -> bool {
         matches!(
@@ -452,6 +462,9 @@ pub struct ModelKey {
     /// concrete variant model id stored here (e.g. `claude-4.6-opus-high`).
     #[serde(default)]
     pub default_variants: Vec<DefaultVariant>,
+    /// Supplier slug pins per model (aggregator routing).
+    #[serde(default)]
+    pub model_slugs: Vec<ModelSlug>,
     #[serde(default)]
     pub oauth_refresh_failure_count: u32,
     #[serde(default, with = "optional_flexible_datetime")]
@@ -524,6 +537,32 @@ pub enum ReasoningEffort {
 /// A user-chosen default variant for one base model family. `base_model` is
 /// the family root (e.g. `claude-4.6-opus`); `model` is the concrete variant
 /// id the runtime should launch when that family is selected.
+/// A user-configured ZenMux/aggregator supplier slug pin for one model.
+///
+/// When set, the effective model id sent to the aggregator becomes
+/// `{model}:{slug}`, locking the upstream supplier instead of free-routing.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelSlug {
+    pub model: String,
+    pub slug: String,
+}
+
+impl ModelSlug {
+    pub const SUPPORTED_SLUGS: [&str; 7] = [
+        "amazon-bedrock",
+        "google-vertex",
+        "anthropic",
+        "openai",
+        "bigmodel",
+        "deepseek",
+        "x-ai",
+    ];
+
+    pub fn is_supported_slug(slug: &str) -> bool {
+        Self::SUPPORTED_SLUGS.contains(&slug.trim())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DefaultVariant {
     pub base_model: String,
@@ -560,6 +599,7 @@ impl ModelKey {
             model_aliases: Vec::new(),
             model_variants: Vec::new(),
             default_variants: Vec::new(),
+            model_slugs: Vec::new(),
             oauth_refresh_failure_count: 0,
             last_oauth_refresh_failed_at: None,
             temporary_unavailable_until: None,

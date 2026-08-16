@@ -89,6 +89,29 @@ fn opencode_zenmux_model_id_falls_back_to_enabled_models() {
 }
 
 #[test]
+fn opencode_zenmux_model_id_appends_configured_supplier_slug() {
+    let mut key = ModelKey::new(ModelType::ZenmuxApi);
+    key.enabled_models = vec!["deepseek/deepseek-v4-flash".to_string()];
+    key.model_slugs = vec![key_vault::key_store::ModelSlug {
+        model: "deepseek/deepseek-v4-flash".to_string(),
+        slug: "deepseek".to_string(),
+    }];
+
+    assert_eq!(
+        opencode_zenmux_model_id(None, &key),
+        "deepseek/deepseek-v4-flash:deepseek"
+    );
+    assert_eq!(
+        opencode_zenmux_model_id(Some("deepseek/deepseek-v4-flash:openai"), &key),
+        "deepseek/deepseek-v4-flash:openai"
+    );
+    assert_eq!(
+        opencode_zenmux_model_id(Some("deepseek/deepseek-chat"), &key),
+        "deepseek/deepseek-chat"
+    );
+}
+
+#[test]
 fn setup_opencode_zenmux_profile_writes_config_and_auth() {
     let temp_dir = tempfile::tempdir().expect("temp opencode profile");
     let mut key = ModelKey::new(ModelType::ZenmuxApi);

@@ -46,12 +46,26 @@ pub(super) fn opencode_zenmux_model_id(
     session_model: Option<&str>,
     selected_key: &ModelKey,
 ) -> String {
-    session_model
+    let model = session_model
         .filter(|value| !value.trim().is_empty())
         .or_else(|| selected_key.enabled_models.first().map(String::as_str))
         .or_else(|| selected_key.available_models.first().map(String::as_str))
         .unwrap_or(OPENCODE_DEFAULT_ZENMUX_MODEL)
-        .to_string()
+        .to_string();
+    apply_model_slug(&model, selected_key)
+}
+
+/// Apply a configured upstream supplier pin unless the caller already supplied one.
+fn apply_model_slug(model: &str, selected_key: &ModelKey) -> String {
+    if model.contains(':') {
+        return model.to_string();
+    }
+    selected_key
+        .model_slugs
+        .iter()
+        .find(|slug| slug.model == model)
+        .map(|slug| format!("{}:{}", model, slug.slug))
+        .unwrap_or_else(|| model.to_string())
 }
 
 pub(super) fn atlascloud_model_id(session_model: Option<&str>, selected_key: &ModelKey) -> String {
