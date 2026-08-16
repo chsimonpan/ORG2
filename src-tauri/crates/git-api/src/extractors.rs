@@ -92,6 +92,13 @@ fn registered_repo_roots() -> Vec<PathBuf> {
 /// - **Windows:** Must be under `<drive>:\Users` or the system temp directory.
 /// - **All:** Home, temp, and user-registered repo roots are allowed.
 fn is_path_allowed(path: &StdPath) -> bool {
+    // A repository root must never authorize reads from SSH credential storage,
+    // even when the current process runs as root and its home directory is an
+    // otherwise allowed workspace parent.
+    if path.components().any(|component| component.as_os_str() == ".ssh") {
+        return false;
+    }
+
     let mut allowed: Vec<PathBuf> = Vec::new();
 
     if let Some(home) = dirs::home_dir() {

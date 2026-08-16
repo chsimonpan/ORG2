@@ -1396,16 +1396,27 @@ mod model_discovery_tests {
         .await
         .expect("bounded wrapper shutdown");
 
-        let mut helper_alive = true;
+        let mut helper_running = true;
         for _ in 0..20 {
-            // SAFETY: signal 0 performs an existence check only.
-            helper_alive = unsafe { libc::kill(helper_pid, 0) == 0 };
-            if !helper_alive {
+            // `kill(pid, 0)` also succeeds for a reaped-pending zombie. The
+            // shutdown contract is that no descendant remains executable;
+            // PID 1 owns eventual reaping after the shell group is killed.
+            let state = std::fs::read_to_string(format!("/proc/{helper_pid}/stat"))
+                .ok()
+                .and_then(|stat| {
+                    stat.rsplit_once(") ")
+                        .and_then(|(_, fields)| fields.chars().next())
+                });
+            helper_running = matches!(state, Some(state) if state != 'Z');
+            if !helper_running {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
-        assert!(!helper_alive, "descendant process {helper_pid} survived");
+        assert!(
+            !helper_running,
+            "descendant process {helper_pid} remained executable after shutdown"
+        );
     }
 
     #[cfg(windows)]
