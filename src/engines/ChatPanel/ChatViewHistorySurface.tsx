@@ -4,7 +4,7 @@ import type {
   AgentOrgRunMemberView,
   AgentOrgRunView,
 } from "@src/api/tauri/agent";
-import { AgentMessageClampProvider } from "@src/engines/ChatPanel/blocks";
+import { AgentMessageClampProvider } from "@src/engines/ChatPanel/blocks/AgentMessageBlock";
 import { AgentOrgGroupChatLiveSessions } from "@src/engines/ChatPanel/hooks/useAgentOrgGroupChatLiveSessions";
 import type { SessionEvent } from "@src/engines/SessionCore/core/types";
 import { SessionCommentsProvider } from "@src/features/Org2Cloud/SessionComments/SessionCommentsContext";

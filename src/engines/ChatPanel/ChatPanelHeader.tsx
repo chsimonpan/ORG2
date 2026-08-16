@@ -15,7 +15,7 @@ import RegionNoticeButton from "@src/components/RegionNoticeButton";
 import Tooltip from "@src/components/Tooltip";
 import type { DropdownEnginePosition } from "@src/hooks/dropdown";
 import { getCollapsedSidebarChromeOffset } from "@src/hooks/ui/sidebar/useCollapsedSidebarChromeOffset";
-import { TabBarTrailingIconButton } from "@src/modules/WorkStation/shared";
+import { TabBarTrailingIconButton } from "@src/modules/WorkStation/shared/TabBar/components/TabBarTrailingIconButton";
 import { HEADER_ICON_SIZE } from "@src/modules/WorkStation/shared/tokens";
 import { CollapsedSidebarButton } from "@src/scaffold/NavigationSidebar/CollapsedSidebarButton";
 import type { ChatHistoryDisplayMode } from "@src/store/ui/chatPanelAtom";
