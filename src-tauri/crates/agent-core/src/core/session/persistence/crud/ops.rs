@@ -81,11 +81,11 @@ INSERT INTO agent_sessions (
     workspace_path, org_id, project_id, project_name,
     work_item_id, agent_role, worktree_path,
     worktree_branch, base_branch, merge_status,
-    project_slug, agent_definition_id, org_member_id, parent_session_id, parent_event_id,
+    project_slug, agent_definition_id, org_member_id, parent_session_id, parent_session_relation, parent_event_id,
     workspace_additional_json, key_source, agent_exec_mode, native_harness_type,
     draft_text, reply_target_event_id, pinned, product_mode
 )
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35)
 ON CONFLICT(session_id) DO UPDATE SET
     name                       = excluded.name,
     status                     = excluded.status,
@@ -110,6 +110,7 @@ ON CONFLICT(session_id) DO UPDATE SET
     agent_definition_id        = COALESCE(excluded.agent_definition_id, agent_sessions.agent_definition_id),
     org_member_id              = COALESCE(excluded.org_member_id, agent_sessions.org_member_id),
     parent_session_id          = COALESCE(excluded.parent_session_id, agent_sessions.parent_session_id),
+    parent_session_relation    = COALESCE(excluded.parent_session_relation, agent_sessions.parent_session_relation),
     parent_event_id            = COALESCE(excluded.parent_event_id, agent_sessions.parent_event_id),
     -- Preserve existing workspace JSON unless the caller
     -- explicitly wrote a non-default value. This stops
@@ -191,6 +192,7 @@ pub fn upsert_session(record: &UnifiedSessionRecord) -> SqliteResult<()> {
                 record.agent_definition_id,
                 record.org_member_id,
                 record.parent_session_id,
+                record.parent_session_relation.map(|relation| relation.as_str()),
                 record.parent_event_id,
                 record.workspace_additional_json,
                 key_source_str,
@@ -1044,6 +1046,7 @@ mod tests {
             agent_definition_id TEXT,
             org_member_id TEXT,
             parent_session_id TEXT,
+            parent_session_relation TEXT,
             parent_event_id TEXT,
             workspace_additional_json TEXT NOT NULL DEFAULT '{}',
             key_source TEXT NOT NULL DEFAULT 'own_key',
@@ -1136,6 +1139,7 @@ mod tests {
                 record.agent_definition_id,
                 record.org_member_id,
                 record.parent_session_id,
+                record.parent_session_relation.map(|relation| relation.as_str()),
                 record.parent_event_id,
                 record.workspace_additional_json,
                 key_source_str,

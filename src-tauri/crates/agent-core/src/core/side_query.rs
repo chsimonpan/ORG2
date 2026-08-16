@@ -27,8 +27,10 @@ use crate::providers::traits::{finish_reason, LLMProvider, LLMResponse, Provider
 pub struct SideQueryConfig {
     /// Model to use. `None` = use the caller-supplied default.
     pub model: Option<String>,
-    /// Maximum tokens in the response (default: 1024).
-    pub max_tokens: u32,
+    /// Optional maximum tokens in the response. `None` delegates to the
+    /// provider-compatible side-query default rather than defining a
+    /// domain-specific budget.
+    pub max_tokens: Option<u32>,
     /// Sampling temperature (default: 0.0 for deterministic output).
     pub temperature: f32,
     /// Optional system prompt prepended as a system message.
@@ -44,6 +46,12 @@ pub struct SideQueryConfig {
     /// one-shot requests whose prefix is never sent again (compaction
     /// summarization) — see [`ChatOptions::skip_cache_write`].
     pub skip_cache_write: bool,
+    /// Use the provider's streaming path (`chat_streaming` with a no-op
+    /// delta sink). Large prompts (e.g. compaction summarization over a
+    /// near-full context window) can exceed non-streaming read timeouts on
+    /// gateways/proxies; streaming keeps bytes flowing so the connection
+    /// stays alive. Defaults to `false` (existing behavior).
+    pub stream: bool,
 }
 
 /// Forced tool call for structured output.
@@ -58,12 +66,13 @@ impl Default for SideQueryConfig {
     fn default() -> Self {
         Self {
             model: None,
-            max_tokens: 1024,
+            max_tokens: Some(1024),
             temperature: 0.0,
             system_prompt: None,
             structured: None,
             account_id: None,
             skip_cache_write: false,
+            stream: false,
         }
     }
 }
@@ -78,6 +87,8 @@ pub struct SideQueryResult {
     pub prompt_tokens: i64,
     /// Completion tokens used by this call.
     pub completion_tokens: i64,
+    /// Cache-read tokens reported by the provider (0 when unavailable).
+    pub cache_read_tokens: i64,
     /// Structured output extracted from a forced tool call. `None` when
     /// `SideQueryConfig::structured` was not set.
     pub structured: Option<Value>,
@@ -230,10 +241,11 @@ pub async fn side_query_typed(
     };
     let tools_ref: Option<&[Value]> = tools.as_deref();
 
+    let max_tokens = config.max_tokens;
     info!(
-        "[side-query] model={}, max_tokens={}, temp={}, messages={}, structured={}",
+        "[side-query] model={}, max_tokens={:?}, temp={}, messages={}, structured={}",
         model,
-        config.max_tokens,
+        max_tokens,
         config.temperature,
         messages.len(),
         expecting_structured,
@@ -244,16 +256,17 @@ pub async fn side_query_typed(
     };
 
     // First attempt
-    let response = provider
-        .chat_with_options(
-            &messages,
-            tools_ref,
-            model,
-            Some(config.max_tokens),
-            config.temperature,
-            chat_options,
-        )
-        .await;
+    let response = side_query_chat(
+        provider,
+        &messages,
+        tools_ref,
+        model,
+        max_tokens,
+        config.temperature,
+        config.stream,
+        chat_options,
+    )
+    .await;
 
     let result = match response {
         Ok(resp) if is_output_truncated(&resp) => {
@@ -281,10 +294,10 @@ pub async fn side_query_typed(
     }
 
     // Retry: pad max_tokens, drop tool_choice override (some proxies reject it)
-    let retry_max_tokens = config.max_tokens.saturating_add(2048);
+    let retry_max_tokens = max_tokens.map(|tokens| tokens.saturating_add(2048));
     info!(
-        "[side-query] Retry: max_tokens={} → {}, no tool_choice override",
-        config.max_tokens, retry_max_tokens
+        "[side-query] Retry: max_tokens={:?} → {:?}, no tool_choice override",
+        max_tokens, retry_max_tokens
     );
 
     // For retry, use tools without the forced tool_choice sentinel
@@ -296,17 +309,18 @@ pub async fn side_query_typed(
     });
     let retry_tools_ref: Option<&[Value]> = retry_tools.as_deref();
 
-    let retry_response = provider
-        .chat_with_options(
-            &messages,
-            retry_tools_ref,
-            model,
-            Some(retry_max_tokens),
-            config.temperature,
-            chat_options,
-        )
-        .await
-        .map_err(SideQueryError::Provider)?;
+    let retry_response = side_query_chat(
+        provider,
+        &messages,
+        retry_tools_ref,
+        model,
+        retry_max_tokens,
+        config.temperature,
+        config.stream,
+        chat_options,
+    )
+    .await
+    .map_err(SideQueryError::Provider)?;
 
     if is_output_truncated(&retry_response) {
         return Err(SideQueryError::IncompleteOutput {
@@ -335,7 +349,52 @@ pub async fn side_query_typed(
 }
 
 fn is_output_truncated(response: &LLMResponse) -> bool {
-    response.finish_reason == finish_reason::LENGTH
+    matches!(
+        response.finish_reason.as_str(),
+        finish_reason::LENGTH | finish_reason::STREAM_ERROR
+    )
+}
+
+/// Issue the underlying chat call, honoring the `stream` flag.
+///
+/// Streaming uses a no-op delta sink: we only need the final assembled
+/// `LLMResponse`, but keeping the HTTP stream flowing avoids gateway
+/// read-timeouts on very large side-query prompts (compaction summaries).
+#[allow(clippy::too_many_arguments)]
+async fn side_query_chat(
+    provider: &dyn LLMProvider,
+    messages: &[Value],
+    tools: Option<&[Value]>,
+    model: &str,
+    max_tokens: Option<u32>,
+    temperature: f32,
+    stream: bool,
+    chat_options: crate::providers::traits::ChatOptions,
+) -> Result<LLMResponse, ProviderError> {
+    if stream {
+        provider
+            .chat_streaming(
+                messages,
+                tools,
+                model,
+                max_tokens,
+                temperature,
+                &|_| {},
+                None,
+            )
+            .await
+    } else {
+        provider
+            .chat_with_options(
+                messages,
+                tools,
+                model,
+                max_tokens,
+                temperature,
+                chat_options,
+            )
+            .await
+    }
 }
 
 /// Attempt to extract a result from a response. Returns `None` to signal
@@ -408,7 +467,7 @@ fn structured_arguments_are_empty(arguments: &Value) -> bool {
 }
 
 fn build_structured_result(response: &LLMResponse, structured: Value) -> SideQueryResult {
-    let (prompt_tokens, completion_tokens) = extract_usage(response);
+    let (prompt_tokens, completion_tokens, cache_read_tokens) = extract_usage(response);
     info!(
         "[side-query] Done (structured): prompt={}, completion={}",
         prompt_tokens, completion_tokens
@@ -417,13 +476,14 @@ fn build_structured_result(response: &LLMResponse, structured: Value) -> SideQue
         content: String::new(),
         prompt_tokens,
         completion_tokens,
+        cache_read_tokens,
         structured: Some(structured),
         finish_reason: response.finish_reason.clone(),
     }
 }
 
 fn build_text_result(response: &LLMResponse, content: String) -> SideQueryResult {
-    let (prompt_tokens, completion_tokens) = extract_usage(response);
+    let (prompt_tokens, completion_tokens, cache_read_tokens) = extract_usage(response);
     info!(
         "[side-query] Done: {} chars, prompt={}, completion={}",
         content.len(),
@@ -434,19 +494,25 @@ fn build_text_result(response: &LLMResponse, content: String) -> SideQueryResult
         content,
         prompt_tokens,
         completion_tokens,
+        cache_read_tokens,
         structured: None,
         finish_reason: response.finish_reason.clone(),
     }
 }
 
-fn extract_usage(response: &LLMResponse) -> (i64, i64) {
+fn extract_usage(response: &LLMResponse) -> (i64, i64, i64) {
     let prompt_tokens = response.usage.get("prompt_tokens").copied().unwrap_or(0);
     let completion_tokens = response
         .usage
         .get("completion_tokens")
         .copied()
         .unwrap_or(0);
-    (prompt_tokens, completion_tokens)
+    let cache_read_tokens = response
+        .usage
+        .get(crate::providers::traits::usage_key::CACHE_READ_TOKENS)
+        .copied()
+        .unwrap_or(0);
+    (prompt_tokens, completion_tokens, cache_read_tokens)
 }
 
 /// When a thinking-only response is observed, record the model's reasoning

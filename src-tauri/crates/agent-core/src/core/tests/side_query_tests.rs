@@ -115,7 +115,7 @@ impl LLMProvider for MockProvider {
         messages: &[Value],
         tools: Option<&[Value]>,
         _model: &str,
-        _max_tokens: u32,
+        _max_tokens: Option<u32>,
         _temperature: f32,
     ) -> Result<LLMResponse, ProviderError> {
         *self.observed_messages.lock().unwrap() = messages.to_vec();
@@ -169,7 +169,7 @@ async fn returns_content_from_provider() {
 #[tokio::test]
 async fn applies_default_config_values() {
     let config = SideQueryConfig::default();
-    assert_eq!(config.max_tokens, 1024);
+    assert_eq!(config.max_tokens, Some(1024));
     assert_eq!(config.temperature, 0.0);
     assert!(config.model.is_none());
     assert!(config.system_prompt.is_none());
@@ -342,7 +342,7 @@ impl LLMProvider for EmptyThenGoodProvider {
         _messages: &[Value],
         _tools: Option<&[Value]>,
         _model: &str,
-        _max_tokens: u32,
+        _max_tokens: Option<u32>,
         _temperature: f32,
     ) -> Result<LLMResponse, ProviderError> {
         let mut count = self.call_count.lock().unwrap();
@@ -417,7 +417,7 @@ impl LLMProvider for AlwaysEmptyStructuredProvider {
         _messages: &[Value],
         _tools: Option<&[Value]>,
         _model: &str,
-        _max_tokens: u32,
+        _max_tokens: Option<u32>,
         _temperature: f32,
     ) -> Result<LLMResponse, ProviderError> {
         Ok(LLMResponse {

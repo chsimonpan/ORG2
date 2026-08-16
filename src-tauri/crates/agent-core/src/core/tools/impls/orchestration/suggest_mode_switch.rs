@@ -31,7 +31,7 @@ pub struct ModeSwitchToolContext {
 }
 
 #[cfg(test)]
-mod tests {
+mod timeout_choice_tests {
     use super::*;
 
     #[test]

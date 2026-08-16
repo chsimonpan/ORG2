@@ -390,7 +390,7 @@ pub(crate) async fn summarize_messages(
     // prose is what they are actually good at.
     let sq_config = SideQueryConfig {
         model: None,
-        max_tokens: config.summary_max_tokens,
+        max_tokens: Some(config.summary_max_tokens),
         temperature: 0.0,
         system_prompt: Some(prompt),
         structured: None,

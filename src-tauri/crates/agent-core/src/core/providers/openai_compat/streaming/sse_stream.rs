@@ -755,7 +755,7 @@ mod tests {
                     }
                 })]),
                 "test-model",
-                1024,
+                Some(1024),
                 0.0,
                 &|_| {},
                 None,
@@ -809,7 +809,7 @@ mod tests {
                 &[serde_json::json!({"role": "user", "content": "hello"})],
                 None,
                 "deepseek-chat",
-                1024,
+                Some(1024),
                 0.0,
                 &|_| {},
                 None,

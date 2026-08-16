@@ -308,7 +308,7 @@ mod tests {
                 &[serde_json::json!({"role": "user", "content": "hello"})],
                 None,
                 "gpt-4.1",
-                1024,
+                Some(1024),
                 0.0,
             )
             .await

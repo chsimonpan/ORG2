@@ -52,7 +52,7 @@ impl ReasoningLevel {
             "high" => Some(Self::High),
             "extra" | "extra-high" | "xhigh" => Some(Self::ExtraHigh),
             "max" => Some(Self::Max),
-            "ultracode" => Some(Self::Ultracode),
+            "ultracode" | "ultra" => Some(Self::Ultracode),
             _ => None,
         }
     }
@@ -119,6 +119,7 @@ const SUFFIX_TOKENS: &[&str] = &[
     "xhigh",
     "max",
     "ultracode",
+    "ultra",
     "minimal",
     "thinking",
     "fast",

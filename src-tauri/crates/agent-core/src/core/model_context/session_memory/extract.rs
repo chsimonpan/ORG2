@@ -202,7 +202,7 @@ pub async fn extract_session_memory(
         // session model (same provider family/protocol) instead of burning
         // the primary channel model on a summarization side query.
         model: Some(crate::providers::model_hints::fast_model_hint(model)),
-        max_tokens: config.extraction_max_tokens,
+        max_tokens: Some(config.extraction_max_tokens),
         temperature: 0.0,
         system_prompt: Some(SM_EXTRACTION_SYSTEM_PROMPT.to_string()),
         structured: Some(StructuredOutput {
