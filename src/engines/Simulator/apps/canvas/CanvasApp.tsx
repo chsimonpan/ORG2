@@ -18,6 +18,8 @@
 import { useAtomValue, useSetAtom } from "jotai";
 import { Layout, RefreshCw } from "lucide-react";
 import React, {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useMemo,
@@ -35,7 +37,6 @@ import CanvasPreviewSurface from "@src/engines/ChatPanel/blocks/CanvasInlineCard
 import type { CanvasInlineMode } from "@src/engines/ChatPanel/blocks/CanvasInlineCard/types";
 import type { SessionEvent } from "@src/engines/SessionCore/core/types";
 import { usePublishWorkstationTabHeader } from "@src/hooks/workStation";
-import { SessionReplayCodeMirrorViewer } from "@src/modules/WorkStation/CodeEditor/SessionReplay/CodePanel/SessionReplayCodeMirrorViewer";
 import {
   PrimarySidebarLayoutWithSections,
   SimulatorReplayChrome,
@@ -55,6 +56,12 @@ import {
 import type { SimulatorAppProps } from "../core/types";
 import { useSimulatorAppState } from "../core/useSimulatorAppState";
 import { CANVAS_APP_CONFIG } from "./canvasConfig";
+
+const SessionReplayCodeMirrorViewer = lazy(() =>
+  import("@src/modules/WorkStation/CodeEditor/SessionReplay/CodePanel/SessionReplayCodeMirrorViewer").then(
+    (mod) => ({ default: mod.SessionReplayCodeMirrorViewer })
+  )
+);
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -727,15 +734,19 @@ const CanvasApp: React.FC<SimulatorAppProps> = () => {
         </>
       ) : (
         /* source tab */
-        <SessionReplayCodeMirrorViewer
-          content={
-            selectedPayload.mode === "url"
-              ? (selectedPayload.url ?? "")
-              : (selectedPayload.content ?? "")
-          }
-          language={selectedPayload.mode === "url" ? "plaintext" : "html"}
-          filePath={selectedPayload.mode === "html" ? "canvas.html" : undefined}
-        />
+        <Suspense fallback={null}>
+          <SessionReplayCodeMirrorViewer
+            content={
+              selectedPayload.mode === "url"
+                ? (selectedPayload.url ?? "")
+                : (selectedPayload.content ?? "")
+            }
+            language={selectedPayload.mode === "url" ? "plaintext" : "html"}
+            filePath={
+              selectedPayload.mode === "html" ? "canvas.html" : undefined
+            }
+          />
+        </Suspense>
       )}
     </div>
   );
