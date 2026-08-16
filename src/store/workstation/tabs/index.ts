@@ -278,7 +278,11 @@ export {
   saveRepoCacheAtom,
   clearRepoCacheAtom,
   clearAllEditorCacheAtom,
+  disposeEditorCacheForSessionAtom,
   switchActiveRepoAtom,
 } from "./editorCache";
 
-export type { ProjectJourneyTabData, SessionJourneyTabData } from "./factories/project";
+export type {
+  ProjectJourneyTabData,
+  SessionJourneyTabData,
+} from "./factories/project";
