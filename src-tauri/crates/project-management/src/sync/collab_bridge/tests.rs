@@ -40,6 +40,7 @@ fn project_meta(id: &str, name: &str) -> ProjectMeta {
         id: id.to_string(),
         name: name.to_string(),
         org_id: ORG.to_string(),
+        workspace_id: None,
         status: "active".to_string(),
         priority: "none".to_string(),
         health: "on_track".to_string(),

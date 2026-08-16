@@ -510,6 +510,7 @@ fn recent_hook_signals_return_newest_hook_facts_with_paths() {
         org_member_id: None,
         collaboration_origin: None,
         metadata: AgentMetadata::default(),
+        journey: Default::default(),
     };
 
     // A placeholder title (equal to the raw source id) is suppressed so a

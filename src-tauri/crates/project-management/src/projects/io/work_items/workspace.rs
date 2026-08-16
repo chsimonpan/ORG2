@@ -67,6 +67,7 @@ mod tests {
             id: "workspace-project".into(),
             name: "Workspace".into(),
             org_id: "personal-org".into(),
+            workspace_id: None,
             status: "active".into(),
             priority: "none".into(),
             health: "no_updates".into(),
