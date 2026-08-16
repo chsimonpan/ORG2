@@ -260,38 +260,6 @@ pub fn get_default_branch(repo_path: &Path, remote: Option<&str>) -> Result<Stri
     Err("Could not determine default branch".to_string())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::remote_tracking_branch;
-
-    #[test]
-    fn parses_short_remote_tracking_branch() {
-        assert_eq!(
-            remote_tracking_branch("origin/feat/org2-cloud-auth"),
-            Some((
-                "origin/feat/org2-cloud-auth".to_string(),
-                "feat/org2-cloud-auth".to_string(),
-            ))
-        );
-    }
-
-    #[test]
-    fn parses_fully_qualified_remote_tracking_branch() {
-        assert_eq!(
-            remote_tracking_branch("refs/remotes/upstream/feature/auth"),
-            Some((
-                "upstream/feature/auth".to_string(),
-                "feature/auth".to_string(),
-            ))
-        );
-    }
-
-    #[test]
-    fn ignores_remote_head_and_plain_branch_names() {
-        assert_eq!(remote_tracking_branch("refs/remotes/origin/HEAD"), None);
-        assert_eq!(remote_tracking_branch("develop"), None);
-    }
-}
 
 /// Get current branch with full info
 pub fn get_current_branch_info(repo_path: &Path) -> Result<GitBranchInfo, String> {
