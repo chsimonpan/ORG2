@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { shouldShowTurnPaginationSpinner } from "../TurnPaginationControls";
+import {
+  canNavigateTurnPage,
+  shouldShowTurnPaginationSpinner,
+} from "../TurnPaginationControls";
 
 describe("shouldShowTurnPaginationSpinner", () => {
   it("does not animate a stable empty session", () => {
@@ -26,6 +29,42 @@ describe("shouldShowTurnPaginationSpinner", () => {
       shouldShowTurnPaginationSpinner({
         turnPaginationReady: true,
         pageCount: 1,
+      })
+    ).toBe(false);
+  });
+});
+
+describe("canNavigateTurnPage", () => {
+  it("keeps both arrows actionable while a known page is hydrating", () => {
+    expect(
+      canNavigateTurnPage({
+        direction: "previous",
+        currentPageIndex: 1,
+        pageCount: 3,
+      })
+    ).toBe(true);
+    expect(
+      canNavigateTurnPage({
+        direction: "next",
+        currentPageIndex: 1,
+        pageCount: 3,
+      })
+    ).toBe(true);
+  });
+
+  it("only disables at the actual history boundaries", () => {
+    expect(
+      canNavigateTurnPage({
+        direction: "previous",
+        currentPageIndex: 0,
+        pageCount: 3,
+      })
+    ).toBe(false);
+    expect(
+      canNavigateTurnPage({
+        direction: "next",
+        currentPageIndex: 2,
+        pageCount: 3,
       })
     ).toBe(false);
   });

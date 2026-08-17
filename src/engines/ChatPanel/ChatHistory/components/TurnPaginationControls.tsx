@@ -98,6 +98,24 @@ export function shouldShowTurnPaginationSpinner(params: {
   return !params.turnPaginationReady && params.pageCount > 0;
 }
 
+/**
+ * Hydration controls the selector's loading affordance, not whether a known
+ * turn cursor may move. Page boundaries alone decide arrow availability.
+ */
+export function canNavigateTurnPage({
+  direction,
+  currentPageIndex,
+  pageCount,
+}: {
+  direction: "previous" | "next";
+  currentPageIndex: number;
+  pageCount: number;
+}): boolean {
+  return direction === "previous"
+    ? currentPageIndex > 0
+    : currentPageIndex < pageCount - 1;
+}
+
 const SELECT_TRIGGER_BASE =
   "flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-lg px-2 text-[13px] font-normal text-text-1 transition-colors";
 const SELECT_CHEVRON_CLASS = "shrink-0 text-text-3 transition-transform";
@@ -509,7 +527,17 @@ const TurnPaginationControls: React.FC<TurnPaginationControlsProps> = memo(
                         iconOnly
                         data-testid="turn-pagination-previous-round"
                         onClick={onPreviousTurnPage}
-                        disabled={!turnPaginationReady || currentPageIndex <= 0}
+                        // A page body may still be hydrating, but its turn
+                        // cursor and structural page are already known. Do not
+                        // trap historical sessions on that placeholder: moving
+                        // left starts the selected page's lazy load.
+                        disabled={
+                          !canNavigateTurnPage({
+                            direction: "previous",
+                            currentPageIndex,
+                            pageCount,
+                          })
+                        }
                         aria-label={t("common:pagination.previousRound")}
                         icon={
                           <ChevronLeft
@@ -538,9 +566,15 @@ const TurnPaginationControls: React.FC<TurnPaginationControlsProps> = memo(
                         iconOnly
                         data-testid="turn-pagination-next-round"
                         onClick={onNextTurnPage}
+                        // Same rule as previous: hydration is visual state,
+                        // not a navigation boundary. `null` remains the
+                        // canonical cursor for Session-first "latest".
                         disabled={
-                          !turnPaginationReady ||
-                          currentPageIndex >= pageCount - 1
+                          !canNavigateTurnPage({
+                            direction: "next",
+                            currentPageIndex,
+                            pageCount,
+                          })
                         }
                         aria-label={t("common:pagination.nextRound")}
                         icon={
@@ -571,8 +605,11 @@ const TurnPaginationControls: React.FC<TurnPaginationControlsProps> = memo(
                         data-testid="turn-pagination-last-round"
                         onClick={onLastTurnPage}
                         disabled={
-                          !turnPaginationReady ||
-                          currentPageIndex >= pageCount - 1
+                          !canNavigateTurnPage({
+                            direction: "next",
+                            currentPageIndex,
+                            pageCount,
+                          })
                         }
                         aria-label={t("common:pagination.latestRound")}
                         icon={

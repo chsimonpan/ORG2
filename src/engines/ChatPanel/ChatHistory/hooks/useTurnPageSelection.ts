@@ -68,6 +68,44 @@ interface TurnPageSelection {
   sessionId: string | null;
 }
 
+/**
+ * Resolve the cursor written by the previous-round control. Kept outside the
+ * React callback so cursor movement and its rendered page stay regression
+ * testable without mounting the entire WorkStation session pipeline.
+ */
+export function selectPreviousTurnPage({
+  activeId,
+  currentPageIndex,
+}: {
+  activeId: string | null;
+  currentPageIndex: number;
+}): TurnPageSelection {
+  return {
+    pageIndex: Math.max(0, currentPageIndex - 1),
+    sessionId: activeId,
+  };
+}
+
+/**
+ * Resolve the cursor written by the next-round control. `null` deliberately
+ * means "latest" so Session-first history keeps following its newest page.
+ */
+export function selectNextTurnPage({
+  activeId,
+  currentPageIndex,
+  pageCount,
+}: {
+  activeId: string | null;
+  currentPageIndex: number;
+  pageCount: number;
+}): TurnPageSelection {
+  const nextPageIndex = Math.min(pageCount - 1, currentPageIndex + 1);
+  return {
+    pageIndex: nextPageIndex >= pageCount - 1 ? null : nextPageIndex,
+    sessionId: activeId,
+  };
+}
+
 export interface UseTurnPageSelectionStateReturn {
   selectedTurnPageIndex: number;
   setTurnPageSelection: Dispatch<SetStateAction<TurnPageSelection>>;
@@ -306,18 +344,15 @@ export function useTurnPageNavigation({
   );
 
   const handlePreviousTurnPage = useCallback(() => {
-    setTurnPageSelection({
-      pageIndex: Math.max(0, currentPageIndex - 1),
-      sessionId: activeId,
-    });
+    setTurnPageSelection(
+      selectPreviousTurnPage({ activeId, currentPageIndex })
+    );
   }, [activeId, currentPageIndex, setTurnPageSelection]);
 
   const handleNextTurnPage = useCallback(() => {
-    const nextPageIndex = Math.min(pageCount - 1, currentPageIndex + 1);
-    setTurnPageSelection({
-      pageIndex: nextPageIndex >= pageCount - 1 ? null : nextPageIndex,
-      sessionId: activeId,
-    });
+    setTurnPageSelection(
+      selectNextTurnPage({ activeId, currentPageIndex, pageCount })
+    );
   }, [activeId, currentPageIndex, pageCount, setTurnPageSelection]);
 
   const handleLastTurnPage = useCallback(() => {
