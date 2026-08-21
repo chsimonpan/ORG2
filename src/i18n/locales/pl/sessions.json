@@ -1017,6 +1017,11 @@
       "copySuccess": "Skopiowano surowy zapis",
       "copyFailed": "Nie udało się skopiować surowego zapisu"
     },
+    "rawPrompt": {
+      "title": "Surowy prompt wysłany do AI",
+      "view": "Pokaż surowy prompt",
+      "length": "{{length}} znaków"
+    },
     "linkWorkItem": {
       "menuItem": "Połącz z Work Item…",
       "title": "Połącz sesję z Work Item",

@@ -1016,6 +1016,11 @@
       "copySuccess": "Transcripción sin procesar copiada",
       "copyFailed": "No se pudo copiar la transcripción sin procesar"
     },
+    "rawPrompt": {
+      "title": "Prompt sin procesar enviado a la IA",
+      "view": "Ver prompt sin procesar",
+      "length": "{{length}} caracteres"
+    },
     "linkWorkItem": {
       "menuItem": "Vincular a un Work Item…",
       "title": "Vincular sesión a un Work Item",

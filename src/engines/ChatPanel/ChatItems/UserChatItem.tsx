@@ -41,8 +41,10 @@ import { imageRefToRustPath } from "@src/util/file/imageRefs";
 import UserMessageContent from "../ChatHistory/components/UserMessageContent";
 import InputArea from "../InputArea";
 import { stripExpandedPillContent } from "../InputArea/utils/pillContentParser";
+import RawPromptToggle from "./RawPromptToggle";
 import { useSharedConversationSender } from "./SharedConversationSenderContext";
 import { normalizeUserMessageText } from "./normalizeUserMessageText";
+import { resolveRawUserPrompt } from "./rawUserPrompt";
 import { resolveUserMessageSide } from "./userMessageSide";
 
 const USER_MSG_MAX_LINES = 3;
@@ -208,6 +210,7 @@ const UserChatItem = ({
   const [isEditing, setIsEditing] = useState(false);
 
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isRawPromptOpen, setIsRawPromptOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState<string | null>(null);
   // Editable copy of the message's attached images; seeded on edit entry so
   // the user can remove stale duplicates before resending.
@@ -275,6 +278,11 @@ const UserChatItem = ({
     if (textToCheck.split("\n").length > USER_MSG_MAX_LINES) return true;
     return textToCheck.length > USER_MSG_MAX_CHARS;
   }, [editedText, fullContent]);
+
+  // The wire prompt behind this bubble. `fullContent` is a rendering of it
+  // (pills as badges, expansion block stripped, envelope normalized), so the
+  // raw string is only reachable through the event itself.
+  const rawPrompt = useMemo(() => resolveRawUserPrompt(event), [event]);
 
   const prPillCards = useMemo(
     () => extractPrPillCards(fullContent),
@@ -483,18 +491,25 @@ const UserChatItem = ({
           )}
         </div>
       </div>
-      {(timestampLabel || fullContent || toolbarActions) && (
+      {(timestampLabel || fullContent || rawPrompt || toolbarActions) && (
         <div className="relative mt-1 flex min-h-6 items-center px-1 text-[11px] leading-none text-text-3">
-          {(fullContent || toolbarActions) && (
+          {(fullContent || rawPrompt || toolbarActions) && (
             <div
-              className={`absolute top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 focus-within:opacity-100 group-hover/msg:opacity-100 ${
-                isRemoteSharedMessage ? "left-full ml-1" : "right-full mr-1"
-              }`}
+              className={`absolute top-1/2 flex -translate-y-1/2 items-center gap-1 focus-within:opacity-100 group-hover/msg:opacity-100 ${
+                isRawPromptOpen ? "opacity-100" : "opacity-0"
+              } ${isRemoteSharedMessage ? "left-full ml-1" : "right-full mr-1"}`}
             >
               {fullContent && (
                 <ChatBubbleCopyButton
                   content={fullContent}
                   placement="toolbar"
+                />
+              )}
+              {rawPrompt.trim() && event?.sessionId && (
+                <RawPromptToggle
+                  rawText={rawPrompt}
+                  sessionId={event.sessionId}
+                  onOpenChange={setIsRawPromptOpen}
                 />
               )}
               {isEditableDisplay && onRestoreCheckpoint && (

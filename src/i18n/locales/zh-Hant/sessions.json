@@ -1030,6 +1030,11 @@
       "copySuccess": "已複製原始記錄",
       "copyFailed": "無法複製原始記錄"
     },
+    "rawPrompt": {
+      "title": "傳送給 AI 的原始 Prompt",
+      "view": "查看原始 Prompt",
+      "length": "{{length}} 個字元"
+    },
     "linkWorkItem": {
       "menuItem": "連結到工作項…",
       "title": "將會話連結到工作項",

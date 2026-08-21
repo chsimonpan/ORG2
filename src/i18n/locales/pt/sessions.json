@@ -1015,6 +1015,11 @@
       "copySuccess": "Transcrição bruta copiada",
       "copyFailed": "Não foi possível copiar a transcrição bruta"
     },
+    "rawPrompt": {
+      "title": "Prompt bruto enviado à IA",
+      "view": "Ver prompt bruto",
+      "length": "{{length}} caracteres"
+    },
     "linkWorkItem": {
       "menuItem": "Vincular a um Work Item…",
       "title": "Vincular sessão a um Work Item",

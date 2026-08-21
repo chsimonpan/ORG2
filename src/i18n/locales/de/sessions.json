@@ -1014,6 +1014,11 @@
       "copySuccess": "Rohtranskript kopiert",
       "copyFailed": "Rohtranskript konnte nicht kopiert werden"
     },
+    "rawPrompt": {
+      "title": "Roh-Prompt an die KI",
+      "view": "Roh-Prompt anzeigen",
+      "length": "{{length}} Zeichen"
+    },
     "linkWorkItem": {
       "menuItem": "Mit Work Item verknüpfen…",
       "title": "Sitzung mit Work Item verknüpfen",

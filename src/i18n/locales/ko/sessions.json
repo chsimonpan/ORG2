@@ -1015,6 +1015,11 @@
       "copySuccess": "원시 트랜스크립트를 복사했습니다",
       "copyFailed": "원시 트랜스크립트를 복사할 수 없습니다"
     },
+    "rawPrompt": {
+      "title": "AI에 전송된 원본 Prompt",
+      "view": "원본 Prompt 보기",
+      "length": "{{length}}자"
+    },
     "linkWorkItem": {
       "menuItem": "Work Item에 연결…",
       "title": "세션을 Work Item에 연결",

@@ -1016,6 +1016,11 @@
       "copySuccess": "Ham döküm kopyalandı",
       "copyFailed": "Ham döküm kopyalanamadı"
     },
+    "rawPrompt": {
+      "title": "AI'ya gönderilen ham prompt",
+      "view": "Ham prompt'u görüntüle",
+      "length": "{{length}} karakter"
+    },
     "linkWorkItem": {
       "menuItem": "Work Item'a bağla…",
       "title": "Oturumu Work Item'a bağla",

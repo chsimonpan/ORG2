@@ -1071,6 +1071,11 @@
       "copySuccess": "Raw transcript copied",
       "copyFailed": "Could not copy the raw transcript"
     },
+    "rawPrompt": {
+      "title": "Raw prompt sent to AI",
+      "view": "View raw prompt",
+      "length": "{{length}} chars"
+    },
     "trackAsProject": {
       "menuItem": "Track as Project",
       "success": "Session is now tracked as a Project"

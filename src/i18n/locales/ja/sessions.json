@@ -1015,6 +1015,11 @@
       "copySuccess": "生トランスクリプトをコピーしました",
       "copyFailed": "生トランスクリプトをコピーできませんでした"
     },
+    "rawPrompt": {
+      "title": "AI に送信した生の Prompt",
+      "view": "生の Prompt を表示",
+      "length": "{{length}} 文字"
+    },
     "linkWorkItem": {
       "menuItem": "Work Item にリンク…",
       "title": "セッションを Work Item にリンク",

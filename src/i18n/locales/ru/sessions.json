@@ -1020,6 +1020,11 @@
       "copySuccess": "Необработанная расшифровка скопирована",
       "copyFailed": "Не удалось скопировать необработанную расшифровку"
     },
+    "rawPrompt": {
+      "title": "Исходный prompt, отправленный ИИ",
+      "view": "Показать исходный prompt",
+      "length": "{{length}} символов"
+    },
     "linkWorkItem": {
       "menuItem": "Связать с Work Item…",
       "title": "Связать сеанс с Work Item",

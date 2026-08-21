@@ -1016,6 +1016,11 @@
       "copySuccess": "Transcription brute copiée",
       "copyFailed": "Impossible de copier la transcription brute"
     },
+    "rawPrompt": {
+      "title": "Prompt brut envoyé à l'IA",
+      "view": "Afficher le prompt brut",
+      "length": "{{length}} caractères"
+    },
     "linkWorkItem": {
       "menuItem": "Lier à un Work Item…",
       "title": "Lier la session à un Work Item",

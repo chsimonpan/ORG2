@@ -1013,6 +1013,11 @@
       "copySuccess": "Đã sao chép bản ghi thô",
       "copyFailed": "Không thể sao chép bản ghi thô"
     },
+    "rawPrompt": {
+      "title": "Prompt thô đã gửi cho AI",
+      "view": "Xem prompt thô",
+      "length": "{{length}} ký tự"
+    },
     "linkWorkItem": {
       "menuItem": "Liên kết với Work Item…",
       "title": "Liên kết phiên với Work Item",

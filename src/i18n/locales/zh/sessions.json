@@ -1062,6 +1062,11 @@
       "copySuccess": "已复制原始记录",
       "copyFailed": "无法复制原始记录"
     },
+    "rawPrompt": {
+      "title": "发送给 AI 的原始 Prompt",
+      "view": "查看原始 Prompt",
+      "length": "{{length}} 个字符"
+    },
     "trackAsProject": {
       "menuItem": "追踪为项目",
       "success": "会话已作为项目追踪"
