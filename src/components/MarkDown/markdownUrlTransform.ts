@@ -17,11 +17,13 @@ import { defaultUrlTransform } from "react-markdown";
 import { parseCloudSessionReference } from "@src/features/Org2Cloud/cloudSessionReference";
 
 import { classifyMarkdownImageSrc } from "./markdownImageSrc";
+import { isWorkspaceRelativeMarkdownFileHref } from "./markdownLinkTarget";
 
 export function markdownUrlTransform(value: string, key?: string): string {
   if (key === "href") {
     if (parseCloudSessionReference(value)) return value;
     if (classifyMarkdownImageSrc(value).kind === "local") return value;
+    if (isWorkspaceRelativeMarkdownFileHref(value)) return value;
   }
 
   return defaultUrlTransform(value);

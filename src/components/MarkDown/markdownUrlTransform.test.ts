@@ -21,6 +21,7 @@ describe("markdown url transform", () => {
       ""
     );
     expect(defaultUrlTransform("C:\\repo\\src\\View.tsx:220")).toBe("");
+    expect(defaultUrlTransform("WebsiteCard.tsx:84")).toBe("");
   });
 
   it("passes a valid session reference through on a link href", () => {
@@ -34,6 +35,14 @@ describe("markdown url transform", () => {
     "asset://localhost/Users/me/project/View.tsx:220",
     "~/project/View.tsx:220",
   ])("passes a supported local file reference through on href: %s", (href) => {
+    expect(markdownUrlTransform(href, "href")).toBe(href);
+  });
+
+  it.each([
+    "WebsiteCard.tsx:84",
+    "src/components/MarkDown/LinkHoverCard.tsx:80",
+    "docs/architecture.md",
+  ])("preserves a workspace-relative file href: %s", (href) => {
     expect(markdownUrlTransform(href, "href")).toBe(href);
   });
 
