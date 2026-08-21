@@ -36,6 +36,10 @@ import { useEditMode } from "./hooks/useEditMode";
 import { useInputAreaMenus } from "./hooks/useInputAreaMenus";
 import { useInputAreaVoice } from "./hooks/useInputAreaVoice";
 import { useStopOnDoubleEscape } from "./hooks/useStopOnDoubleEscape";
+import {
+  type InputAreaPresentation,
+  isContextualInputAreaPresentation,
+} from "./inputAreaPresentation";
 import { openedTabMentionOptionsAtom } from "./openedTabMentionOptionsAtom";
 
 interface InputAreaProps {
@@ -85,6 +89,8 @@ interface InputAreaProps {
   allowFileAttachments?: boolean;
   /** Enable agent-only submit interceptors such as /compact and MCP tools. */
   enableAgentInterceptors?: boolean;
+  /** Focus the shared composer editor when this InputArea mounts. */
+  autoFocus?: boolean;
   /** Limit the slash menu to the supplied item categories. */
   slashItemCategories?: ReadonlyArray<SlashItemCategory>;
   /**
@@ -92,6 +98,8 @@ interface InputAreaProps {
    * open upward even in queue-edit mode (there is no room beneath it).
    */
   bottomAnchored?: boolean;
+  /** Contextual composers used by element-selection surfaces. */
+  presentation?: InputAreaPresentation;
 }
 
 /**
@@ -149,8 +157,10 @@ const InputAreaInteractive: React.FC<InputAreaProps> = memo(
     showAgentControls = true,
     allowFileAttachments = true,
     enableAgentInterceptors = true,
+    autoFocus = false,
     slashItemCategories,
     bottomAnchored = false,
+    presentation = "default",
   }) => {
     const { t } = useTranslation("sessions");
 
@@ -173,6 +183,7 @@ const InputAreaInteractive: React.FC<InputAreaProps> = memo(
       handleInputBlur,
       handleContentChange,
       compactHintVisible,
+      canvasHintVisible,
       handleAtMention,
       handleAtMentionClose,
       isInputEmpty,
@@ -242,6 +253,8 @@ const InputAreaInteractive: React.FC<InputAreaProps> = memo(
       disableStopWhenEmpty && currentInputEmpty && !isWpGeneWorking;
     const mentionTreePosition = chatPanelPosition === "left" ? "right" : "left";
     const voiceFeatureEnabled = useAtomValue(voiceInputEnabledAtom);
+    const isContextualPanel = presentation === "contextual";
+    const isContextual = isContextualInputAreaPresentation(presentation);
 
     const {
       showPlusSlashMenu,
@@ -368,15 +381,17 @@ const InputAreaInteractive: React.FC<InputAreaProps> = memo(
         onDrop={handleContainerDrop}
       >
         <div className="relative flex flex-col gap-0.5">
-          <InputAreaTopRows
-            isEditMode={isEditMode}
-            omitChatHeader={omitChatHeader}
-            topRowPills={topRowPills}
-            topRowTrailingContent={topRowTrailingContent}
-            composerInputRef={composerInputRef}
-            sessionId={sessionId}
-            skillWorkspacePaths={skillWorkspacePaths}
-          />
+          {!isContextual && (
+            <InputAreaTopRows
+              isEditMode={isEditMode}
+              omitChatHeader={omitChatHeader}
+              topRowPills={topRowPills}
+              topRowTrailingContent={topRowTrailingContent}
+              composerInputRef={composerInputRef}
+              sessionId={sessionId}
+              skillWorkspacePaths={skillWorkspacePaths}
+            />
+          )}
           <QuietEditStatus
             isEditMode={isEditMode}
             quietEditSurface={quietEditSurface}
@@ -516,9 +531,15 @@ const InputAreaInteractive: React.FC<InputAreaProps> = memo(
                 showVoiceUi={showVoiceUi}
                 voice={voice}
                 currentRepoPath={currentRepoPath}
+                contextualPanel={isContextualPanel}
+                inlineLeadingContent={isContextual ? topRowPills : undefined}
                 placeholder={placeholder}
                 trailingHint={
-                  compactHintVisible ? t("input.compactArgHint") : undefined
+                  compactHintVisible
+                    ? t("input.compactArgHint")
+                    : canvasHintVisible
+                      ? t("input.canvasArgHint", "what to build")
+                      : undefined
                 }
                 currentInputEmpty={currentInputEmpty}
                 stopSuppressedForEmptyInput={stopSuppressedForEmptyInput}
@@ -532,6 +553,7 @@ const InputAreaInteractive: React.FC<InputAreaProps> = memo(
                 submitDisabled={submitDisabled}
                 showAgentControls={showAgentControls}
                 showImageAttachments={allowFileAttachments}
+                autoFocus={autoFocus}
               />
             )}
           </ComposerShell>

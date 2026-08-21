@@ -265,6 +265,8 @@ interface NormalComposerContentProps extends SharedComposerBarProps {
   showVoiceUi: boolean;
   voice: UseVoiceInputResult;
   currentRepoPath?: string;
+  contextualPanel?: boolean;
+  inlineLeadingContent?: React.ReactNode;
   onContentChange: (text: string) => void;
   onBlur: () => void;
   onSubmit: (capturedText?: string) => void;
@@ -283,6 +285,7 @@ interface NormalComposerContentProps extends SharedComposerBarProps {
   submitDisabled?: boolean;
   showAgentControls?: boolean;
   showImageAttachments?: boolean;
+  autoFocus?: boolean;
 }
 
 export const NormalComposerContent: React.FC<NormalComposerContentProps> = ({
@@ -326,6 +329,8 @@ export const NormalComposerContent: React.FC<NormalComposerContentProps> = ({
   showVoiceUi,
   voice,
   currentRepoPath,
+  contextualPanel = false,
+  inlineLeadingContent,
   placeholder,
   trailingHint,
   currentInputEmpty,
@@ -340,6 +345,7 @@ export const NormalComposerContent: React.FC<NormalComposerContentProps> = ({
   submitDisabled,
   showAgentControls = true,
   showImageAttachments = true,
+  autoFocus = false,
 }) => {
   const { t } = useTranslation("sessions");
 
@@ -362,7 +368,9 @@ export const NormalComposerContent: React.FC<NormalComposerContentProps> = ({
           onOpenSkillsTools={onOpenSkillsTools}
           dropdownDirection="up"
           repoPath={currentRepoPath}
-          showContextInfo={showAgentControls && !isCursorIde}
+          showContextInfo={
+            showAgentControls && !isCursorIde && !contextualPanel
+          }
           editorSlot={
             <InputEditor
               key="chat-panel-input-editor"
@@ -390,17 +398,24 @@ export const NormalComposerContent: React.FC<NormalComposerContentProps> = ({
               placeholder={placeholder || t("input.defaultPlaceholder")}
               trailingHint={trailingHint}
               onImagePaste={onImagePaste}
+              autoFocus={autoFocus}
+              leadingContent={
+                contextualPanel ? inlineLeadingContent : undefined
+              }
             />
           }
           leftPrefix={
-            <ComposerPrefixes
-              isCiteCode={isCiteCode}
-              selectedCiteRange={selectedCiteRange}
-              citeFileName={citeFileName}
-              onClearCiteCode={onClearCiteCode}
-              replyInfo={replyInfo}
-              onClearReplyInfo={onClearReplyInfo}
-            />
+            <>
+              <ComposerPrefixes
+                isCiteCode={isCiteCode}
+                selectedCiteRange={selectedCiteRange}
+                citeFileName={citeFileName}
+                onClearCiteCode={onClearCiteCode}
+                replyInfo={replyInfo}
+                onClearReplyInfo={onClearReplyInfo}
+              />
+              {!contextualPanel && inlineLeadingContent}
+            </>
           }
           pills={
             <div className={INPUT_AREA_CONTROL_GROUP_CLASS}>
@@ -410,7 +425,7 @@ export const NormalComposerContent: React.FC<NormalComposerContentProps> = ({
           }
           submitButton={
             <div className="flex h-7 items-center gap-0.5">
-              {showAgentControls && (
+              {showAgentControls && !contextualPanel && (
                 <PromptPolishButton
                   control={promptPolish}
                   disabled={promptPolishDisabled}

@@ -127,3 +127,33 @@
   color: var(--color-text-3);
   font-size: 14px;
 }
+// ===== Chat composer =====
+.composer-input.chat-input-editor {
+  min-width: 0;
+  height: auto !important;
+
+  .composer-input-wrapper {
+    height: auto;
+    min-height: 60px;
+  }
+
+  .composer-input-content {
+    height: auto;
+    min-height: 60px;
+    white-space: pre-wrap;
+  }
+}
+
+// A contextual reference is owned by the surrounding surface rather than the
+// editable document, but visually shares the first line with the editor. Drop
+// the ordinary leading inset so the placeholder/caret follows the shared
+// editor pill at the same spacing as a real inline ComposerPill.
+.composer-input.chat-input-editor-leading {
+  .composer-input-content {
+    padding-left: 0;
+
+    &.is-empty::before {
+      left: 0;
+    }
+  }
+}
