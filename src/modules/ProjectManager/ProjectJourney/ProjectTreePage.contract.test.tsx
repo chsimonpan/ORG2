@@ -152,6 +152,18 @@ describe("ProjectTreePage production session route", () => {
       "message-8"
     );
 
+    const taskRow = container.querySelector(
+      '[data-node-id="task:session-1:task-1"]'
+    ) as HTMLDivElement;
+    await act(async () => taskRow.click());
+    expect(onOpenSession).toHaveBeenCalledWith(
+      "session-1",
+      "Exact task",
+      undefined,
+      undefined,
+      undefined
+    );
+
     const taskJourneyButton = container.querySelector(
       '[data-testid="project-tree-open-task-journey-task-1"]'
     ) as HTMLButtonElement;

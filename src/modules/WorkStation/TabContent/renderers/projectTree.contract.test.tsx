@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { Provider, createStore } from "jotai";
+import { Provider } from "jotai";
 import { act } from "react";
 import { type Root, createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { workstationLayoutAtom } from "@src/store/workstation/tabs";
+import { createInstrumentedStore } from "@src/util/core/state/instrumentedStore";
 
 import ProjectTreeTabRenderer from "./projectTree";
 
@@ -58,7 +59,7 @@ vi.mock("@src/modules/ProjectManager/ProjectJourney", () => ({
 describe("ProjectTreeTabRenderer session Journey contract", () => {
   let container: HTMLDivElement;
   let root: Root;
-  const store = createStore();
+  const store = createInstrumentedStore();
 
   beforeEach(() => {
     store.set(workstationLayoutAtom, {

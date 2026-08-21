@@ -26,6 +26,8 @@ export interface SessionContinuation {
 export interface OpenSessionInWorkstationOptions {
   sessionId: string;
   title?: string;
+  /** Optional durable transcript target for Journey navigation. */
+  initialMessageId?: string;
 }
 
 function getSessionTitle(
@@ -57,16 +59,30 @@ export const openSessionInWorkstationAtom = atom(
       set(closeChatPanelTabAtom, tabId);
     }
 
+    // This is primary WorkStation navigation, not a transient surface claim.
+    // Switch the remembered workspace first: workstationLayoutAtom is partitioned
+    // by that selection, so opening the tab before the jump writes it into the old
+    // session workspace and makes the click appear to do nothing.
+    set(jumpToSessionAtom, {
+      sessionId,
+      sessionName: title,
+      repoPath: session?.repoPath,
+    });
     const layout = get(workstationLayoutAtom);
     set(workstationLayoutAtom, {
       ...layout,
       mainPane: openTab(
         layout.mainPane,
-        createChatSessionTab(sessionId, title)
+        createChatSessionTab(
+          sessionId,
+          title,
+          undefined,
+          undefined,
+          options.initialMessageId
+        )
       ),
     });
     set(chatPanelMaximizedAtom, false);
-    set(claimPipelineSessionAtom, sessionId);
     return true;
   }
 );

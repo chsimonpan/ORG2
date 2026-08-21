@@ -5,8 +5,8 @@ import { useSetAtom } from "jotai";
 import React, { memo, useCallback } from "react";
 
 import { ProjectTreePage } from "@src/modules/ProjectManager/ProjectJourney";
+import { openSessionInWorkstationAtom } from "@src/store/session/sessionTabPlacementAtom";
 import {
-  createChatSessionTab,
   createProjectJourneyTab,
   createSessionJourneyTab,
   createWorkItemDetailTab,
@@ -32,6 +32,7 @@ function useOpenWorkStationTab() {
 
 const ProjectTreeTabRenderer: React.FC<UnifiedTabContentProps> = memo(() => {
   const openTab = useOpenWorkStationTab();
+  const openSessionInWorkstation = useSetAtom(openSessionInWorkstationAtom);
 
   return (
     <ProjectTreePage
@@ -51,15 +52,12 @@ const ProjectTreeTabRenderer: React.FC<UnifiedTabContentProps> = memo(() => {
         _projectSlug,
         initialMessageId
       ) => {
-        openTab(
-          createChatSessionTab(
-            sessionId,
-            sessionTitle || sessionId.slice(0, 8),
-            workItemId,
-            undefined,
-            initialMessageId
-          )
-        );
+        void workItemId;
+        openSessionInWorkstation({
+          sessionId,
+          title: sessionTitle || sessionId.slice(0, 8),
+          initialMessageId,
+        });
       }}
       onOpenSessionJourney={(sessionId, sessionName, target) => {
         openTab(

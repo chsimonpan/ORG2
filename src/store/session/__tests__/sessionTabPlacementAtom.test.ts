@@ -171,6 +171,7 @@ describe("session tab placement", () => {
       "chat-session:codexapp-source"
     );
     expect(store.get(activeSessionIdAtom)).toBe("codexapp-source");
+    expect(store.get(workstationActiveSessionIdAtom)).toBe("codexapp-source");
   });
 
   it("retargets a Workstation tab to the writable continuation in place", () => {

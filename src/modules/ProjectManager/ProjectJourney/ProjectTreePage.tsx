@@ -291,24 +291,23 @@ const ProjectTreePage: React.FC<ProjectTreePageProps> = ({
               <div
                 key={node.id}
                 className={`group flex items-center gap-1 rounded-md px-1 py-1 text-xs hover:bg-fill-2 ${
-                  node.kind === "session" && node.sessionId && onOpenSession
-                    ? "cursor-pointer"
-                    : ""
+                  node.sessionId && onOpenSession ? "cursor-pointer" : ""
                 }`}
                 style={{ paddingLeft: 8 + depth * 14 }}
                 data-testid={`project-tree-row-${node.kind}`}
                 data-node-id={node.id}
                 onClick={() => {
-                  // Session rows navigate on a body click (matching every
-                  // other sidebar tree in the app); only the toggle chevron
-                  // should expand/collapse. Non-session rows keep the old
-                  // toggle-on-body behavior via the chevron button below.
-                  if (node.kind === "session" && node.sessionId) {
+                  // Every Journey level that carries a session id must open
+                  // its owning session. Task/fork/checkpoint rows are level-4
+                  // projections, not standalone destinations. Preserve their
+                  // exact durable anchor when one exists.
+                  if (node.sessionId) {
                     onOpenSession?.(
                       node.sessionId,
                       node.title,
                       node.workItemId,
-                      node.projectSlug
+                      node.projectSlug,
+                      node.anchorMessageId
                     );
                   }
                 }}

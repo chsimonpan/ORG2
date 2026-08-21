@@ -92,6 +92,24 @@ const logger = createLogger("ChatView");
 
 const EMPTY_CHAT_EVENTS: SessionEvent[] = [];
 
+/**
+ * The EventStore snapshot is global and can briefly still contain the previous
+ * session while ChatView has already switched ids. Journey commands must never
+ * borrow that stale session's user anchor.
+ */
+export function resolveLatestJourneyUserMessageId(
+  events: SessionEvent[],
+  sessionId: string
+): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.sessionId === sessionId && isBackendUserMessageEvent(event)) {
+      return event.id;
+    }
+  }
+  return null;
+}
+
 export type { ChatViewProps } from "./ChatViewTypes";
 
 const ChatView: React.FC<ChatViewProps> = memo(
@@ -285,13 +303,10 @@ const ChatView: React.FC<ChatViewProps> = memo(
     const canvasPreviewPill = useChatViewCanvasPreview(sessionId, snapshot);
     const currentPlanApproval = usePendingPlanApproval(sessionId);
     const chatEvents = snapshot?.chatEvents ?? EMPTY_CHAT_EVENTS;
-    const latestUserMessageId = useMemo(() => {
-      for (let index = chatEvents.length - 1; index >= 0; index -= 1) {
-        const event = chatEvents[index];
-        if (event && isBackendUserMessageEvent(event)) return event.id;
-      }
-      return null;
-    }, [chatEvents]);
+    const latestUserMessageId = useMemo(
+      () => resolveLatestJourneyUserMessageId(chatEvents, sessionId),
+      [chatEvents, sessionId]
+    );
     const isAgentWorking = useAtomValue(isSessionActiveAtom);
 
     const gitArtifactStats = useMemo(
@@ -444,9 +459,10 @@ const ChatView: React.FC<ChatViewProps> = memo(
             ref={handlePinnedHeaderHostRef}
             className={
               turnPaginationEnabled || groupChatViewActive
-                ? "flex flex-shrink-0 flex-col"
-                : "absolute inset-x-0 top-0 z-40 flex flex-col"
+                ? "pointer-events-auto relative z-40 flex flex-shrink-0 flex-col"
+                : "pointer-events-auto absolute inset-x-0 top-0 z-40 flex flex-col"
             }
+            data-tauri-drag-region="false"
             data-chat-pinned-header-portal-host
           />
           {!isReadOnlySurface && (
