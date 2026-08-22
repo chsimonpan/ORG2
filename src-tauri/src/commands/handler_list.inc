@@ -542,6 +542,7 @@ git::repos::server_check_github_visibility,
 git::repos::server_create_empty_repo,
 git::repos::server_import_folder,
 git::repos::server_create_folder,
+git::repos::server_validate_workspace_path,
 git::repos::server_check_is_git_repo,
 // Workspace preset commands
 git::repos::server_list_workspaces,
