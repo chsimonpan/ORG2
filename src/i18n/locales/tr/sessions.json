@@ -848,7 +848,10 @@
       "insert": "Ekle"
     },
     "compactArgHint": "<özet için isteğe bağlı odak>",
-    "compactCommandDescription": "Eski bağlamı özetleyerek yer açar. İsteğe bağlı: /compact <özet odağı>"
+    "compactCommandDescription": "Eski bağlamı özetleyerek yer açar. İsteğe bağlı: /compact <özet odağı>",
+    "canvasCommandDescription": "Yeni bir etkileşimli Canvas oluşturur. İsteğe bağlı: /canvas <oluşturulacak içerik>",
+    "canvasArgHint": "oluşturulacak içerik",
+    "newCanvasAction": "Yeni Canvas"
   },
   "listPanel": {
     "showingOf": "{{total}} içinden {{filtered}} gösteriliyor",
@@ -1230,6 +1233,10 @@
       "fileCount_other": "{{count}} dosya",
       "turnCount_one": "{{count}} tur",
       "turnCount_other": "{{count}} tur"
+    },
+    "sideChat": {
+      "title": "Yan sohbet",
+      "openInSideChat": "Yan sohbette aç"
     }
   },
   "chatStatus": {
@@ -2058,7 +2065,19 @@
     "orgSendMessageRunning": "{{recipient}} adresine mesaj gönderiliyor",
     "orgSendMessageDone": "{{recipient}} adresine mesaj gönderildi",
     "orgSendMessageFailed": "{{recipient}} adresine mesaj gönderilemedi",
-    "noMatch": "No match"
+    "noMatch": "No match",
+    "reviseInlineCanvasRunning": "Canvas düzenleniyor",
+    "reviseInlineCanvasDone": "Canvas düzenlendi",
+    "reviseInlineCanvasFailed": "Canvas düzenleme başarısız",
+    "reviseInlineCanvasHtmlRunning": "HTML Canvas düzenleniyor",
+    "reviseInlineCanvasHtmlDone": "HTML Canvas düzenlendi",
+    "reviseInlineCanvasHtmlFailed": "HTML Canvas düzenleme başarısız",
+    "reviseInlineCanvasUrlRunning": "URL Canvas düzenleniyor",
+    "reviseInlineCanvasUrlDone": "URL Canvas düzenlendi",
+    "reviseInlineCanvasUrlFailed": "URL Canvas düzenleme başarısız",
+    "reviseInlineCanvasA2uiRunning": "A2UI Canvas düzenleniyor",
+    "reviseInlineCanvasA2uiDone": "A2UI Canvas düzenlendi",
+    "reviseInlineCanvasA2uiFailed": "A2UI Canvas düzenleme başarısız"
   },
   "hoverCard": {
     "commits": "Commit",
@@ -2075,7 +2094,8 @@
       "manageAgents": "Agents / Skills yönet",
       "project": "Proje oluştur",
       "workItem": "Work Item oluştur",
-      "benchmark": "Benchmark (Beta)"
+      "benchmark": "Benchmark (Beta)",
+      "parallelRun": "Paralel çalıştırma"
     },
     "searchModels": "Model ara...",
     "newItem": "Yeni öğe",
@@ -2340,7 +2360,64 @@
     "agentSpotlightViewMode": "Agent görünüm modu",
     "agentSpotlightListView": "Liste görünümü",
     "agentSpotlightCardView": "Kart görünümü",
-    "agentSpotlightCardHint": "Agent değiştirmek için ←/→ veya ↑/↓ kullanın. Seçmek için Enter’a basın."
+    "agentSpotlightCardHint": "Agent değiştirmek için ←/→ veya ↑/↓ kullanın. Seçmek için Enter’a basın.",
+    "worktreeSource": {
+      "title": "Çalışma ağacı oluştur",
+      "confirm": "Çalışma ağacını kullan",
+      "resolving": "PR çözümleniyor…",
+      "selectRepository": "Çalışma ağacı kaynağını seçmeden önce bir depo seçin.",
+      "sourceTabs": "Çalışma ağacı kaynağı",
+      "tabs": {
+        "smart": "Akıllı",
+        "github": "GitHub",
+        "branch": "Dal",
+        "name": "Ad"
+      },
+      "smartPlaceholder": "Ad, #1234, dal veya GitHub/GitLab URL’si",
+      "smartAria": "Ad, PR numarası, dal veya GitHub/GitLab URL’si girin",
+      "smartHint": "Bir ad, PR numarası veya dal girin ya da PR/MR URL’si yapıştırın.",
+      "refreshGithub": "GitHub listesini yenile",
+      "githubSearch": "GitHub PR ve sorunlarını ara",
+      "githubSearchAria": "GitHub pull request ve sorunlarını ara",
+      "githubError": "GitHub öğeleri yüklenemedi.",
+      "githubEmpty": "Açık GitHub PR veya sorunu yok.",
+      "githubNoMatches": "Eşleşme yok.",
+      "refreshBranches": "Dal listesini yenile",
+      "branchSearch": "Dal ara veya ref gir",
+      "branchSearchAria": "Dal ara veya temel ref gir",
+      "branchError": "Dallar yüklenemedi.",
+      "branchEmpty": "Bu depoda dal bulunamadı.",
+      "branchNoMatches": "Eşleşen dal yok.",
+      "branchUseAsRef": "“{{value}}” değerini ref olarak kullan",
+      "branchCustomRefHint": "Etiket, commit veya herhangi bir Git ref’i",
+      "worktreeLabel": "Çalışma ağacı etiketi",
+      "namePlaceholder": "ozellik-adi",
+      "nameBase": "Taban: {{branch}}",
+      "nameBaseHead": "Taban: HEAD"
+    },
+    "multiRunner": {
+      "exit": "Tek ajana geri dön",
+      "addRunner": "Çalıştırıcı ekle",
+      "removeRunner": "Çalıştırıcıyı kaldır",
+      "selectHarness": "Ajan seç",
+      "pickHarness": "Bir ajan seçin",
+      "parallelCount": "paralel çalışır · {{max}} taneden {{count}}",
+      "launchpadQuestion": "{{count}} çalıştırıcı ile ne oluşturmak istiyorsunuz?",
+      "worktreePerRunner": "Çalıştırıcı başına worktree",
+      "worktreeForced": "Paralel çalıştırma her çalıştırıcıya daima kendi worktree'sini verir.",
+      "blocker": {
+        "noHarness": "Bir ajan seçin",
+        "noModel": "Bir model seçin",
+        "cliNotInstalled": "{{cli}} kurulu değil",
+        "cliNoGui": "{{cli}} GUI moduna sahip değil"
+      },
+      "launchError": {
+        "noPrompt": "Çalıştırıcıların ne oluşturmasını istediğinizi yazın",
+        "promptTooLong": "Görev açıklaması 10.000 karakterden kısa olmalı",
+        "noRepo": "Bir depo seçin — her çalıştırıcı kendi worktree'sine ihtiyaç duyar",
+        "notEnoughRunners": "En az iki çalıştırılabilir çalıştırıcı ayarlayın"
+      }
+    }
   },
   "planner": {
     "tabs": {
@@ -2811,5 +2888,78 @@
     "summarize": "Agent ile özetle",
     "waiting": "İçerik bekleniyor…",
     "empty": "İçerik yok"
+  },
+  "pokerTable": {
+    "menuLabel": "Poker table",
+    "header": {
+      "title": "No-Limit Inference – {{stakes}} Mtok – 6-max",
+      "hand": "Hand #{{number}}",
+      "history": "Hand history",
+      "settings": "Table settings",
+      "leave": "Leave table",
+      "close": "Close"
+    },
+    "potLabel": "Pot",
+    "tokens": "{{amount}} tokens",
+    "thinking": "Thinking · {{seconds}}s",
+    "waitingFor": "Waiting for {{name}}…",
+    "dealing": "Dealing…",
+    "nextHand": "Deal next hand",
+    "seat": {
+      "you": "You",
+      "bot": "bot",
+      "allIn": "All in"
+    },
+    "actions": {
+      "fold": "Fold",
+      "check": "Check",
+      "call": "Call {{amount}}",
+      "bet": "Bet {{amount}}",
+      "raise": "Raise {{amount}}",
+      "allIn": "All in {{amount}}",
+      "betLabel": "Bet",
+      "raiseLabel": "Raise",
+      "callLabel": "Call",
+      "checkLabel": "Check"
+    },
+    "result": {
+      "wins": "{{name}} wins {{amount}}",
+      "winsWith": "{{name}} wins {{amount}} with {{hand}}"
+    },
+    "rebuy": {
+      "title": "You're out of chips",
+      "bankroll": "Bankroll {{amount}}",
+      "buyIn": "Buy in {{amount}}",
+      "reset": "Reset bankroll"
+    },
+    "history": {
+      "title": "Hand history",
+      "empty": "No hands played yet",
+      "foldedOut": "everyone folded"
+    },
+    "settings": {
+      "stakes": "Stakes",
+      "speed": "Table speed",
+      "speed_normal": "Normal",
+      "speed_fast": "Fast"
+    }
+  },
+  "runGroup": {
+    "open": "Aç",
+    "stop": "Durdur",
+    "stopAll": "Tümünü durdur",
+    "runAgain": "Yeniden çalıştır",
+    "stopFailed": "Bu çalıştırma durdurulamadı",
+    "subtitle": "{{total}} çalıştırıcıdan {{count}} tanesi başlatıldı",
+    "missingTitle": "Çalıştırma grubu kullanılamıyor",
+    "missingBody": "Bu çalıştırma grubu artık bu makinede saklanmıyor.",
+    "state": {
+      "running": "Çalışıyor",
+      "done": "Tamamlandı",
+      "failed": "Başarısız",
+      "stopped": "Durduruldu",
+      "skipped": "Atlandı",
+      "pending": "Başlatılıyor"
+    }
   }
 }

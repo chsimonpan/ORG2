@@ -34,6 +34,7 @@ import {
   createLaunchpadTab,
   createOrganizationTab,
   createProjectTab,
+  createRunGroupTab,
   createRuntimeTab,
   createSessionTab,
   createTeamInboxTab,
@@ -608,6 +609,30 @@ export const openChannelInChatPanelTabAtom = atom(
   }
 );
 openChannelInChatPanelTabAtom.debugLabel = "openChannelInChatPanelTab";
+
+/**
+ * Open or focus the tab for one multi-runner fan-out.
+ *
+ * The launcher calls this instead of navigating into any single launched
+ * session: with N sessions started at once, picking one of them to show would
+ * be an arbitrary choice, and the comparison is the thing the user asked for.
+ */
+export const openRunGroupInChatPanelTabAtom = atom(
+  null,
+  (get, set, input: { runGroupId: string; title: string }) => {
+    const existingTab = get(chatPanelTabsAtom).tabs.find(
+      (tab) => tab.type === "run-group" && tab.runGroupId === input.runGroupId
+    );
+    if (existingTab) {
+      set(activateChatPanelTabAtom, existingTab.id);
+      return existingTab.id;
+    }
+    const tab = createRunGroupTab(input);
+    set(appendAndActivateChatPanelTabAtom, { tab });
+    return tab.id;
+  }
+);
+openRunGroupInChatPanelTabAtom.debugLabel = "openRunGroupInChatPanelTab";
 
 /** Open or focus the singleton Explore tab. */
 export const openExploreInChatPanelTabAtom = atom(null, (get, set) => {

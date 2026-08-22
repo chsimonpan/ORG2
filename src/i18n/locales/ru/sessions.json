@@ -852,7 +852,10 @@
       "insert": "Вставить"
     },
     "compactArgHint": "<необязательный фокус резюме>",
-    "compactCommandDescription": "Обобщить старый контекст, чтобы освободить место. Необязательно: /compact <фокус резюме>"
+    "compactCommandDescription": "Обобщить старый контекст, чтобы освободить место. Необязательно: /compact <фокус резюме>",
+    "canvasCommandDescription": "Создать новый интерактивный Canvas. Необязательно: /canvas <что создать>",
+    "canvasArgHint": "что создать",
+    "newCanvasAction": "Новый Canvas"
   },
   "listPanel": {
     "showingOf": "Показано {{filtered}} из {{total}}",
@@ -1246,6 +1249,10 @@
       "fileCount_other": "{{count}} файлов",
       "turnCount_one": "{{count}} раунд",
       "turnCount_other": "{{count}} раундов"
+    },
+    "sideChat": {
+      "title": "Боковой чат",
+      "openInSideChat": "Открыть в боковом чате"
     }
   },
   "chatStatus": {
@@ -2100,7 +2107,19 @@
     "orgSendMessageRunning": "Отправка сообщения {{recipient}}",
     "orgSendMessageDone": "Сообщение отправлено {{recipient}}",
     "orgSendMessageFailed": "Не удалось отправить сообщение {{recipient}}",
-    "noMatch": "No match"
+    "noMatch": "No match",
+    "reviseInlineCanvasRunning": "Правка Canvas",
+    "reviseInlineCanvasDone": "Canvas исправлен",
+    "reviseInlineCanvasFailed": "Ошибка правки Canvas",
+    "reviseInlineCanvasHtmlRunning": "Правка HTML Canvas",
+    "reviseInlineCanvasHtmlDone": "HTML Canvas исправлен",
+    "reviseInlineCanvasHtmlFailed": "Ошибка правки HTML Canvas",
+    "reviseInlineCanvasUrlRunning": "Правка URL Canvas",
+    "reviseInlineCanvasUrlDone": "URL Canvas исправлен",
+    "reviseInlineCanvasUrlFailed": "Ошибка правки URL Canvas",
+    "reviseInlineCanvasA2uiRunning": "Правка A2UI Canvas",
+    "reviseInlineCanvasA2uiDone": "A2UI Canvas исправлен",
+    "reviseInlineCanvasA2uiFailed": "Ошибка правки A2UI Canvas"
   },
   "hoverCard": {
     "commits": "Коммиты",
@@ -2118,7 +2137,8 @@
       "manageAgents": "Управлять Agents / Skills",
       "project": "Создать проект",
       "workItem": "Создать Work Item",
-      "benchmark": "Benchmark (Beta)"
+      "benchmark": "Benchmark (Beta)",
+      "parallelRun": "Параллельный запуск"
     },
     "searchModels": "Поиск моделей...",
     "newItem": "Новый элемент",
@@ -2383,7 +2403,64 @@
     "agentSpotlightViewMode": "Режим просмотра Agent",
     "agentSpotlightListView": "Список",
     "agentSpotlightCardView": "Карточка",
-    "agentSpotlightCardHint": "Используйте ←/→ или ↑/↓, чтобы переключать Agent. Нажмите Enter для выбора."
+    "agentSpotlightCardHint": "Используйте ←/→ или ↑/↓, чтобы переключать Agent. Нажмите Enter для выбора.",
+    "worktreeSource": {
+      "title": "Создать рабочее дерево",
+      "confirm": "Использовать рабочее дерево",
+      "resolving": "Определение PR…",
+      "selectRepository": "Выберите репозиторий перед выбором источника рабочего дерева.",
+      "sourceTabs": "Источник рабочего дерева",
+      "tabs": {
+        "smart": "Умный",
+        "github": "GitHub",
+        "branch": "Ветка",
+        "name": "Имя"
+      },
+      "smartPlaceholder": "Имя, #1234, ветка или URL GitHub/GitLab",
+      "smartAria": "Введите имя, номер PR, ветку или URL GitHub/GitLab",
+      "smartHint": "Введите имя, номер PR, ветку или вставьте URL PR/MR.",
+      "refreshGithub": "Обновить список GitHub",
+      "githubSearch": "Поиск PR и задач GitHub",
+      "githubSearchAria": "Поиск pull request и задач GitHub",
+      "githubError": "Не удалось загрузить элементы GitHub.",
+      "githubEmpty": "Нет открытых PR или задач GitHub.",
+      "githubNoMatches": "Совпадений нет.",
+      "refreshBranches": "Обновить список веток",
+      "branchSearch": "Поиск веток или ввод ref",
+      "branchSearchAria": "Поиск веток или ввод базового ref",
+      "branchError": "Не удалось загрузить ветки.",
+      "branchEmpty": "В этом репозитории ветки не найдены.",
+      "branchNoMatches": "Подходящих веток нет.",
+      "branchUseAsRef": "Использовать «{{value}}» как ref",
+      "branchCustomRefHint": "Тег, коммит или любой Git ref",
+      "worktreeLabel": "Метка рабочего дерева",
+      "namePlaceholder": "имя-функции",
+      "nameBase": "База: {{branch}}",
+      "nameBaseHead": "База: HEAD"
+    },
+    "multiRunner": {
+      "exit": "Вернуться к одному агенту",
+      "addRunner": "Добавить раннер",
+      "removeRunner": "Удалить раннер",
+      "selectHarness": "Выбрать агента",
+      "pickHarness": "Выберите агента",
+      "parallelCount": "выполняются параллельно · {{count}} из {{max}}",
+      "launchpadQuestion": "Что вы хотите создать с {{count}} раннерами?",
+      "worktreePerRunner": "Отдельное рабочее дерево на раннер",
+      "worktreeForced": "Параллельный запуск всегда выделяет каждому раннеру собственное рабочее дерево.",
+      "blocker": {
+        "noHarness": "Выберите агента",
+        "noModel": "Выберите модель",
+        "cliNotInstalled": "{{cli}} не установлен",
+        "cliNoGui": "{{cli}} не поддерживает режим GUI"
+      },
+      "launchError": {
+        "noPrompt": "Опишите, что должны создать раннеры",
+        "promptTooLong": "Описание задачи должно быть короче 10 000 символов",
+        "noRepo": "Выберите репозиторий — каждому раннеру нужно собственное рабочее дерево",
+        "notEnoughRunners": "Настройте не менее двух готовых к запуску раннеров"
+      }
+    }
   },
   "planner": {
     "tabs": {
@@ -2854,5 +2931,78 @@
     "summarize": "Обобщить с Agent",
     "waiting": "Ожидание контента…",
     "empty": "Нет содержимого"
+  },
+  "pokerTable": {
+    "menuLabel": "Poker table",
+    "header": {
+      "title": "No-Limit Inference – {{stakes}} Mtok – 6-max",
+      "hand": "Hand #{{number}}",
+      "history": "Hand history",
+      "settings": "Table settings",
+      "leave": "Leave table",
+      "close": "Close"
+    },
+    "potLabel": "Pot",
+    "tokens": "{{amount}} tokens",
+    "thinking": "Thinking · {{seconds}}s",
+    "waitingFor": "Waiting for {{name}}…",
+    "dealing": "Dealing…",
+    "nextHand": "Deal next hand",
+    "seat": {
+      "you": "You",
+      "bot": "bot",
+      "allIn": "All in"
+    },
+    "actions": {
+      "fold": "Fold",
+      "check": "Check",
+      "call": "Call {{amount}}",
+      "bet": "Bet {{amount}}",
+      "raise": "Raise {{amount}}",
+      "allIn": "All in {{amount}}",
+      "betLabel": "Bet",
+      "raiseLabel": "Raise",
+      "callLabel": "Call",
+      "checkLabel": "Check"
+    },
+    "result": {
+      "wins": "{{name}} wins {{amount}}",
+      "winsWith": "{{name}} wins {{amount}} with {{hand}}"
+    },
+    "rebuy": {
+      "title": "You're out of chips",
+      "bankroll": "Bankroll {{amount}}",
+      "buyIn": "Buy in {{amount}}",
+      "reset": "Reset bankroll"
+    },
+    "history": {
+      "title": "Hand history",
+      "empty": "No hands played yet",
+      "foldedOut": "everyone folded"
+    },
+    "settings": {
+      "stakes": "Stakes",
+      "speed": "Table speed",
+      "speed_normal": "Normal",
+      "speed_fast": "Fast"
+    }
+  },
+  "runGroup": {
+    "open": "Открыть",
+    "stop": "Остановить",
+    "stopAll": "Остановить все",
+    "runAgain": "Запустить снова",
+    "stopFailed": "Не удалось остановить этот запуск",
+    "subtitle": "Запущено раннеров: {{count}} из {{total}}",
+    "missingTitle": "Группа запусков недоступна",
+    "missingBody": "Эта группа запусков больше не хранится на этом компьютере.",
+    "state": {
+      "running": "Выполняется",
+      "done": "Готово",
+      "failed": "Ошибка",
+      "stopped": "Остановлен",
+      "skipped": "Пропущен",
+      "pending": "Запускается"
+    }
   }
 }

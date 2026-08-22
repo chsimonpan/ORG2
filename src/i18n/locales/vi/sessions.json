@@ -845,7 +845,10 @@
       "insert": "Chèn"
     },
     "compactArgHint": "<trọng tâm tóm tắt (tùy chọn)>",
-    "compactCommandDescription": "Tóm tắt ngữ cảnh cũ để giải phóng dung lượng. Tùy chọn: /compact <trọng tâm tóm tắt>"
+    "compactCommandDescription": "Tóm tắt ngữ cảnh cũ để giải phóng dung lượng. Tùy chọn: /compact <trọng tâm tóm tắt>",
+    "canvasCommandDescription": "Tạo một Canvas tương tác mới. Tùy chọn: /canvas <nội dung cần tạo>",
+    "canvasArgHint": "nội dung cần tạo",
+    "newCanvasAction": "Canvas mới"
   },
   "listPanel": {
     "showingOf": "Hiển thị {{filtered}} / {{total}}",
@@ -1227,6 +1230,10 @@
       "fileCount_other": "{{count}} tệp",
       "turnCount_one": "{{count}} lượt",
       "turnCount_other": "{{count}} lượt"
+    },
+    "sideChat": {
+      "title": "Trò chuyện bên",
+      "openInSideChat": "Mở trong trò chuyện bên"
     }
   },
   "chatStatus": {
@@ -2055,7 +2062,19 @@
     "orgSendMessageRunning": "Đang gửi tin nhắn đến {{recipient}}",
     "orgSendMessageDone": "Đã gửi tin nhắn đến {{recipient}}",
     "orgSendMessageFailed": "Không gửi được tin nhắn đến {{recipient}}",
-    "noMatch": "No match"
+    "noMatch": "No match",
+    "reviseInlineCanvasRunning": "Đang chỉnh sửa Canvas",
+    "reviseInlineCanvasDone": "Canvas đã chỉnh sửa",
+    "reviseInlineCanvasFailed": "Chỉnh sửa Canvas thất bại",
+    "reviseInlineCanvasHtmlRunning": "Đang chỉnh sửa Canvas HTML",
+    "reviseInlineCanvasHtmlDone": "Canvas HTML đã chỉnh sửa",
+    "reviseInlineCanvasHtmlFailed": "Chỉnh sửa Canvas HTML thất bại",
+    "reviseInlineCanvasUrlRunning": "Đang chỉnh sửa Canvas URL",
+    "reviseInlineCanvasUrlDone": "Canvas URL đã chỉnh sửa",
+    "reviseInlineCanvasUrlFailed": "Chỉnh sửa Canvas URL thất bại",
+    "reviseInlineCanvasA2uiRunning": "Đang chỉnh sửa Canvas A2UI",
+    "reviseInlineCanvasA2uiDone": "Canvas A2UI đã chỉnh sửa",
+    "reviseInlineCanvasA2uiFailed": "Chỉnh sửa Canvas A2UI thất bại"
   },
   "hoverCard": {
     "commits": "Commit",
@@ -2072,7 +2091,8 @@
       "manageAgents": "Quản lý Agents / Skills",
       "project": "Tạo dự án",
       "workItem": "Tạo Work Item",
-      "benchmark": "Benchmark (Beta)"
+      "benchmark": "Benchmark (Beta)",
+      "parallelRun": "Chạy song song"
     },
     "searchModels": "Tìm kiếm mô hình...",
     "newItem": "Mục mới",
@@ -2337,7 +2357,64 @@
     "agentSpotlightViewMode": "Chế độ xem Agent",
     "agentSpotlightListView": "Dạng danh sách",
     "agentSpotlightCardView": "Dạng thẻ",
-    "agentSpotlightCardHint": "Dùng ←/→ hoặc ↑/↓ để chuyển Agent. Nhấn Enter để chọn."
+    "agentSpotlightCardHint": "Dùng ←/→ hoặc ↑/↓ để chuyển Agent. Nhấn Enter để chọn.",
+    "worktreeSource": {
+      "title": "Tạo cây làm việc",
+      "confirm": "Dùng cây làm việc",
+      "resolving": "Đang phân giải PR…",
+      "selectRepository": "Hãy chọn kho mã trước khi chọn nguồn cây làm việc.",
+      "sourceTabs": "Nguồn cây làm việc",
+      "tabs": {
+        "smart": "Thông minh",
+        "github": "GitHub",
+        "branch": "Nhánh",
+        "name": "Tên"
+      },
+      "smartPlaceholder": "Tên, #1234, nhánh hoặc URL GitHub/GitLab",
+      "smartAria": "Nhập tên, số PR, nhánh hoặc URL GitHub/GitLab",
+      "smartHint": "Nhập tên, số PR, nhánh hoặc dán URL PR/MR.",
+      "refreshGithub": "Làm mới danh sách GitHub",
+      "githubSearch": "Tìm PR và issue trên GitHub",
+      "githubSearchAria": "Tìm pull request và issue trên GitHub",
+      "githubError": "Không thể tải các mục GitHub.",
+      "githubEmpty": "Không có PR hoặc issue GitHub đang mở.",
+      "githubNoMatches": "Không có kết quả phù hợp.",
+      "refreshBranches": "Làm mới danh sách nhánh",
+      "branchSearch": "Tìm nhánh hoặc nhập ref",
+      "branchSearchAria": "Tìm nhánh hoặc nhập ref cơ sở",
+      "branchError": "Không thể tải các nhánh.",
+      "branchEmpty": "Không tìm thấy nhánh trong kho mã này.",
+      "branchNoMatches": "Không có nhánh phù hợp.",
+      "branchUseAsRef": "Dùng “{{value}}” làm ref",
+      "branchCustomRefHint": "Thẻ, commit hoặc bất kỳ Git ref nào",
+      "worktreeLabel": "Nhãn cây làm việc",
+      "namePlaceholder": "ten-tinh-nang",
+      "nameBase": "Cơ sở: {{branch}}",
+      "nameBaseHead": "Cơ sở: HEAD"
+    },
+    "multiRunner": {
+      "exit": "Quay lại một tác nhân",
+      "addRunner": "Thêm runner",
+      "removeRunner": "Xóa runner",
+      "selectHarness": "Chọn tác nhân",
+      "pickHarness": "Chọn một tác nhân",
+      "parallelCount": "chạy song song · {{count}} trên {{max}}",
+      "launchpadQuestion": "Bạn muốn xây dựng gì với {{count}} runner?",
+      "worktreePerRunner": "Mỗi runner một worktree",
+      "worktreeForced": "Chạy song song luôn cấp cho mỗi runner một worktree riêng.",
+      "blocker": {
+        "noHarness": "Hãy chọn tác nhân",
+        "noModel": "Hãy chọn mô hình",
+        "cliNotInstalled": "{{cli}} chưa được cài đặt",
+        "cliNoGui": "{{cli}} không có chế độ GUI"
+      },
+      "launchError": {
+        "noPrompt": "Hãy mô tả điều bạn muốn các runner xây dựng",
+        "promptTooLong": "Mô tả công việc phải dưới 10.000 ký tự",
+        "noRepo": "Hãy chọn một kho lưu trữ — mỗi runner cần worktree riêng",
+        "notEnoughRunners": "Hãy thiết lập ít nhất hai runner có thể chạy"
+      }
+    }
   },
   "planner": {
     "tabs": {
@@ -2807,5 +2884,78 @@
     "summarize": "Tóm tắt với Agent",
     "waiting": "Đang chờ nội dung…",
     "empty": "Không có nội dung"
+  },
+  "pokerTable": {
+    "menuLabel": "Poker table",
+    "header": {
+      "title": "No-Limit Inference – {{stakes}} Mtok – 6-max",
+      "hand": "Hand #{{number}}",
+      "history": "Hand history",
+      "settings": "Table settings",
+      "leave": "Leave table",
+      "close": "Close"
+    },
+    "potLabel": "Pot",
+    "tokens": "{{amount}} tokens",
+    "thinking": "Thinking · {{seconds}}s",
+    "waitingFor": "Waiting for {{name}}…",
+    "dealing": "Dealing…",
+    "nextHand": "Deal next hand",
+    "seat": {
+      "you": "You",
+      "bot": "bot",
+      "allIn": "All in"
+    },
+    "actions": {
+      "fold": "Fold",
+      "check": "Check",
+      "call": "Call {{amount}}",
+      "bet": "Bet {{amount}}",
+      "raise": "Raise {{amount}}",
+      "allIn": "All in {{amount}}",
+      "betLabel": "Bet",
+      "raiseLabel": "Raise",
+      "callLabel": "Call",
+      "checkLabel": "Check"
+    },
+    "result": {
+      "wins": "{{name}} wins {{amount}}",
+      "winsWith": "{{name}} wins {{amount}} with {{hand}}"
+    },
+    "rebuy": {
+      "title": "You're out of chips",
+      "bankroll": "Bankroll {{amount}}",
+      "buyIn": "Buy in {{amount}}",
+      "reset": "Reset bankroll"
+    },
+    "history": {
+      "title": "Hand history",
+      "empty": "No hands played yet",
+      "foldedOut": "everyone folded"
+    },
+    "settings": {
+      "stakes": "Stakes",
+      "speed": "Table speed",
+      "speed_normal": "Normal",
+      "speed_fast": "Fast"
+    }
+  },
+  "runGroup": {
+    "open": "Mở",
+    "stop": "Dừng",
+    "stopAll": "Dừng tất cả",
+    "runAgain": "Chạy lại",
+    "stopFailed": "Không thể dừng lần chạy này",
+    "subtitle": "Đã khởi động {{count}} trên {{total}} runner",
+    "missingTitle": "Nhóm chạy không khả dụng",
+    "missingBody": "Nhóm chạy này không còn được lưu trên máy này.",
+    "state": {
+      "running": "Đang chạy",
+      "done": "Hoàn tất",
+      "failed": "Thất bại",
+      "stopped": "Đã dừng",
+      "skipped": "Đã bỏ qua",
+      "pending": "Đang khởi động"
+    }
   }
 }

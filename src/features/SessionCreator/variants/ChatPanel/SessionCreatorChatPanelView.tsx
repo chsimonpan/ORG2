@@ -84,6 +84,11 @@ interface SessionCreatorChatPanelViewProps {
   isOrgMembersPanelOpen: boolean;
   isWingmanMode: boolean;
   leadingActionSlot?: React.ReactNode;
+  /**
+   * Runner list rendered in place of the launchpad's agent hero + action
+   * cards while multi-runner mode is on. Present only for that mode.
+   */
+  multiRunnerContent?: React.ReactNode;
   onAttachedWorkItemContextChange: React.Dispatch<
     React.SetStateAction<SessionLaunchWorkItemContext | null>
   >;
@@ -137,6 +142,7 @@ const SessionCreatorChatPanelView: React.FC<
   isOrgMembersPanelOpen,
   isWingmanMode,
   leadingActionSlot,
+  multiRunnerContent,
   onAttachedWorkItemContextChange,
   onCategoryPickerOpen,
   onCreateWorkItem,
@@ -234,17 +240,18 @@ const SessionCreatorChatPanelView: React.FC<
             {cliLaunchModeSwitch && (
               <div aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border-2" />
             )}
-            {!hideWorkItemAttachmentControl && !isLaunchpadLayout && (
-              <WorkItemAttachmentControl
-                composerInputRef={composerInputRef}
-                currentWorkItemContext={workItemContext}
-                onCreateWorkItem={onCreateWorkItem}
-                onWorkItemContextChange={onAttachedWorkItemContextChange}
-                repoId={sessionInfoProps.repoId}
-                repoPath={sessionInfoProps.repoPath}
-                mode="add"
-              />
-            )}
+            {!hideWorkItemAttachmentControl &&
+              (!isLaunchpadLayout || Boolean(multiRunnerContent)) && (
+                <WorkItemAttachmentControl
+                  composerInputRef={composerInputRef}
+                  currentWorkItemContext={workItemContext}
+                  onCreateWorkItem={onCreateWorkItem}
+                  onWorkItemContextChange={onAttachedWorkItemContextChange}
+                  repoId={sessionInfoProps.repoId}
+                  repoPath={sessionInfoProps.repoPath}
+                  mode="add"
+                />
+              )}
             {orgMembersPanelProps && (
               <Button
                 variant="secondary"
@@ -322,25 +329,40 @@ const SessionCreatorChatPanelView: React.FC<
   const launchpadMiddleContent = isLaunchpadLayout ? (
     <div
       className={`session-creator-chat-panel-launchpad-middle flex flex-col items-center gap-4 ${
-        isLaunchpadWorkItemPickerOpen
+        isLaunchpadWorkItemPickerOpen && !multiRunnerContent
           ? "relative min-h-0 w-full flex-1 justify-center overflow-hidden"
           : "absolute inset-x-0 -translate-y-1/2"
       }`}
       style={
-        isLaunchpadWorkItemPickerOpen
+        isLaunchpadWorkItemPickerOpen && !multiRunnerContent
           ? undefined
           : CREATOR_MIDDLE_POSITION_STYLE
       }
     >
-      {agentHero}
-      {launchpadSuggestionContent && (
+      {/* Multi-runner owns the whole middle slot: with N runners listed below
+          it, a single-harness hero pill would name one of them and imply the
+          others do not exist. */}
+      {multiRunnerContent ? (
         <div
-          className={`session-creator-chat-panel-launchpad-suggestions w-full ${
-            isLaunchpadWorkItemPickerOpen ? "flex min-h-0 flex-1 flex-col" : ""
-          }`}
+          className={`session-creator-chat-panel-launchpad-runners mx-auto w-full ${DETAIL_PANEL_TOKENS.contentMaxWidth}`}
         >
-          {launchpadSuggestionContent}
+          {multiRunnerContent}
         </div>
+      ) : (
+        <>
+          {agentHero}
+          {launchpadSuggestionContent && (
+            <div
+              className={`session-creator-chat-panel-launchpad-suggestions w-full ${
+                isLaunchpadWorkItemPickerOpen
+                  ? "flex min-h-0 flex-1 flex-col"
+                  : ""
+              }`}
+            >
+              {launchpadSuggestionContent}
+            </div>
+          )}
+        </>
       )}
     </div>
   ) : null;

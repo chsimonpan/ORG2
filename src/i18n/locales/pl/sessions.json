@@ -849,7 +849,10 @@
       "insert": "Wstaw"
     },
     "compactArgHint": "<opcjonalny nacisk podsumowania>",
-    "compactCommandDescription": "Podsumuj starszy kontekst, aby zwolnić miejsce. Opcjonalnie: /compact <nacisk podsumowania>"
+    "compactCommandDescription": "Podsumuj starszy kontekst, aby zwolnić miejsce. Opcjonalnie: /compact <nacisk podsumowania>",
+    "canvasCommandDescription": "Utwórz nowy interaktywny Canvas. Opcjonalnie: /canvas <co utworzyć>",
+    "canvasArgHint": "co utworzyć",
+    "newCanvasAction": "Nowy Canvas"
   },
   "listPanel": {
     "showingOf": "Wyświetlono {{filtered}} z {{total}}",
@@ -1243,6 +1246,10 @@
       "fileCount_other": "{{count}} plików",
       "turnCount_one": "{{count}} runda",
       "turnCount_other": "{{count}} rund"
+    },
+    "sideChat": {
+      "title": "Czat boczny",
+      "openInSideChat": "Otwórz w czacie bocznym"
     }
   },
   "chatStatus": {
@@ -2109,7 +2116,19 @@
     "orgSendMessageRunning": "Wysyłanie wiadomości do {{recipient}}",
     "orgSendMessageDone": "Wysłano wiadomość do {{recipient}}",
     "orgSendMessageFailed": "Nie udało się wysłać wiadomości do {{recipient}}",
-    "noMatch": "No match"
+    "noMatch": "No match",
+    "reviseInlineCanvasRunning": "Poprawianie Canvas",
+    "reviseInlineCanvasDone": "Canvas poprawiony",
+    "reviseInlineCanvasFailed": "Poprawianie Canvas nie powiodło się",
+    "reviseInlineCanvasHtmlRunning": "Poprawianie Canvas HTML",
+    "reviseInlineCanvasHtmlDone": "Canvas HTML poprawiony",
+    "reviseInlineCanvasHtmlFailed": "Poprawianie Canvas HTML nie powiodło się",
+    "reviseInlineCanvasUrlRunning": "Poprawianie Canvas URL",
+    "reviseInlineCanvasUrlDone": "Canvas URL poprawiony",
+    "reviseInlineCanvasUrlFailed": "Poprawianie Canvas URL nie powiodło się",
+    "reviseInlineCanvasA2uiRunning": "Poprawianie Canvas A2UI",
+    "reviseInlineCanvasA2uiDone": "Canvas A2UI poprawiony",
+    "reviseInlineCanvasA2uiFailed": "Poprawianie Canvas A2UI nie powiodło się"
   },
   "hoverCard": {
     "commits": "Commity",
@@ -2128,7 +2147,8 @@
       "manageAgents": "Zarządzaj Agents / Skills",
       "project": "Utwórz projekt",
       "workItem": "Utwórz Work Item",
-      "benchmark": "Benchmark (Beta)"
+      "benchmark": "Benchmark (Beta)",
+      "parallelRun": "Uruchomienie równoległe"
     },
     "searchModels": "Wyszukaj modele...",
     "newItem": "Nowy element",
@@ -2393,7 +2413,64 @@
     "agentSpotlightViewMode": "Tryb widoku Agent",
     "agentSpotlightListView": "Widok listy",
     "agentSpotlightCardView": "Widok karty",
-    "agentSpotlightCardHint": "Użyj ←/→ lub ↑/↓, aby przełączać Agents. Naciśnij Enter, aby wybrać."
+    "agentSpotlightCardHint": "Użyj ←/→ lub ↑/↓, aby przełączać Agents. Naciśnij Enter, aby wybrać.",
+    "worktreeSource": {
+      "title": "Utwórz drzewo robocze",
+      "confirm": "Użyj drzewa roboczego",
+      "resolving": "Rozwiązywanie PR…",
+      "selectRepository": "Wybierz repozytorium przed wybraniem źródła drzewa roboczego.",
+      "sourceTabs": "Źródło drzewa roboczego",
+      "tabs": {
+        "smart": "Inteligentne",
+        "github": "GitHub",
+        "branch": "Gałąź",
+        "name": "Nazwa"
+      },
+      "smartPlaceholder": "Nazwa, #1234, gałąź lub adres GitHub/GitLab",
+      "smartAria": "Wprowadź nazwę, numer PR, gałąź lub adres GitHub/GitLab",
+      "smartHint": "Wpisz nazwę, numer PR lub gałąź albo wklej adres PR/MR.",
+      "refreshGithub": "Odśwież listę GitHub",
+      "githubSearch": "Szukaj PR i zgłoszeń GitHub",
+      "githubSearchAria": "Szukaj pull requestów i zgłoszeń GitHub",
+      "githubError": "Nie udało się wczytać elementów GitHub.",
+      "githubEmpty": "Brak otwartych PR lub zgłoszeń GitHub.",
+      "githubNoMatches": "Brak wyników.",
+      "refreshBranches": "Odśwież listę gałęzi",
+      "branchSearch": "Szukaj gałęzi lub wpisz ref",
+      "branchSearchAria": "Szukaj gałęzi lub wpisz bazowy ref",
+      "branchError": "Nie udało się wczytać gałęzi.",
+      "branchEmpty": "Nie znaleziono gałęzi w tym repozytorium.",
+      "branchNoMatches": "Brak pasujących gałęzi.",
+      "branchUseAsRef": "Użyj „{{value}}” jako ref",
+      "branchCustomRefHint": "Tag, commit lub dowolny ref Git",
+      "worktreeLabel": "Etykieta drzewa roboczego",
+      "namePlaceholder": "nazwa-funkcji",
+      "nameBase": "Baza: {{branch}}",
+      "nameBaseHead": "Baza: HEAD"
+    },
+    "multiRunner": {
+      "exit": "Wróć do pojedynczego agenta",
+      "addRunner": "Dodaj runner",
+      "removeRunner": "Usuń runner",
+      "selectHarness": "Wybierz agenta",
+      "pickHarness": "Wybierz agenta",
+      "parallelCount": "działają równolegle · {{count}} z {{max}}",
+      "launchpadQuestion": "Co chcesz zbudować z {{count}} runnerami?",
+      "worktreePerRunner": "Osobny worktree na runner",
+      "worktreeForced": "Uruchomienie równoległe zawsze daje każdemu runnerowi własny worktree.",
+      "blocker": {
+        "noHarness": "Wybierz agenta",
+        "noModel": "Wybierz model",
+        "cliNotInstalled": "{{cli}} nie jest zainstalowany",
+        "cliNoGui": "{{cli}} nie ma trybu GUI"
+      },
+      "launchError": {
+        "noPrompt": "Opisz, co runnery mają zbudować",
+        "promptTooLong": "Opis zadania musi mieć mniej niż 10 000 znaków",
+        "noRepo": "Wybierz repozytorium — każdy runner potrzebuje własnego worktree",
+        "notEnoughRunners": "Skonfiguruj co najmniej dwa gotowe runnery"
+      }
+    }
   },
   "planner": {
     "tabs": {
@@ -2847,5 +2924,78 @@
     "summarize": "Podsumuj z Agent",
     "waiting": "Oczekiwanie na treść…",
     "empty": "Brak treści"
+  },
+  "pokerTable": {
+    "menuLabel": "Poker table",
+    "header": {
+      "title": "No-Limit Inference – {{stakes}} Mtok – 6-max",
+      "hand": "Hand #{{number}}",
+      "history": "Hand history",
+      "settings": "Table settings",
+      "leave": "Leave table",
+      "close": "Close"
+    },
+    "potLabel": "Pot",
+    "tokens": "{{amount}} tokens",
+    "thinking": "Thinking · {{seconds}}s",
+    "waitingFor": "Waiting for {{name}}…",
+    "dealing": "Dealing…",
+    "nextHand": "Deal next hand",
+    "seat": {
+      "you": "You",
+      "bot": "bot",
+      "allIn": "All in"
+    },
+    "actions": {
+      "fold": "Fold",
+      "check": "Check",
+      "call": "Call {{amount}}",
+      "bet": "Bet {{amount}}",
+      "raise": "Raise {{amount}}",
+      "allIn": "All in {{amount}}",
+      "betLabel": "Bet",
+      "raiseLabel": "Raise",
+      "callLabel": "Call",
+      "checkLabel": "Check"
+    },
+    "result": {
+      "wins": "{{name}} wins {{amount}}",
+      "winsWith": "{{name}} wins {{amount}} with {{hand}}"
+    },
+    "rebuy": {
+      "title": "You're out of chips",
+      "bankroll": "Bankroll {{amount}}",
+      "buyIn": "Buy in {{amount}}",
+      "reset": "Reset bankroll"
+    },
+    "history": {
+      "title": "Hand history",
+      "empty": "No hands played yet",
+      "foldedOut": "everyone folded"
+    },
+    "settings": {
+      "stakes": "Stakes",
+      "speed": "Table speed",
+      "speed_normal": "Normal",
+      "speed_fast": "Fast"
+    }
+  },
+  "runGroup": {
+    "open": "Otwórz",
+    "stop": "Zatrzymaj",
+    "stopAll": "Zatrzymaj wszystkie",
+    "runAgain": "Uruchom ponownie",
+    "stopFailed": "Nie udało się zatrzymać tego uruchomienia",
+    "subtitle": "Uruchomiono {{count}} z {{total}} runnerów",
+    "missingTitle": "Grupa uruchomień niedostępna",
+    "missingBody": "Ta grupa uruchomień nie jest już zapisana na tym komputerze.",
+    "state": {
+      "running": "W trakcie",
+      "done": "Zakończone",
+      "failed": "Niepowodzenie",
+      "stopped": "Zatrzymane",
+      "skipped": "Pominięte",
+      "pending": "Uruchamianie"
+    }
   }
 }

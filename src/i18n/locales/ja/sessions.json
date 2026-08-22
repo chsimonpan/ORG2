@@ -847,7 +847,10 @@
       "insert": "挿入"
     },
     "compactArgHint": "<任意: 要約の重点>",
-    "compactCommandDescription": "古いコンテキストを要約して空きを作ります。任意: /compact <要約の重点>"
+    "compactCommandDescription": "古いコンテキストを要約して空きを作ります。任意: /compact <要約の重点>",
+    "canvasCommandDescription": "新しいインタラクティブ Canvas を作成します。任意: /canvas <作成する内容>",
+    "canvasArgHint": "作成する内容",
+    "newCanvasAction": "新しい Canvas"
   },
   "listPanel": {
     "showingOf": "{{total}} 件中 {{filtered}} 件を表示",
@@ -1229,6 +1232,10 @@
       "fileCount_other": "{{count}} ファイル",
       "turnCount_one": "{{count}} ラウンド",
       "turnCount_other": "{{count}} ラウンド"
+    },
+    "sideChat": {
+      "title": "サイドチャット",
+      "openInSideChat": "サイドチャットで開く"
     }
   },
   "chatStatus": {
@@ -2057,7 +2064,19 @@
     "orgSendMessageRunning": "{{recipient}} にメッセージを送信中",
     "orgSendMessageDone": "{{recipient}} にメッセージを送信しました",
     "orgSendMessageFailed": "{{recipient}} へのメッセージ送信に失敗",
-    "noMatch": "No match"
+    "noMatch": "No match",
+    "reviseInlineCanvasRunning": "Canvas を修正中",
+    "reviseInlineCanvasDone": "Canvas を修正しました",
+    "reviseInlineCanvasFailed": "Canvas の修正に失敗しました",
+    "reviseInlineCanvasHtmlRunning": "HTML Canvas を修正中",
+    "reviseInlineCanvasHtmlDone": "HTML Canvas を修正しました",
+    "reviseInlineCanvasHtmlFailed": "HTML Canvas の修正に失敗しました",
+    "reviseInlineCanvasUrlRunning": "URL Canvas を修正中",
+    "reviseInlineCanvasUrlDone": "URL Canvas を修正しました",
+    "reviseInlineCanvasUrlFailed": "URL Canvas の修正に失敗しました",
+    "reviseInlineCanvasA2uiRunning": "A2UI Canvas を修正中",
+    "reviseInlineCanvasA2uiDone": "A2UI Canvas を修正しました",
+    "reviseInlineCanvasA2uiFailed": "A2UI Canvas の修正に失敗しました"
   },
   "hoverCard": {
     "commits": "コミット",
@@ -2074,7 +2093,8 @@
       "manageAgents": "Agents / Skills を管理",
       "project": "プロジェクトを作成",
       "workItem": "Work Item を作成",
-      "benchmark": "Benchmark (Beta)"
+      "benchmark": "Benchmark (Beta)",
+      "parallelRun": "並列実行"
     },
     "searchModels": "モデルを検索...",
     "newItem": "新しいアイテム",
@@ -2339,7 +2359,64 @@
     "agentSpotlightViewMode": "Agent 表示モード",
     "agentSpotlightListView": "リスト表示",
     "agentSpotlightCardView": "カード表示",
-    "agentSpotlightCardHint": "←/→ または ↑/↓ で Agent を切り替えます。Enter で選択します。"
+    "agentSpotlightCardHint": "←/→ または ↑/↓ で Agent を切り替えます。Enter で選択します。",
+    "worktreeSource": {
+      "title": "ワークツリーを作成",
+      "confirm": "ワークツリーを使用",
+      "resolving": "PR を解決中…",
+      "selectRepository": "ワークツリーのソースを選ぶ前にリポジトリを選択してください。",
+      "sourceTabs": "ワークツリーのソース",
+      "tabs": {
+        "smart": "スマート",
+        "github": "GitHub",
+        "branch": "ブランチ",
+        "name": "名前"
+      },
+      "smartPlaceholder": "名前、#1234、ブランチ、または GitHub/GitLab URL",
+      "smartAria": "名前、PR 番号、ブランチ、または GitHub/GitLab URL を入力",
+      "smartHint": "名前、PR 番号、ブランチを入力するか、PR/MR URL を貼り付けてください。",
+      "refreshGithub": "GitHub リストを更新",
+      "githubSearch": "GitHub の PR と Issue を検索",
+      "githubSearchAria": "GitHub のプルリクエストと Issue を検索",
+      "githubError": "GitHub の項目を読み込めませんでした。",
+      "githubEmpty": "オープンな GitHub PR または Issue はありません。",
+      "githubNoMatches": "一致する項目はありません。",
+      "refreshBranches": "ブランチ一覧を更新",
+      "branchSearch": "ブランチを検索、または ref を入力",
+      "branchSearchAria": "ブランチを検索、またはベース ref を入力",
+      "branchError": "ブランチを読み込めませんでした。",
+      "branchEmpty": "このリポジトリにブランチがありません。",
+      "branchNoMatches": "一致するブランチはありません。",
+      "branchUseAsRef": "「{{value}}」を ref として使用",
+      "branchCustomRefHint": "タグ、コミット、または任意の Git ref",
+      "worktreeLabel": "ワークツリーのラベル",
+      "namePlaceholder": "feature-name",
+      "nameBase": "ベース: {{branch}}",
+      "nameBaseHead": "ベース: HEAD"
+    },
+    "multiRunner": {
+      "exit": "単一エージェントに戻る",
+      "addRunner": "ランナーを追加",
+      "removeRunner": "ランナーを削除",
+      "selectHarness": "エージェントを選択",
+      "pickHarness": "エージェントを選択",
+      "parallelCount": "並列実行 · {{count}} / {{max}}",
+      "launchpadQuestion": "{{count}} 個のランナーで何を作りますか？",
+      "worktreePerRunner": "ランナーごとのワークツリー",
+      "worktreeForced": "並列実行では常に各ランナーに専用のワークツリーが割り当てられます。",
+      "blocker": {
+        "noHarness": "エージェントを選択してください",
+        "noModel": "モデルを選択してください",
+        "cliNotInstalled": "{{cli}} がインストールされていません",
+        "cliNoGui": "{{cli}} は GUI モードに対応していません"
+      },
+      "launchError": {
+        "noPrompt": "ランナーに作らせたい内容を記述してください",
+        "promptTooLong": "タスクの説明は 10,000 文字未満にしてください",
+        "noRepo": "リポジトリを選択してください — 各ランナーに専用のワークツリーが必要です",
+        "notEnoughRunners": "実行可能なランナーを 2 つ以上設定してください"
+      }
+    }
   },
   "planner": {
     "tabs": {
@@ -2809,5 +2886,78 @@
     "summarize": "Agent で要約",
     "waiting": "コンテンツを待機中…",
     "empty": "コンテンツなし"
+  },
+  "pokerTable": {
+    "menuLabel": "Poker table",
+    "header": {
+      "title": "No-Limit Inference – {{stakes}} Mtok – 6-max",
+      "hand": "Hand #{{number}}",
+      "history": "Hand history",
+      "settings": "Table settings",
+      "leave": "Leave table",
+      "close": "Close"
+    },
+    "potLabel": "Pot",
+    "tokens": "{{amount}} tokens",
+    "thinking": "Thinking · {{seconds}}s",
+    "waitingFor": "Waiting for {{name}}…",
+    "dealing": "Dealing…",
+    "nextHand": "Deal next hand",
+    "seat": {
+      "you": "You",
+      "bot": "bot",
+      "allIn": "All in"
+    },
+    "actions": {
+      "fold": "Fold",
+      "check": "Check",
+      "call": "Call {{amount}}",
+      "bet": "Bet {{amount}}",
+      "raise": "Raise {{amount}}",
+      "allIn": "All in {{amount}}",
+      "betLabel": "Bet",
+      "raiseLabel": "Raise",
+      "callLabel": "Call",
+      "checkLabel": "Check"
+    },
+    "result": {
+      "wins": "{{name}} wins {{amount}}",
+      "winsWith": "{{name}} wins {{amount}} with {{hand}}"
+    },
+    "rebuy": {
+      "title": "You're out of chips",
+      "bankroll": "Bankroll {{amount}}",
+      "buyIn": "Buy in {{amount}}",
+      "reset": "Reset bankroll"
+    },
+    "history": {
+      "title": "Hand history",
+      "empty": "No hands played yet",
+      "foldedOut": "everyone folded"
+    },
+    "settings": {
+      "stakes": "Stakes",
+      "speed": "Table speed",
+      "speed_normal": "Normal",
+      "speed_fast": "Fast"
+    }
+  },
+  "runGroup": {
+    "open": "開く",
+    "stop": "停止",
+    "stopAll": "すべて停止",
+    "runAgain": "再実行",
+    "stopFailed": "この実行を停止できませんでした",
+    "subtitle": "{{total}} 件中 {{count}} 件のランナーを開始",
+    "missingTitle": "実行グループを利用できません",
+    "missingBody": "この実行グループはこの端末に保存されていません。",
+    "state": {
+      "running": "実行中",
+      "done": "完了",
+      "failed": "失敗",
+      "stopped": "停止済み",
+      "skipped": "スキップ",
+      "pending": "開始中"
+    }
   }
 }

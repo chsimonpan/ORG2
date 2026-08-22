@@ -848,7 +848,10 @@
       "insert": "Insertar"
     },
     "compactArgHint": "<enfoque opcional para el resumen>",
-    "compactCommandDescription": "Resume el contexto anterior para liberar espacio. Opcional: /compact <enfoque del resumen>"
+    "compactCommandDescription": "Resume el contexto anterior para liberar espacio. Opcional: /compact <enfoque del resumen>",
+    "canvasCommandDescription": "Crea un nuevo Canvas interactivo. Opcional: /canvas <qué crear>",
+    "canvasArgHint": "qué crear",
+    "newCanvasAction": "Nuevo Canvas"
   },
   "listPanel": {
     "showingOf": "Mostrando {{filtered}} de {{total}}",
@@ -1230,6 +1233,10 @@
       "fileCount_other": "{{count}} archivos",
       "turnCount_one": "{{count}} turno",
       "turnCount_other": "{{count}} turnos"
+    },
+    "sideChat": {
+      "title": "Chat lateral",
+      "openInSideChat": "Abrir en el chat lateral"
     }
   },
   "chatStatus": {
@@ -2058,7 +2065,19 @@
     "orgSendMessageRunning": "Enviando mensaje a {{recipient}}",
     "orgSendMessageDone": "Mensaje enviado a {{recipient}}",
     "orgSendMessageFailed": "Error al enviar el mensaje a {{recipient}}",
-    "noMatch": "No match"
+    "noMatch": "No match",
+    "reviseInlineCanvasRunning": "Revisando Canvas",
+    "reviseInlineCanvasDone": "Canvas revisado",
+    "reviseInlineCanvasFailed": "Error al revisar Canvas",
+    "reviseInlineCanvasHtmlRunning": "Revisando Canvas HTML",
+    "reviseInlineCanvasHtmlDone": "Canvas HTML revisado",
+    "reviseInlineCanvasHtmlFailed": "Error al revisar Canvas HTML",
+    "reviseInlineCanvasUrlRunning": "Revisando Canvas URL",
+    "reviseInlineCanvasUrlDone": "Canvas URL revisado",
+    "reviseInlineCanvasUrlFailed": "Error al revisar Canvas URL",
+    "reviseInlineCanvasA2uiRunning": "Revisando Canvas A2UI",
+    "reviseInlineCanvasA2uiDone": "Canvas A2UI revisado",
+    "reviseInlineCanvasA2uiFailed": "Error al revisar Canvas A2UI"
   },
   "hoverCard": {
     "commits": "Commits",
@@ -2075,7 +2094,8 @@
       "manageAgents": "Gestionar Agents / Skills",
       "project": "Crear proyecto",
       "workItem": "Crear Work Item",
-      "benchmark": "Benchmark (Beta)"
+      "benchmark": "Benchmark (Beta)",
+      "parallelRun": "Ejecución paralela"
     },
     "searchModels": "Buscar modelos...",
     "newItem": "Nuevo elemento",
@@ -2340,7 +2360,64 @@
     "agentSpotlightViewMode": "Modo de vista de Agent",
     "agentSpotlightListView": "Vista de lista",
     "agentSpotlightCardView": "Vista de tarjeta",
-    "agentSpotlightCardHint": "Usa ←/→ o ↑/↓ para cambiar de Agent. Pulsa Enter para seleccionar."
+    "agentSpotlightCardHint": "Usa ←/→ o ↑/↓ para cambiar de Agent. Pulsa Enter para seleccionar.",
+    "worktreeSource": {
+      "title": "Crear árbol de trabajo",
+      "confirm": "Usar árbol de trabajo",
+      "resolving": "Resolviendo PR…",
+      "selectRepository": "Selecciona un repositorio antes de elegir el origen del árbol de trabajo.",
+      "sourceTabs": "Origen del árbol de trabajo",
+      "tabs": {
+        "smart": "Inteligente",
+        "github": "GitHub",
+        "branch": "Rama",
+        "name": "Nombre"
+      },
+      "smartPlaceholder": "Nombre, #1234, rama o URL de GitHub/GitLab",
+      "smartAria": "Introduce un nombre, número de PR, rama o URL de GitHub/GitLab",
+      "smartHint": "Escribe un nombre, número de PR o rama, o pega una URL de PR/MR.",
+      "refreshGithub": "Actualizar lista de GitHub",
+      "githubSearch": "Buscar PR e incidencias de GitHub",
+      "githubSearchAria": "Buscar solicitudes de incorporación e incidencias de GitHub",
+      "githubError": "No se pudieron cargar los elementos de GitHub.",
+      "githubEmpty": "No hay PR ni incidencias abiertas en GitHub.",
+      "githubNoMatches": "No hay coincidencias.",
+      "refreshBranches": "Actualizar lista de ramas",
+      "branchSearch": "Buscar ramas o introducir una referencia",
+      "branchSearchAria": "Buscar ramas o introducir una referencia base",
+      "branchError": "No se pudieron cargar las ramas.",
+      "branchEmpty": "No se encontraron ramas en este repositorio.",
+      "branchNoMatches": "No hay ramas coincidentes.",
+      "branchUseAsRef": "Usar «{{value}}» como referencia",
+      "branchCustomRefHint": "Etiqueta, commit o cualquier referencia de Git",
+      "worktreeLabel": "Etiqueta del árbol de trabajo",
+      "namePlaceholder": "nombre-funcionalidad",
+      "nameBase": "Base: {{branch}}",
+      "nameBaseHead": "Base: HEAD"
+    },
+    "multiRunner": {
+      "exit": "Volver a un solo agente",
+      "addRunner": "Añadir runner",
+      "removeRunner": "Quitar runner",
+      "selectHarness": "Seleccionar agente",
+      "pickHarness": "Elegir un agente",
+      "parallelCount": "se ejecutan en paralelo · {{count}} de {{max}}",
+      "launchpadQuestion": "¿Qué quieres construir con {{count}} runners?",
+      "worktreePerRunner": "Un worktree por runner",
+      "worktreeForced": "Una ejecución paralela siempre da a cada runner su propio worktree.",
+      "blocker": {
+        "noHarness": "Elige un agente",
+        "noModel": "Elige un modelo",
+        "cliNotInstalled": "{{cli}} no está instalado",
+        "cliNoGui": "{{cli}} no tiene modo GUI"
+      },
+      "launchError": {
+        "noPrompt": "Describe qué quieres que construyan los runners",
+        "promptTooLong": "La descripción debe tener menos de 10.000 caracteres",
+        "noRepo": "Selecciona un repositorio: cada runner necesita su propio worktree",
+        "notEnoughRunners": "Configura al menos dos runners ejecutables"
+      }
+    }
   },
   "planner": {
     "tabs": {
@@ -2810,5 +2887,78 @@
     "summarize": "Resumir con Agent",
     "waiting": "Esperando contenido…",
     "empty": "Sin contenido"
+  },
+  "pokerTable": {
+    "menuLabel": "Poker table",
+    "header": {
+      "title": "No-Limit Inference – {{stakes}} Mtok – 6-max",
+      "hand": "Hand #{{number}}",
+      "history": "Hand history",
+      "settings": "Table settings",
+      "leave": "Leave table",
+      "close": "Close"
+    },
+    "potLabel": "Pot",
+    "tokens": "{{amount}} tokens",
+    "thinking": "Thinking · {{seconds}}s",
+    "waitingFor": "Waiting for {{name}}…",
+    "dealing": "Dealing…",
+    "nextHand": "Deal next hand",
+    "seat": {
+      "you": "You",
+      "bot": "bot",
+      "allIn": "All in"
+    },
+    "actions": {
+      "fold": "Fold",
+      "check": "Check",
+      "call": "Call {{amount}}",
+      "bet": "Bet {{amount}}",
+      "raise": "Raise {{amount}}",
+      "allIn": "All in {{amount}}",
+      "betLabel": "Bet",
+      "raiseLabel": "Raise",
+      "callLabel": "Call",
+      "checkLabel": "Check"
+    },
+    "result": {
+      "wins": "{{name}} wins {{amount}}",
+      "winsWith": "{{name}} wins {{amount}} with {{hand}}"
+    },
+    "rebuy": {
+      "title": "You're out of chips",
+      "bankroll": "Bankroll {{amount}}",
+      "buyIn": "Buy in {{amount}}",
+      "reset": "Reset bankroll"
+    },
+    "history": {
+      "title": "Hand history",
+      "empty": "No hands played yet",
+      "foldedOut": "everyone folded"
+    },
+    "settings": {
+      "stakes": "Stakes",
+      "speed": "Table speed",
+      "speed_normal": "Normal",
+      "speed_fast": "Fast"
+    }
+  },
+  "runGroup": {
+    "open": "Abrir",
+    "stop": "Detener",
+    "stopAll": "Detener todo",
+    "runAgain": "Ejecutar de nuevo",
+    "stopFailed": "No se pudo detener esta ejecución",
+    "subtitle": "{{count}} de {{total}} runners iniciados",
+    "missingTitle": "Grupo de ejecución no disponible",
+    "missingBody": "Este grupo de ejecución ya no está guardado en este equipo.",
+    "state": {
+      "running": "En curso",
+      "done": "Completado",
+      "failed": "Con errores",
+      "stopped": "Detenido",
+      "skipped": "Omitido",
+      "pending": "Iniciando"
+    }
   }
 }

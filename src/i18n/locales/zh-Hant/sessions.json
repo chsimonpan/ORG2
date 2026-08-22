@@ -862,7 +862,10 @@
       "insert": "插入"
     },
     "compactArgHint": "<可選:本次總結的重點>",
-    "compactCommandDescription": "總結較早的上下文以釋放空間。可選:/compact <本次總結的重點>"
+    "compactCommandDescription": "總結較早的上下文以釋放空間。可選:/compact <本次總結的重點>",
+    "canvasCommandDescription": "建立一個新的互動式 Canvas。可選：/canvas <要建立的內容>",
+    "canvasArgHint": "要建立的內容",
+    "newCanvasAction": "新增 Canvas"
   },
   "listPanel": {
     "showingOf": "顯示 {{filtered}} / {{total}}",
@@ -1244,6 +1247,10 @@
       "fileCount_other": "{{count}} 個檔案",
       "turnCount_one": "{{count}} 輪",
       "turnCount_other": "{{count}} 輪"
+    },
+    "sideChat": {
+      "title": "側邊聊天",
+      "openInSideChat": "在側邊聊天中開啟"
     }
   },
   "chatStatus": {
@@ -2072,7 +2079,19 @@
     "orgSendMessageRunning": "正在向 {{recipient}} 傳送訊息",
     "orgSendMessageDone": "向 {{recipient}} 傳送訊息",
     "orgSendMessageFailed": "向 {{recipient}} 傳送訊息失敗",
-    "noMatch": "No match"
+    "noMatch": "No match",
+    "reviseInlineCanvasRunning": "正在修訂 Canvas",
+    "reviseInlineCanvasDone": "Canvas 已修訂",
+    "reviseInlineCanvasFailed": "Canvas 修訂失敗",
+    "reviseInlineCanvasHtmlRunning": "正在修訂 HTML Canvas",
+    "reviseInlineCanvasHtmlDone": "HTML Canvas 已修訂",
+    "reviseInlineCanvasHtmlFailed": "HTML Canvas 修訂失敗",
+    "reviseInlineCanvasUrlRunning": "正在修訂 URL Canvas",
+    "reviseInlineCanvasUrlDone": "URL Canvas 已修訂",
+    "reviseInlineCanvasUrlFailed": "URL Canvas 修訂失敗",
+    "reviseInlineCanvasA2uiRunning": "正在修訂 A2UI Canvas",
+    "reviseInlineCanvasA2uiDone": "A2UI Canvas 已修訂",
+    "reviseInlineCanvasA2uiFailed": "A2UI Canvas 修訂失敗"
   },
   "hoverCard": {
     "commits": "提交",
@@ -2089,7 +2108,8 @@
       "manageAgents": "管理 Agent / Skills",
       "project": "建立專案",
       "workItem": "建立 Work Item",
-      "benchmark": "Benchmark (Beta)"
+      "benchmark": "Benchmark (Beta)",
+      "parallelRun": "平行執行"
     },
     "searchModels": "搜索模型...",
     "newItem": "新建專案",
@@ -2355,7 +2375,64 @@
     "agentSpotlightViewMode": "Agent 檢視模式",
     "agentSpotlightListView": "列表檢視",
     "agentSpotlightCardView": "卡片檢視",
-    "agentSpotlightCardHint": "使用 ←/→ 或 ↑/↓ 切換 Agent。按 Enter 選擇。"
+    "agentSpotlightCardHint": "使用 ←/→ 或 ↑/↓ 切換 Agent。按 Enter 選擇。",
+    "worktreeSource": {
+      "title": "建立工作樹",
+      "confirm": "使用工作樹",
+      "resolving": "正在解析 PR…",
+      "selectRepository": "請先選擇儲存庫，再選擇工作樹來源。",
+      "sourceTabs": "工作樹來源",
+      "tabs": {
+        "smart": "智慧",
+        "github": "GitHub",
+        "branch": "分支",
+        "name": "名稱"
+      },
+      "smartPlaceholder": "名稱、#1234、分支或 GitHub/GitLab URL",
+      "smartAria": "輸入名稱、PR 編號、分支或 GitHub/GitLab URL",
+      "smartHint": "輸入名稱、PR 編號、分支，或貼上 PR/MR URL。",
+      "refreshGithub": "重新整理 GitHub 清單",
+      "githubSearch": "搜尋 GitHub PR 與議題",
+      "githubSearchAria": "搜尋 GitHub 拉取要求與議題",
+      "githubError": "無法載入 GitHub 項目。",
+      "githubEmpty": "沒有開啟的 GitHub PR 或議題。",
+      "githubNoMatches": "沒有相符項目。",
+      "refreshBranches": "重新整理分支清單",
+      "branchSearch": "搜尋分支或輸入引用",
+      "branchSearchAria": "搜尋分支或輸入基礎引用",
+      "branchError": "無法載入分支。",
+      "branchEmpty": "此儲存庫中沒有分支。",
+      "branchNoMatches": "沒有相符的分支。",
+      "branchUseAsRef": "使用「{{value}}」作為引用",
+      "branchCustomRefHint": "標籤、提交或任意 Git 引用",
+      "worktreeLabel": "工作樹標籤",
+      "namePlaceholder": "功能名稱",
+      "nameBase": "基礎：{{branch}}",
+      "nameBaseHead": "基礎：HEAD"
+    },
+    "multiRunner": {
+      "exit": "返回單一代理",
+      "addRunner": "新增執行器",
+      "removeRunner": "移除執行器",
+      "selectHarness": "選擇執行器",
+      "pickHarness": "選擇執行器",
+      "parallelCount": "並行執行 · {{count}} / {{max}}",
+      "launchpadQuestion": "你想用 {{count}} 個執行器建立什麼？",
+      "worktreePerRunner": "每個執行器獨立工作樹",
+      "worktreeForced": "平行執行一律為每個執行器建立獨立的工作樹。",
+      "blocker": {
+        "noHarness": "請選擇執行器",
+        "noModel": "請選擇模型",
+        "cliNotInstalled": "{{cli}} 尚未安裝",
+        "cliNoGui": "{{cli}} 不支援 GUI 模式"
+      },
+      "launchError": {
+        "noPrompt": "請描述你想讓執行器建立什麼",
+        "promptTooLong": "任務描述需少於 10,000 個字元",
+        "noRepo": "請選擇儲存庫——每個執行器都需要獨立的工作樹",
+        "notEnoughRunners": "請至少設定兩個可執行的執行器"
+      }
+    }
   },
   "planner": {
     "tabs": {
@@ -2825,5 +2902,138 @@
     "summarize": "讓 Agent 總結",
     "waiting": "等待內容中…",
     "empty": "無內容"
+  },
+  "canvasApp": {
+    "empty": "尚未渲染任何 Canvas",
+    "sidebarTitle": "Canvas 清單",
+    "noCanvases": "還沒有 Canvas",
+    "revisionCanvas": "Canvas",
+    "revisionTitle": "正在修改 {{title}}",
+    "revisionReceiving": "正在產生變更 · {{amount}} 個字元",
+    "revisionApplying": "正在套用已驗證的變更…",
+    "revisionDoneTitle": "已更新 {{title}}",
+    "revisionFailedTitle": "未能更新 {{title}}",
+    "revisionTargetedSummary": "{{amount}} 處精確修改 · 保留原 Canvas",
+    "revisionTargetedSummary_other": "{{count}} 處精確修改 · 保留原 Canvas",
+    "revisionReplacementSummary": "完整替換 · {{amount}} 個字元 · 保留原 Canvas",
+    "revisionUrlSummary": "已更新 URL · 保留原 Canvas",
+    "revisionGenericSummary": "已在原 Canvas 上完成更新",
+    "revisionStepsLabel": "Canvas 更新進度",
+    "compareToggle": "對比",
+    "compareMark": "vs",
+    "compareHint": "已選擇 2 個 · 顯示差異",
+    "design": "設計",
+    "designHint": "選擇要修改的元素",
+    "designUnavailable": "設計功能不可用",
+    "reactCspUnavailable": "目前版本無法執行 React 預覽，請開啟原始碼檢視",
+    "designPromptLabel": "描述 Canvas 變更",
+    "designPromptPlaceholder": "描述要修改的內容…",
+    "clearDesignSelection": "清除 Canvas 選擇",
+    "compareTooLarge": "版本過大，無法對比",
+    "revisionReceivingLabel": "正在產生變更…",
+    "designHoverHint": "點擊選擇，拖曳框選",
+    "share": "分享",
+    "shareHint": "分享這個 Canvas 快照",
+    "shareWaitForRevision": "請等待 Canvas 更新完成",
+    "shareLocalUrlUnavailable": "其他人無法開啟本機 URL",
+    "shareTooLarge": "這個 Canvas 太大，無法產生分享連結",
+    "shareEmpty": "這個 Canvas 沒有可分享的內容",
+    "shareDialogTitle": "分享 Canvas",
+    "shareDialogScope": "只包含這個 Canvas 快照。對話、儲存庫、會話以及後續修訂都不會被分享。",
+    "shareDialogPreparing": "正在建立連結…",
+    "shareDialogLink": "Canvas 分享連結",
+    "shareDialogCopyFailed": "複製失敗。請選取連結後手動複製。",
+    "shareDialogPublic": "任何擁有此連結的人都可以檢視該快照。",
+    "shareDialogShortExpiry": "短連結 · 有效期至 {{date}}",
+    "shareDialogFallback": "短連結服務不可用，已改為建立完整連結。",
+    "shareDialogOpen": "開啟",
+    "shareDialogCopied": "已複製",
+    "shareDialogCopy": "複製連結",
+    "shareDialogTooLarge": "這個 Canvas 太大，無法產生可靠的自包含連結。",
+    "shareDialogShortUnavailable": "分享服務暫時無法連線，而這個 Canvas 太大，無法產生自包含連結。請稍後再試。",
+    "shareDialogUnsupported": "目前應用版本無法建立壓縮的 Canvas 連結。",
+    "shareDialogInvalid": "這個 Canvas 不包含可發佈的快照。",
+    "shareDialogError": "無法建立 Canvas 連結。",
+    "shareDialogRetryShort": "重試短連結",
+    "shareDialogRetryingShort": "正在重試…",
+    "retry": "重試"
+  },
+  "domSelection": {
+    "previewTitle": "Canvas 選區預覽",
+    "elementsCount_other": "{{count}} 個元素",
+    "regionLabel": "區域 · {{label}}"
+  },
+  "pokerTable": {
+    "menuLabel": "Poker table",
+    "header": {
+      "title": "No-Limit Inference – {{stakes}} Mtok – 6-max",
+      "hand": "Hand #{{number}}",
+      "history": "Hand history",
+      "settings": "Table settings",
+      "leave": "Leave table",
+      "close": "Close"
+    },
+    "potLabel": "Pot",
+    "tokens": "{{amount}} tokens",
+    "thinking": "Thinking · {{seconds}}s",
+    "waitingFor": "Waiting for {{name}}…",
+    "dealing": "Dealing…",
+    "nextHand": "Deal next hand",
+    "seat": {
+      "you": "You",
+      "bot": "bot",
+      "allIn": "All in"
+    },
+    "actions": {
+      "fold": "Fold",
+      "check": "Check",
+      "call": "Call {{amount}}",
+      "bet": "Bet {{amount}}",
+      "raise": "Raise {{amount}}",
+      "allIn": "All in {{amount}}",
+      "betLabel": "Bet",
+      "raiseLabel": "Raise",
+      "callLabel": "Call",
+      "checkLabel": "Check"
+    },
+    "result": {
+      "wins": "{{name}} wins {{amount}}",
+      "winsWith": "{{name}} wins {{amount}} with {{hand}}"
+    },
+    "rebuy": {
+      "title": "You're out of chips",
+      "bankroll": "Bankroll {{amount}}",
+      "buyIn": "Buy in {{amount}}",
+      "reset": "Reset bankroll"
+    },
+    "history": {
+      "title": "Hand history",
+      "empty": "No hands played yet",
+      "foldedOut": "everyone folded"
+    },
+    "settings": {
+      "stakes": "Stakes",
+      "speed": "Table speed",
+      "speed_normal": "Normal",
+      "speed_fast": "Fast"
+    }
+  },
+  "runGroup": {
+    "open": "開啟",
+    "stop": "停止",
+    "stopAll": "全部停止",
+    "runAgain": "重新執行",
+    "stopFailed": "無法停止此執行",
+    "subtitle": "已啟動 {{count}} / {{total}} 個執行器",
+    "missingTitle": "執行群組無法使用",
+    "missingBody": "本機已不再保存此執行群組。",
+    "state": {
+      "running": "執行中",
+      "done": "已完成",
+      "failed": "失敗",
+      "stopped": "已停止",
+      "skipped": "已略過",
+      "pending": "啟動中"
+    }
   }
 }

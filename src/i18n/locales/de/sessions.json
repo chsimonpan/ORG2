@@ -846,7 +846,10 @@
       "insert": "Einfügen"
     },
     "compactArgHint": "<optionaler Fokus für die Zusammenfassung>",
-    "compactCommandDescription": "Älteren Kontext zusammenfassen, um Platz freizugeben. Optional: /compact <Fokus für die Zusammenfassung>"
+    "compactCommandDescription": "Älteren Kontext zusammenfassen, um Platz freizugeben. Optional: /compact <Fokus für die Zusammenfassung>",
+    "canvasCommandDescription": "Eine neue interaktive Canvas erstellen. Optional: /canvas <was erstellt werden soll>",
+    "canvasArgHint": "was erstellt werden soll",
+    "newCanvasAction": "Neue Canvas"
   },
   "listPanel": {
     "showingOf": "{{filtered}} von {{total}} angezeigt",
@@ -1228,6 +1231,10 @@
       "fileCount_other": "{{count}} Dateien",
       "turnCount_one": "{{count}} Runde",
       "turnCount_other": "{{count}} Runden"
+    },
+    "sideChat": {
+      "title": "Seitenchat",
+      "openInSideChat": "Im Seitenchat öffnen"
     }
   },
   "chatStatus": {
@@ -2056,7 +2063,19 @@
     "orgSendMessageRunning": "Nachricht wird an {{recipient}} gesendet",
     "orgSendMessageDone": "Nachricht an {{recipient}} gesendet",
     "orgSendMessageFailed": "Senden der Nachricht an {{recipient}} fehlgeschlagen",
-    "noMatch": "No match"
+    "noMatch": "No match",
+    "reviseInlineCanvasRunning": "Canvas wird überarbeitet",
+    "reviseInlineCanvasDone": "Canvas überarbeitet",
+    "reviseInlineCanvasFailed": "Canvas-Überarbeitung fehlgeschlagen",
+    "reviseInlineCanvasHtmlRunning": "HTML-Canvas wird überarbeitet",
+    "reviseInlineCanvasHtmlDone": "HTML-Canvas überarbeitet",
+    "reviseInlineCanvasHtmlFailed": "Überarbeitung des HTML-Canvas fehlgeschlagen",
+    "reviseInlineCanvasUrlRunning": "URL-Canvas wird überarbeitet",
+    "reviseInlineCanvasUrlDone": "URL-Canvas überarbeitet",
+    "reviseInlineCanvasUrlFailed": "Überarbeitung des URL-Canvas fehlgeschlagen",
+    "reviseInlineCanvasA2uiRunning": "A2UI-Canvas wird überarbeitet",
+    "reviseInlineCanvasA2uiDone": "A2UI-Canvas überarbeitet",
+    "reviseInlineCanvasA2uiFailed": "Überarbeitung des A2UI-Canvas fehlgeschlagen"
   },
   "hoverCard": {
     "commits": "Commits",
@@ -2073,7 +2092,8 @@
       "manageAgents": "Agents / Skills verwalten",
       "project": "Projekt erstellen",
       "workItem": "Work Item erstellen",
-      "benchmark": "Benchmark (Beta)"
+      "benchmark": "Benchmark (Beta)",
+      "parallelRun": "Parallellauf"
     },
     "searchModels": "Modelle suchen...",
     "newItem": "Neues Element",
@@ -2338,7 +2358,64 @@
     "agentSpotlightViewMode": "Agent-Ansichtsmodus",
     "agentSpotlightListView": "Listenansicht",
     "agentSpotlightCardView": "Kartenansicht",
-    "agentSpotlightCardHint": "Mit ←/→ oder ↑/↓ zwischen Agents wechseln. Enter zum Auswählen drücken."
+    "agentSpotlightCardHint": "Mit ←/→ oder ↑/↓ zwischen Agents wechseln. Enter zum Auswählen drücken.",
+    "worktreeSource": {
+      "title": "Worktree erstellen",
+      "confirm": "Worktree verwenden",
+      "resolving": "PR wird aufgelöst…",
+      "selectRepository": "Wähle zuerst ein Repository aus, bevor du eine Worktree-Quelle auswählst.",
+      "sourceTabs": "Worktree-Quelle",
+      "tabs": {
+        "smart": "Intelligent",
+        "github": "GitHub",
+        "branch": "Branch",
+        "name": "Name"
+      },
+      "smartPlaceholder": "Name, #1234, Branch oder GitHub-/GitLab-URL",
+      "smartAria": "Name, PR-Nummer, Branch oder GitHub-/GitLab-URL eingeben",
+      "smartHint": "Gib einen Namen, eine PR-Nummer oder einen Branch ein oder füge eine PR-/MR-URL ein.",
+      "refreshGithub": "GitHub-Liste aktualisieren",
+      "githubSearch": "GitHub-PRs und Issues durchsuchen",
+      "githubSearchAria": "GitHub-Pull-Requests und Issues durchsuchen",
+      "githubError": "GitHub-Einträge konnten nicht geladen werden.",
+      "githubEmpty": "Keine offenen GitHub-PRs oder Issues.",
+      "githubNoMatches": "Keine Treffer.",
+      "refreshBranches": "Branch-Liste aktualisieren",
+      "branchSearch": "Branches durchsuchen oder Ref eingeben",
+      "branchSearchAria": "Branches durchsuchen oder Basis-Ref eingeben",
+      "branchError": "Branches konnten nicht geladen werden.",
+      "branchEmpty": "In diesem Repository wurden keine Branches gefunden.",
+      "branchNoMatches": "Keine passenden Branches.",
+      "branchUseAsRef": "„{{value}}“ als Ref verwenden",
+      "branchCustomRefHint": "Tag, Commit oder beliebige Git-Ref",
+      "worktreeLabel": "Worktree-Bezeichnung",
+      "namePlaceholder": "feature-name",
+      "nameBase": "Basis: {{branch}}",
+      "nameBaseHead": "Basis: HEAD"
+    },
+    "multiRunner": {
+      "exit": "Zurück zu einem einzelnen Agenten",
+      "addRunner": "Runner hinzufügen",
+      "removeRunner": "Runner entfernen",
+      "selectHarness": "Agent auswählen",
+      "pickHarness": "Agent wählen",
+      "parallelCount": "laufen parallel · {{count}} von {{max}}",
+      "launchpadQuestion": "Was möchtest du mit {{count}} Runnern bauen?",
+      "worktreePerRunner": "Ein Worktree pro Runner",
+      "worktreeForced": "Ein Parallellauf gibt jedem Runner immer einen eigenen Worktree.",
+      "blocker": {
+        "noHarness": "Agent auswählen",
+        "noModel": "Modell auswählen",
+        "cliNotInstalled": "{{cli}} ist nicht installiert",
+        "cliNoGui": "{{cli}} hat keinen GUI-Modus"
+      },
+      "launchError": {
+        "noPrompt": "Beschreibe, was die Runner bauen sollen",
+        "promptTooLong": "Die Aufgabenbeschreibung muss unter 10.000 Zeichen bleiben",
+        "noRepo": "Wähle ein Repository — jeder Runner braucht einen eigenen Worktree",
+        "notEnoughRunners": "Richte mindestens zwei lauffähige Runner ein"
+      }
+    }
   },
   "planner": {
     "tabs": {
@@ -2808,5 +2885,78 @@
     "summarize": "Mit Agent zusammenfassen",
     "waiting": "Warte auf Inhalt…",
     "empty": "Kein Inhalt"
+  },
+  "pokerTable": {
+    "menuLabel": "Poker table",
+    "header": {
+      "title": "No-Limit Inference – {{stakes}} Mtok – 6-max",
+      "hand": "Hand #{{number}}",
+      "history": "Hand history",
+      "settings": "Table settings",
+      "leave": "Leave table",
+      "close": "Close"
+    },
+    "potLabel": "Pot",
+    "tokens": "{{amount}} tokens",
+    "thinking": "Thinking · {{seconds}}s",
+    "waitingFor": "Waiting for {{name}}…",
+    "dealing": "Dealing…",
+    "nextHand": "Deal next hand",
+    "seat": {
+      "you": "You",
+      "bot": "bot",
+      "allIn": "All in"
+    },
+    "actions": {
+      "fold": "Fold",
+      "check": "Check",
+      "call": "Call {{amount}}",
+      "bet": "Bet {{amount}}",
+      "raise": "Raise {{amount}}",
+      "allIn": "All in {{amount}}",
+      "betLabel": "Bet",
+      "raiseLabel": "Raise",
+      "callLabel": "Call",
+      "checkLabel": "Check"
+    },
+    "result": {
+      "wins": "{{name}} wins {{amount}}",
+      "winsWith": "{{name}} wins {{amount}} with {{hand}}"
+    },
+    "rebuy": {
+      "title": "You're out of chips",
+      "bankroll": "Bankroll {{amount}}",
+      "buyIn": "Buy in {{amount}}",
+      "reset": "Reset bankroll"
+    },
+    "history": {
+      "title": "Hand history",
+      "empty": "No hands played yet",
+      "foldedOut": "everyone folded"
+    },
+    "settings": {
+      "stakes": "Stakes",
+      "speed": "Table speed",
+      "speed_normal": "Normal",
+      "speed_fast": "Fast"
+    }
+  },
+  "runGroup": {
+    "open": "Öffnen",
+    "stop": "Stoppen",
+    "stopAll": "Alle stoppen",
+    "runAgain": "Erneut ausführen",
+    "stopFailed": "Dieser Lauf konnte nicht gestoppt werden",
+    "subtitle": "{{count}} von {{total}} Runnern gestartet",
+    "missingTitle": "Laufgruppe nicht verfügbar",
+    "missingBody": "Diese Laufgruppe ist auf diesem Rechner nicht mehr gespeichert.",
+    "state": {
+      "running": "Läuft",
+      "done": "Fertig",
+      "failed": "Fehlgeschlagen",
+      "stopped": "Gestoppt",
+      "skipped": "Übersprungen",
+      "pending": "Startet"
+    }
   }
 }

@@ -41,6 +41,7 @@ export {
   openOrFocusSessionInChatPanelTabAtom,
   openOrReplaceSessionInChatPanelTabAtom,
   openProjectInChatPanelTabAtom,
+  openRunGroupInChatPanelTabAtom,
   openSessionInNewChatTabAtom,
   openWorkItemInChatPanelTabAtom,
   openWorkspaceOverviewInChatPanelTabAtom,
