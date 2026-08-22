@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildOrg2SessionRoutingMap,
   buildOrg2TreeItems,
   formatOrg2ProjectLabel,
   resolveOrg2SessionStatusTone,
 } from "./index";
+import { isOrg2WorkspaceSessionLeaf } from "./sidebarConnector.menuItemRouting";
 
 describe("buildOrg2TreeItems", () => {
   it("按 workspace→project→session 归组，work item 仅作为元数据且拒绝 slug 推断", () => {
@@ -43,9 +45,7 @@ describe("buildOrg2TreeItems", () => {
     ]);
     expect(unlinked?.treeDepth).toBe(1);
     expect(unlinked?.children?.map((item) => item.treeDepth)).toEqual([
-      2,
-      2,
-      2,
+      2, 2, 2,
     ]);
     expect(unlinked?.children?.map((item) => item.trailingElement)).toEqual([
       expect.anything(),
@@ -66,5 +66,42 @@ describe("buildOrg2TreeItems", () => {
     expect(resolveOrg2SessionStatusTone("completed")).toBe("ended");
     expect(resolveOrg2SessionStatusTone("running")).toBe("running");
     expect(resolveOrg2SessionStatusTone(undefined)).toBe("running");
+  });
+});
+
+describe("workspace hierarchy session routing map", () => {
+  it("includes sessions outside the visible paginated roster", () => {
+    const visible = {
+      session_id: "weather",
+      projectId: "proj-weather",
+    } as never;
+    const older = {
+      session_id: "ppcharge",
+      projectId: "proj-ppcharge",
+    } as never;
+    const map = buildOrg2SessionRoutingMap(new Map([["weather", visible]]), [
+      visible,
+      older,
+    ]);
+    expect(map.get("ppcharge")).toBe(older);
+  });
+});
+
+describe("workspace hierarchy session routing", () => {
+  it("marks only projected session leaves for bypassing project routing", () => {
+    expect(
+      isOrg2WorkspaceSessionLeaf({
+        id: "ppcharge-aug",
+        key: "org2-tree-session-ppcharge-aug",
+        label: "ppcharge-aug",
+      })
+    ).toBe(true);
+    expect(
+      isOrg2WorkspaceSessionLeaf({
+        id: "org2-tree-project-proj-ppcharge",
+        key: "org2-tree-project-proj-ppcharge",
+        label: "ppcharge",
+      })
+    ).toBe(false);
   });
 });

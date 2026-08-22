@@ -41,10 +41,11 @@ async fn resolve_gateway_model_and_account(
 /// different account. A selected session owns its durable model variant (and
 /// therefore its encoded reasoning effort); gateway settings are defaults for
 /// a brand-new row or an older row that did not persist a model yet.
-fn resolve_channel_launch_overrides(
+fn resolve_channel_launch_overrides_with_account_lookup(
     persisted: Option<&crate::session::persistence::UnifiedSessionRecord>,
     gateway_account: Option<String>,
     gateway_model: Option<String>,
+    account_exists: impl Fn(&str) -> bool,
 ) -> Result<(Option<String>, Option<String>), String> {
     let Some(record) = persisted else {
         return Ok((gateway_account, gateway_model));
@@ -66,7 +67,35 @@ fn resolve_channel_launch_overrides(
                 record.session_id, model
             )
         })?;
-    Ok((Some(account_id.to_string()), Some(model.to_string())))
+    if account_exists(account_id) {
+        return Ok((Some(account_id.to_string()), Some(model.to_string())));
+    }
+
+    // Key Vault accounts may be deleted or re-created while a durable Feishu
+    // binding still points at the old id. Reusing that tombstoned id makes all
+    // later turns fail before model execution. Fall back as an inseparable
+    // gateway account/model pair; never pair the historical model with a
+    // different account because provider/model availability is account-bound.
+    match (gateway_account, gateway_model) {
+        (Some(account), Some(model)) if account_exists(&account) => Ok((Some(account), Some(model))),
+        _ => Err(format!(
+            "session '{}' references missing account '{}', and no valid gateway account/model fallback is configured",
+            record.session_id, account_id
+        )),
+    }
+}
+
+fn resolve_channel_launch_overrides(
+    persisted: Option<&crate::session::persistence::UnifiedSessionRecord>,
+    gateway_account: Option<String>,
+    gateway_model: Option<String>,
+) -> Result<(Option<String>, Option<String>), String> {
+    resolve_channel_launch_overrides_with_account_lookup(
+        persisted,
+        gateway_account,
+        gateway_model,
+        |account_id| key_vault::key_store::KEY_SERVICE.get_key_by_id(account_id).is_some(),
+    )
 }
 
 async fn load_persisted_channel_session(
@@ -588,7 +617,7 @@ pub(super) fn build_inbound_deps(state: &AgentAppState) -> Result<InboundProcess
 
 #[cfg(test)]
 mod channel_launch_override_tests {
-    use super::resolve_channel_launch_overrides;
+    use super::{resolve_channel_launch_overrides, resolve_channel_launch_overrides_with_account_lookup};
     use crate::session::persistence::UnifiedSessionRecord;
 
     fn durable_session(model: Option<&str>, account_id: Option<&str>) -> UnifiedSessionRecord {
@@ -607,10 +636,11 @@ mod channel_launch_override_tests {
             Some("account-picked-in-session"),
         );
 
-        let (account, model) = resolve_channel_launch_overrides(
+        let (account, model) = resolve_channel_launch_overrides_with_account_lookup(
             Some(&persisted),
             Some("gateway-default-account".to_string()),
             Some("anthropic/claude-sonnet-4-6:anthropic".to_string()),
+            |account| account == "account-picked-in-session",
         )
         .expect("persisted session should restore");
 
@@ -637,6 +667,35 @@ mod channel_launch_override_tests {
             .expect("old row without a model uses gateway defaults"),
             (gateway_account, gateway_model)
         );
+    }
+
+    #[test]
+    fn missing_persisted_account_uses_valid_gateway_pair() {
+        let resolved = resolve_channel_launch_overrides_with_account_lookup(
+            Some(&durable_session(Some("gpt-5.5-high"), Some("deleted-account"))),
+            Some("current-account".to_string()),
+            Some("gpt-5.6".to_string()),
+            |account| account == "current-account",
+        )
+        .expect("a deleted historical account should recover through the configured gateway pair");
+
+        assert_eq!(
+            resolved,
+            (Some("current-account".to_string()), Some("gpt-5.6".to_string()))
+        );
+    }
+
+    #[test]
+    fn missing_persisted_account_never_reuses_historical_model_with_new_account() {
+        let err = resolve_channel_launch_overrides_with_account_lookup(
+            Some(&durable_session(Some("gpt-5.5-high"), Some("deleted-account"))),
+            Some("current-account".to_string()),
+            None,
+            |account| account == "current-account",
+        )
+        .expect_err("fallback must be a complete account/model pair");
+
+        assert!(err.contains("missing account 'deleted-account'"), "{err}");
     }
 
     #[test]

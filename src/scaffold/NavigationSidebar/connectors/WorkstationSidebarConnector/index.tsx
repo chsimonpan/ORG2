@@ -156,6 +156,15 @@ export function formatOrg2ProjectLabel(projectName: string): string {
   return withoutPrefix || projectName;
 }
 
+export function buildOrg2SessionRoutingMap(
+  visibleSessionMap: ReadonlyMap<string, import("@src/store/session").Session>,
+  sessions: readonly import("@src/store/session").Session[]
+): Map<string, import("@src/store/session").Session> {
+  const map = new Map(visibleSessionMap);
+  for (const session of sessions) map.set(session.session_id, session);
+  return map;
+}
+
 export function buildOrg2TreeItems(
   sessions: readonly import("@src/store/session").Session[]
 ): NavigationMenuItem[] {
@@ -443,7 +452,7 @@ export const WorkstationSidebarConnector: React.FC = () => {
 
   const {
     menuItems,
-    sessionMap,
+    sessionMap: visibleSessionMap,
     subagentParentIds,
     isLoadMoreId,
     getLoadMoreGroupId,
@@ -482,6 +491,15 @@ export const WorkstationSidebarConnector: React.FC = () => {
     projectsSearchQuery: sidebarSearchQueries.projects,
     activeProjectOrgId,
   });
+
+  // The hierarchy tree is built from every durable session, not just the
+  // current paginated/sidebar roster. Its click router therefore needs the
+  // same complete population; otherwise older projects (for example
+  // PPCharge) render correctly but their leaves cannot resolve to a Session.
+  const sessionMap = useMemo(
+    () => buildOrg2SessionRoutingMap(visibleSessionMap, sortedSessions),
+    [sortedSessions, visibleSessionMap]
+  );
 
   const {
     rename,

@@ -48,6 +48,11 @@ type RenderProjectsWrapperParams = Parameters<
   typeof useRenderProjectsMenuItemWrapper
 >[0];
 
+/** Workspace hierarchy session leaves must always open their local session. */
+export function isOrg2WorkspaceSessionLeaf(item: NavigationMenuItem): boolean {
+  return item.key.startsWith("org2-tree-session-");
+}
+
 interface UseWorkstationSidebarMenuItemRoutingParams {
   sessionMap: Parameters<typeof useRenderSessionMenuItemWrapper>[0];
   cloudRemoteRowMap: RenderWorkstationWrapperParams["cloudRemoteRowMap"];
@@ -157,6 +162,14 @@ export function useWorkstationSidebarMenuItemRouting({
         item.id === NEW_SESSION_MENU_ITEM_ID ||
         getDraftIdFromMenuItemId(item.id)
       ) {
+        handleMenuItemClick(key, item);
+        return;
+      }
+      // Workspace hierarchy leaves are projections of real local sessions.
+      // They must never be routed through the projects handler: when a Work
+      // Items view is visible that handler owns arbitrary menu items and would
+      // otherwise swallow the click before the normal sessionMap path opens it.
+      if (isOrg2WorkspaceSessionLeaf(item)) {
         handleMenuItemClick(key, item);
         return;
       }
