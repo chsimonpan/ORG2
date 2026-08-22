@@ -5,7 +5,10 @@
 //! reads top-to-bottom without scrolling past the slash-command and
 //! lifecycle code that lives next door.
 
+use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::oneshot;
 use tracing::{info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
@@ -281,6 +284,25 @@ impl InboundMessageHandler for GatewayInboundHandler {
             sid
         };
 
+        // A channel reply while the bound turn is blocked in
+        // `ask_user_questions` is an answer to that interaction, not a new
+        // turn. Resolve it directly; otherwise the new message queues behind
+        // the processing lock and the original turn can never continue.
+        if let Some(session) = state.get_session(&target_sid).await {
+            if let Some(request_id) = pending_question_request_id(&session).await {
+                session
+                    .question_manager
+                    .respond(&request_id, vec![vec![msg.content.trim().to_string()]])
+                    .await?;
+                let reply = OutboundMessage::new(
+                    &msg.channel,
+                    &msg.chat_id,
+                    "已收到选择，Agent 正在继续处理。",
+                );
+                return Ok(Some(reply));
+            }
+        }
+
         // Re-inject so the target session consumes the message via the
         // standard pipeline. Keeps the real sender_id so the channel
         // context header built downstream sees the user, not
@@ -386,6 +408,21 @@ pub(super) async fn ensure_os_session_registered(state: &AgentAppState, sid: &st
         state.invalidate_session(sid).await;
         state.register_session(session).await;
     }
+}
+
+async fn pending_question_request_id(session: &AgentSession) -> Option<String> {
+    session
+        .question_manager
+        .get_pending_metadata()
+        .await
+        .into_iter()
+        .find_map(|metadata| {
+            metadata
+                .get("requestId")
+                .or_else(|| metadata.get("request_id"))
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
 }
 
 /// Dispatch a message (usually re-injected) to a target session and
@@ -530,6 +567,12 @@ async fn dispatch_to_session(
         .await
         .ok_or_else(|| format!("Session {} not found after init", target_session_id))?;
 
+    let stop_relay = spawn_channel_progress_relay(
+        state,
+        target_session_id,
+        &origin_channel,
+        &origin_chat_id,
+    );
     let outbound = crate::session::gateway_pipeline::process_gateway_message(
         enriched,
         session_arc,
@@ -537,8 +580,107 @@ async fn dispatch_to_session(
         state.app_handle.clone(),
     )
     .await?;
+    if let Some(stop) = stop_relay {
+        let _ = stop.send(());
+    }
 
     Ok(prepend_reset_notice(state, &origin_channel, &origin_chat_id, outbound).await)
+}
+
+
+/// Relay durable assistant segments from a channel-bound turn while it is still
+/// running. The normal gateway pipeline only returns one final message, which
+/// means a turn blocked on an interactive tool (for example
+/// `ask_user_questions`) otherwise appears silent forever in Feishu.
+fn spawn_channel_progress_relay(
+    state: &AgentAppState,
+    session_id: &str,
+    channel: &str,
+    chat_id: &str,
+) -> Option<oneshot::Sender<()>> {
+    let app_handle = state.app_handle.clone()?;
+    let bus = state.bus.clone();
+    let session_id = session_id.to_string();
+    let channel = channel.to_string();
+    let chat_id = chat_id.to_string();
+    let (stop_tx, mut stop_rx) = oneshot::channel();
+
+    tokio::spawn(async move {
+        let initial = crate::foundation::bus::event_pipeline_bridge::read_session_events(
+            &app_handle,
+            &session_id,
+        );
+        let mut seen: HashSet<String> = initial.into_iter().map(|event| event.id).collect();
+        let mut interval = tokio::time::interval(Duration::from_millis(750));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                _ = &mut stop_rx => break,
+                _ = interval.tick() => {
+                    let events = crate::foundation::bus::event_pipeline_bridge::read_session_events(
+                        &app_handle,
+                        &session_id,
+                    );
+                    for event in events {
+                        if !seen.insert(event.id.clone()) {
+                            continue;
+                        }
+                        let text = channel_progress_text(&event);
+                        if text.is_empty() {
+                            continue;
+                        }
+                        let mut outbound = OutboundMessage::new(&channel, &chat_id, &text);
+                        outbound.metadata.insert(
+                            "channel_progress".to_string(),
+                            serde_json::Value::Bool(true),
+                        );
+                        bus.lock().await.publish_outbound(outbound);
+                    }
+                }
+            }
+        }
+    });
+    Some(stop_tx)
+}
+
+fn channel_progress_text(event: &core_types::session_event::SessionEvent) -> String {
+    use core_types::session_event::{EventDisplayStatus, EventDisplayVariant, EventSource};
+    if event.source != EventSource::Assistant {
+        return String::new();
+    }
+    match event.display_variant {
+        EventDisplayVariant::Message if event.display_status == EventDisplayStatus::Completed => {
+            event.display_text.trim().to_string()
+        }
+        EventDisplayVariant::ToolCall
+            if event.display_status == EventDisplayStatus::AwaitingUser
+                && event.function_name == "ask_user_questions" =>
+        {
+            format_channel_question(&event.args)
+        }
+        _ => String::new(),
+    }
+}
+
+fn format_channel_question(args: &serde_json::Value) -> String {
+    let Some(questions) = args.get("questions").and_then(|value| value.as_array()) else {
+        return "Agent 正在等待你的输入，请直接回复后继续。".to_string();
+    };
+    let mut lines = vec!["Agent 正在等待你的选择：".to_string()];
+    for question in questions {
+        if let Some(text) = question.get("question").and_then(|value| value.as_str()) {
+            lines.push(text.to_string());
+        }
+        if let Some(options) = question.get("options").and_then(|value| value.as_array()) {
+            for (index, option) in options.iter().enumerate() {
+                if let Some(label) = option.get("label").and_then(|value| value.as_str()) {
+                    lines.push(format!("{}. {}", index + 1, label));
+                }
+            }
+        }
+    }
+    lines.push("请直接回复选项编号或你的具体决定。".to_string());
+    lines.join("\n")
 }
 
 async fn prepend_reset_notice(
@@ -617,7 +759,10 @@ pub(super) fn build_inbound_deps(state: &AgentAppState) -> Result<InboundProcess
 
 #[cfg(test)]
 mod channel_launch_override_tests {
-    use super::{resolve_channel_launch_overrides, resolve_channel_launch_overrides_with_account_lookup};
+    use super::{
+        channel_progress_text, format_channel_question, resolve_channel_launch_overrides,
+        resolve_channel_launch_overrides_with_account_lookup,
+    };
     use crate::session::persistence::UnifiedSessionRecord;
 
     fn durable_session(model: Option<&str>, account_id: Option<&str>) -> UnifiedSessionRecord {
@@ -696,6 +841,56 @@ mod channel_launch_override_tests {
         .expect_err("fallback must be a complete account/model pair");
 
         assert!(err.contains("missing account 'deleted-account'"), "{err}");
+    }
+
+    #[test]
+    fn channel_progress_renders_completed_assistant_message() {
+        use core_types::session_event::{
+            ActivityStatus, EventDisplayStatus, EventDisplayVariant, EventSource, SessionEvent,
+        };
+        let event = SessionEvent {
+            id: "assistant-1".to_string(),
+            chunk_id: None,
+            session_id: "s".to_string(),
+            created_at: "now".to_string(),
+            function_name: "assistant".to_string(),
+            ui_canonical: "agent_message".to_string(),
+            action_type: "assistant".to_string(),
+            args: serde_json::json!({}),
+            result: serde_json::json!({}),
+            source: EventSource::Assistant,
+            display_text: "  progress text  ".to_string(),
+            display_status: EventDisplayStatus::Completed,
+            display_variant: EventDisplayVariant::Message,
+            activity_status: ActivityStatus::Agent,
+            thread_id: None,
+            process_id: None,
+            call_id: None,
+            file_path: None,
+            command: None,
+            is_delta: None,
+            repo_id: None,
+            repo_path: None,
+            extracted: None,
+            payload_refs: Vec::new(),
+            shell_replay: None,
+            shell_replay_bookmarks: Default::default(),
+            last_extract_at: None,
+        };
+        assert_eq!(channel_progress_text(&event), "progress text");
+    }
+
+    #[test]
+    fn channel_question_renders_numbered_options() {
+        let text = format_channel_question(&serde_json::json!({
+            "questions": [{
+                "question": "How should this continue?",
+                "options": [{"label": "Keep"}, {"label": "Stop"}]
+            }]
+        }));
+        assert!(text.contains("How should this continue?"));
+        assert!(text.contains("1. Keep"));
+        assert!(text.contains("2. Stop"));
     }
 
     #[test]
