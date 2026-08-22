@@ -3,6 +3,12 @@
 //! The user-facing total deliberately excludes shell, agent CLI, and tool
 //! helpers. Those processes are returned by a separate diagnostic command so
 //! they can never be accidentally folded into `effective_total_bytes`.
+//!
+//! Schema v2 adds a resident / swapped split and a lifetime peak per process.
+//! The headline `effective_memory_bytes` stays the metric the platform's own
+//! task manager shows (macOS `phys_footprint`, Windows private working set,
+//! Linux PSS); the split explains how much of that headline is physically
+//! resident right now versus held by the memory compressor or swap.
 
 #[cfg(target_os = "macos")]
 mod macos_services;
@@ -11,14 +17,14 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 use sysinfo::UpdateKind;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use tauri::AppHandle;
 #[cfg(windows)]
 use tauri::Manager;
 
-const SNAPSHOT_SCHEMA_VERSION: u16 = 1;
+const SNAPSHOT_SCHEMA_VERSION: u16 = 2;
 const INVENTORY_CACHE_TTL: Duration = Duration::from_millis(750);
 
 #[cfg(target_os = "macos")]
@@ -27,15 +33,58 @@ const MACOS_OBSERVATION_WINDOW: Duration = Duration::from_secs(3);
 const MACOS_EAGER_OBSERVATION_SCANS: usize = 8;
 #[cfg(target_os = "macos")]
 const MACOS_EAGER_OBSERVATION_INTERVAL: Duration = Duration::from_millis(250);
+/// Upper bound on VM regions walked per process. Real processes have a few
+/// thousand regions; the bound only guards against a kernel that never
+/// advances the cursor.
+#[cfg(target_os = "macos")]
+const MACOS_MAX_VM_REGIONS: usize = 200_000;
 
 /// The metric used as the effective-memory value for one process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryMetricKind {
+    /// macOS `ri_phys_footprint` — Activity Monitor's "Memory" column.
     PhysicalFootprint,
+    /// Windows `PrivateWorkingSetSize` — Task Manager's "Memory" column.
     PrivateWorkingSet,
+    /// Windows `PrivateUsage` (commit charge) when EX2 counters are unavailable.
     PrivateBytes,
+    /// Linux proportional set size from `/proc/<pid>/smaps_rollup`.
+    Pss,
     RssFallback,
+}
+
+/// How the resident / swapped split of one process was measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryBreakdownKind {
+    /// macOS `proc_pidinfo(PROC_PIDREGIONINFO)` walk over the process VM map.
+    VmRegionWalk,
+    /// Linux `/proc/<pid>/smaps_rollup`.
+    SmapsRollup,
+    /// Windows working-set vs. private-commit counters.
+    WorkingSetCommit,
+    Unavailable,
+}
+
+/// Resident / swapped split of one process. All values are bytes; swapped
+/// pages are counted at their uncompressed size so that
+/// `resident_private + swapped` approximates the private part of the headline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MemoryBreakdown {
+    resident_private_bytes: u64,
+    resident_shared_bytes: u64,
+    swapped_bytes: u64,
+    kind: MemoryBreakdownKind,
+}
+
+impl MemoryBreakdown {
+    const UNAVAILABLE: Self = Self {
+        resident_private_bytes: 0,
+        resident_shared_bytes: 0,
+        swapped_bytes: 0,
+        kind: MemoryBreakdownKind::Unavailable,
+    };
 }
 
 /// Summary of how the effective total was measured.
@@ -79,9 +128,23 @@ pub struct AppMemoryProcess {
     pub process_instance_id: String,
     pub name: String,
     pub role: AppMemoryProcessRole,
+    /// Headline metric — what the platform's own task manager shows.
     pub effective_memory_bytes: u64,
     pub metric_kind: MemoryMetricKind,
     pub rss_bytes: u64,
+    /// Physically resident pages private to this process.
+    pub resident_private_bytes: u64,
+    /// Physically resident pages shared with other processes (shared
+    /// libraries, dyld cache, shared memory). Not summable across processes.
+    pub resident_shared_bytes: u64,
+    /// Private pages currently held by the memory compressor or swap, at
+    /// uncompressed size. Windows: private commit that is not resident.
+    pub swapped_bytes: u64,
+    pub breakdown_kind: MemoryBreakdownKind,
+    /// Lifetime peak of `effective_memory_bytes` when the OS tracks one
+    /// (macOS `ri_lifetime_max_phys_footprint`, Windows `PeakPagefileUsage`
+    /// for the private-bytes path). `None` where no matching peak exists.
+    pub peak_effective_memory_bytes: Option<u64>,
 }
 
 /// Atomic application-memory snapshot consumed by every frontend surface.
@@ -92,6 +155,14 @@ pub struct AppMemorySnapshot {
     pub processes: Vec<AppMemoryProcess>,
     pub effective_total_bytes: u64,
     pub rss_mapped_total_bytes: u64,
+    /// Sum of `resident_private_bytes` — physical RAM exclusively held by
+    /// the app right now.
+    pub resident_private_total_bytes: u64,
+    /// Sum of `resident_shared_bytes` — diagnostic only; shared pages are
+    /// counted once per process that maps them.
+    pub resident_shared_total_bytes: u64,
+    /// Sum of `swapped_bytes` — the part of the headline that is *not* in RAM.
+    pub swapped_total_bytes: u64,
     pub measurement: EffectiveMeasurement,
     pub attribution: AttributionStatus,
     pub skipped_ambiguous_pids: Vec<u32>,
@@ -105,6 +176,9 @@ impl AppMemorySnapshot {
             processes: Vec::new(),
             effective_total_bytes: 0,
             rss_mapped_total_bytes: 0,
+            resident_private_total_bytes: 0,
+            resident_shared_total_bytes: 0,
+            swapped_total_bytes: 0,
             measurement: EffectiveMeasurement::Unavailable,
             attribution,
             skipped_ambiguous_pids: Vec::new(),
@@ -145,7 +219,7 @@ struct ProcessDescriptor {
     executable: Option<String>,
     rss_bytes: u64,
     virtual_memory_bytes: u64,
-    #[cfg(target_os = "macos")]
+    #[cfg(unix)]
     belongs_to_current_user: bool,
 }
 
@@ -176,13 +250,13 @@ impl ProcessInventoryCache {
 
         let refresh_kind = ProcessRefreshKind::nothing().with_memory();
         #[cfg(target_os = "macos")]
-        let refresh_kind = refresh_kind
-            .with_exe(UpdateKind::OnlyIfNotSet)
-            .with_user(UpdateKind::OnlyIfNotSet);
+        let refresh_kind = refresh_kind.with_exe(UpdateKind::OnlyIfNotSet);
+        #[cfg(unix)]
+        let refresh_kind = refresh_kind.with_user(UpdateKind::OnlyIfNotSet);
         self.system
             .refresh_processes_specifics(ProcessesToUpdate::All, true, refresh_kind);
 
-        #[cfg(target_os = "macos")]
+        #[cfg(unix)]
         let current_uid = sysinfo::Uid::try_from(unsafe { libc::getuid() } as usize).ok();
 
         self.descriptors = self
@@ -198,7 +272,7 @@ impl ProcessInventoryCache {
                 executable: process.exe().map(|path| path.to_string_lossy().to_string()),
                 rss_bytes: process.memory(),
                 virtual_memory_bytes: process.virtual_memory(),
-                #[cfg(target_os = "macos")]
+                #[cfg(unix)]
                 belongs_to_current_user: current_uid
                     .as_ref()
                     .is_some_and(|uid| process.user_id() == Some(uid)),
@@ -246,19 +320,133 @@ struct EffectiveProcessMemory {
     bytes: u64,
     kind: MemoryMetricKind,
     birth_token: u64,
+    breakdown: MemoryBreakdown,
+    peak_bytes: Option<u64>,
+}
+
+impl EffectiveProcessMemory {
+    fn rss_fallback(descriptor: &ProcessDescriptor, birth_token: u64) -> Self {
+        Self {
+            bytes: descriptor.rss_bytes,
+            kind: MemoryMetricKind::RssFallback,
+            birth_token,
+            breakdown: MemoryBreakdown::UNAVAILABLE,
+            peak_bytes: None,
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
-fn macos_rusage(pid: u32) -> Option<libc::rusage_info_v2> {
-    let mut usage = std::mem::MaybeUninit::<libc::rusage_info_v2>::zeroed();
+fn macos_rusage(pid: u32) -> Option<libc::rusage_info_v4> {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage_info_v4>::zeroed();
     let result = unsafe {
         libc::proc_pid_rusage(
             pid as libc::c_int,
-            libc::RUSAGE_INFO_V2,
+            libc::RUSAGE_INFO_V4,
             usage.as_mut_ptr().cast(),
         )
     };
     (result == 0).then(|| unsafe { usage.assume_init() })
+}
+
+/// `struct proc_regioninfo` from `<sys/proc_info.h>`; not exported by the
+/// `libc` crate. Layout is stable ABI (used by `vmmap`, `footprint`, `lsof`).
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Default, Clone, Copy)]
+struct ProcRegionInfo {
+    pri_protection: u32,
+    pri_max_protection: u32,
+    pri_inheritance: u32,
+    pri_flags: u32,
+    pri_offset: u64,
+    pri_behavior: u32,
+    pri_user_wired_count: u32,
+    pri_user_tag: u32,
+    pri_pages_resident: u32,
+    pri_pages_shared_now_private: u32,
+    pri_pages_swapped_out: u32,
+    pri_pages_dirtied: u32,
+    pri_ref_count: u32,
+    pri_shadow_depth: u32,
+    pri_share_mode: u32,
+    pri_private_pages_resident: u32,
+    pri_shared_pages_resident: u32,
+    pri_obj_id: u32,
+    pri_depth: u32,
+    pri_address: u64,
+    pri_size: u64,
+}
+
+#[cfg(target_os = "macos")]
+const PROC_PIDREGIONINFO: libc::c_int = 7;
+/// `SM_*` share modes from `<mach/vm_region.h>` whose pages belong to this
+/// process rather than to a shared object (shared cache, shared memory).
+#[cfg(target_os = "macos")]
+const SM_COW: u32 = 1;
+#[cfg(target_os = "macos")]
+const SM_PRIVATE: u32 = 2;
+#[cfg(target_os = "macos")]
+const SM_PRIVATE_ALIASED: u32 = 6;
+#[cfg(target_os = "macos")]
+const SM_LARGE_PAGE: u32 = 8;
+
+/// Walk the VM map of `pid` with `proc_pidinfo(PROC_PIDREGIONINFO)`. This is
+/// an unprivileged, same-user query (no task port), so it works against
+/// Apple's hardened WebKit XPC helpers. Resident counts come straight from the
+/// per-region extended info; swapped pages are those held by the compressor
+/// or on-disk swap and are counted only for private / copy-on-write regions
+/// so that the shared dyld cache does not inflate the app's own number.
+#[cfg(target_os = "macos")]
+fn macos_region_breakdown(pid: u32) -> MemoryBreakdown {
+    let page_size = unsafe { libc::vm_page_size } as u64;
+    let mut address: u64 = 0;
+    let mut resident_pages: u64 = 0;
+    let mut private_pages: u64 = 0;
+    let mut swapped_pages: u64 = 0;
+    let mut regions = 0_usize;
+    loop {
+        let mut info = ProcRegionInfo::default();
+        let size = std::mem::size_of::<ProcRegionInfo>() as libc::c_int;
+        let written = unsafe {
+            libc::proc_pidinfo(
+                pid as libc::c_int,
+                PROC_PIDREGIONINFO,
+                address,
+                (&mut info as *mut ProcRegionInfo).cast(),
+                size,
+            )
+        };
+        if written != size {
+            break;
+        }
+        regions += 1;
+        resident_pages += u64::from(info.pri_pages_resident);
+        private_pages += u64::from(info.pri_private_pages_resident);
+        if matches!(
+            info.pri_share_mode,
+            SM_COW | SM_PRIVATE | SM_PRIVATE_ALIASED | SM_LARGE_PAGE
+        ) {
+            swapped_pages += u64::from(info.pri_pages_swapped_out);
+        }
+        let next = info.pri_address.saturating_add(info.pri_size);
+        if next <= address || regions >= MACOS_MAX_VM_REGIONS {
+            break;
+        }
+        address = next;
+    }
+    if regions == 0 {
+        return MemoryBreakdown::UNAVAILABLE;
+    }
+    let resident_private_bytes = private_pages.saturating_mul(page_size);
+    MemoryBreakdown {
+        resident_private_bytes,
+        resident_shared_bytes: resident_pages
+            .saturating_sub(private_pages)
+            .saturating_mul(page_size),
+        swapped_bytes: swapped_pages.saturating_mul(page_size),
+        kind: MemoryBreakdownKind::VmRegionWalk,
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -287,23 +475,91 @@ fn collect_effective_memory(descriptor: &ProcessDescriptor) -> EffectiveProcessM
             bytes: usage.ri_phys_footprint,
             kind: MemoryMetricKind::PhysicalFootprint,
             birth_token: usage.ri_proc_start_abstime,
+            breakdown: macos_region_breakdown(descriptor.pid),
+            peak_bytes: (usage.ri_lifetime_max_phys_footprint > 0)
+                .then_some(usage.ri_lifetime_max_phys_footprint),
         }
     } else {
-        EffectiveProcessMemory {
-            bytes: descriptor.rss_bytes,
-            kind: MemoryMetricKind::RssFallback,
-            birth_token: descriptor.start_time_secs,
-        }
+        EffectiveProcessMemory::rss_fallback(descriptor, descriptor.start_time_secs)
     }
 }
 
-#[cfg(not(any(target_os = "macos", windows)))]
-fn collect_effective_memory(descriptor: &ProcessDescriptor) -> EffectiveProcessMemory {
-    EffectiveProcessMemory {
-        bytes: descriptor.rss_bytes,
-        kind: MemoryMetricKind::RssFallback,
-        birth_token: descriptor.start_time_secs,
+/// Parsed subset of `/proc/<pid>/smaps_rollup` (Linux ≥ 4.14). Values in bytes.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct SmapsRollup {
+    pss: u64,
+    private_clean: u64,
+    private_dirty: u64,
+    swap_pss: u64,
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_smaps_rollup(text: &str) -> Option<SmapsRollup> {
+    let mut rollup = SmapsRollup::default();
+    let mut saw_pss = false;
+    for line in text.lines() {
+        let Some((key, rest)) = line.split_once(':') else {
+            continue;
+        };
+        let mut fields = rest.split_whitespace();
+        let Some(value) = fields.next().and_then(|value| value.parse::<u64>().ok()) else {
+            continue;
+        };
+        let bytes = match fields.next() {
+            Some("kB") | Some("KB") => value.saturating_mul(1024),
+            Some("mB") | Some("MB") => value.saturating_mul(1024 * 1024),
+            Some(_) | None => value,
+        };
+        match key.trim() {
+            "Pss" => {
+                rollup.pss = bytes;
+                saw_pss = true;
+            }
+            "Private_Clean" => rollup.private_clean = bytes,
+            "Private_Dirty" => rollup.private_dirty = bytes,
+            "SwapPss" => rollup.swap_pss = bytes,
+            _ => {}
+        }
     }
+    saw_pss.then_some(rollup)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_smaps_rollup(pid: u32) -> Option<SmapsRollup> {
+    let text = std::fs::read_to_string(format!("/proc/{pid}/smaps_rollup")).ok()?;
+    parse_smaps_rollup(&text)
+}
+
+#[cfg(target_os = "linux")]
+fn collect_effective_memory(descriptor: &ProcessDescriptor) -> EffectiveProcessMemory {
+    match linux_smaps_rollup(descriptor.pid) {
+        Some(rollup) => {
+            let resident_private_bytes = rollup
+                .private_clean
+                .saturating_add(rollup.private_dirty);
+            EffectiveProcessMemory {
+                bytes: rollup.pss,
+                kind: MemoryMetricKind::Pss,
+                birth_token: descriptor.start_time_secs,
+                breakdown: MemoryBreakdown {
+                    resident_private_bytes,
+                    // PSS already counts shared pages proportionally, so the
+                    // remainder is this process's fair share of shared pages.
+                    resident_shared_bytes: rollup.pss.saturating_sub(resident_private_bytes),
+                    swapped_bytes: rollup.swap_pss,
+                    kind: MemoryBreakdownKind::SmapsRollup,
+                },
+                peak_bytes: None,
+            }
+        }
+        None => EffectiveProcessMemory::rss_fallback(descriptor, descriptor.start_time_secs),
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+fn collect_effective_memory(descriptor: &ProcessDescriptor) -> EffectiveProcessMemory {
+    EffectiveProcessMemory::rss_fallback(descriptor, descriptor.start_time_secs)
 }
 
 fn build_process(descriptor: &ProcessDescriptor, role: AppMemoryProcessRole) -> AppMemoryProcess {
@@ -325,6 +581,11 @@ fn build_process(descriptor: &ProcessDescriptor, role: AppMemoryProcessRole) -> 
         effective_memory_bytes: effective.bytes,
         metric_kind: effective.kind,
         rss_bytes: descriptor.rss_bytes,
+        resident_private_bytes: effective.breakdown.resident_private_bytes,
+        resident_shared_bytes: effective.breakdown.resident_shared_bytes,
+        swapped_bytes: effective.breakdown.swapped_bytes,
+        breakdown_kind: effective.breakdown.kind,
+        peak_effective_memory_bytes: effective.peak_bytes,
     }
 }
 
@@ -373,6 +634,15 @@ fn aggregate_snapshot(
     let rss_mapped_total_bytes = processes.iter().fold(0_u64, |total, process| {
         total.saturating_add(process.rss_bytes)
     });
+    let resident_private_total_bytes = processes.iter().fold(0_u64, |total, process| {
+        total.saturating_add(process.resident_private_bytes)
+    });
+    let resident_shared_total_bytes = processes.iter().fold(0_u64, |total, process| {
+        total.saturating_add(process.resident_shared_bytes)
+    });
+    let swapped_total_bytes = processes.iter().fold(0_u64, |total, process| {
+        total.saturating_add(process.swapped_bytes)
+    });
     let all_rss = processes
         .iter()
         .all(|process| process.metric_kind == MemoryMetricKind::RssFallback);
@@ -382,7 +652,9 @@ fn aggregate_snapshot(
     let all_native = processes.iter().all(|process| {
         matches!(
             process.metric_kind,
-            MemoryMetricKind::PhysicalFootprint | MemoryMetricKind::PrivateWorkingSet
+            MemoryMetricKind::PhysicalFootprint
+                | MemoryMetricKind::PrivateWorkingSet
+                | MemoryMetricKind::Pss
         )
     });
     let measurement = if all_native {
@@ -401,6 +673,9 @@ fn aggregate_snapshot(
         processes,
         effective_total_bytes,
         rss_mapped_total_bytes,
+        resident_private_total_bytes,
+        resident_shared_total_bytes,
+        swapped_total_bytes,
         measurement,
         attribution,
         skipped_ambiguous_pids,
@@ -689,6 +964,25 @@ fn resolve_macos_service_ownership(
     (owned, skipped, attribution)
 }
 
+/// WebKitGTK helper roles by executable name. `sysinfo` reports the kernel
+/// `comm` name, which is truncated to 15 bytes ("WebKitNetworkPr"), so match
+/// on prefixes rather than whole names.
+#[cfg(not(any(target_os = "macos", windows)))]
+fn webkitgtk_role(name: &str) -> Option<AppMemoryProcessRole> {
+    let lower = name.to_ascii_lowercase();
+    if lower.starts_with("webkitwebproc") {
+        Some(AppMemoryProcessRole::Renderer)
+    } else if lower.starts_with("webkitnetworkp") {
+        Some(AppMemoryProcessRole::Network)
+    } else if lower.starts_with("webkitgpuproc") {
+        Some(AppMemoryProcessRole::Gpu)
+    } else if lower.contains("webprocess") || lower.contains("webkit") {
+        Some(AppMemoryProcessRole::Utility)
+    } else {
+        None
+    }
+}
+
 #[cfg(not(any(target_os = "macos", windows)))]
 fn owned_webview_processes(
     inventory: &[ProcessDescriptor],
@@ -700,14 +994,15 @@ fn owned_webview_processes(
     let root_pid = std::process::id();
     let mut owned = HashMap::new();
     for descriptor in inventory {
-        let lower = descriptor.name.to_ascii_lowercase();
-        if descendant_depth(descriptor.pid, root_pid, inventory).is_some()
-            && (lower.contains("webprocess") || lower.contains("webkit"))
-        {
-            owned.insert(
-                process_instance_key(descriptor),
-                AppMemoryProcessRole::Renderer,
-            );
+        #[cfg(unix)]
+        if !descriptor.belongs_to_current_user {
+            continue;
+        }
+        if descendant_depth(descriptor.pid, root_pid, inventory).is_none() {
+            continue;
+        }
+        if let Some(role) = webkitgtk_role(&descriptor.name) {
+            owned.insert(process_instance_key(descriptor), role);
         }
     }
     (owned, Vec::new(), AttributionStatus::Complete)
@@ -902,6 +1197,11 @@ mod tests {
             effective_memory_bytes: bytes,
             metric_kind: kind,
             rss_bytes: bytes.saturating_add(10),
+            resident_private_bytes: bytes / 2,
+            resident_shared_bytes: 5,
+            swapped_bytes: bytes - bytes / 2,
+            breakdown_kind: MemoryBreakdownKind::VmRegionWalk,
+            peak_effective_memory_bytes: Some(bytes.saturating_mul(2)),
         }
     }
 
@@ -919,6 +1219,61 @@ mod tests {
         assert_eq!(snapshot.measurement, EffectiveMeasurement::Native);
         assert_eq!(snapshot.effective_total_bytes, 150);
         assert_eq!(snapshot.rss_mapped_total_bytes, 170);
+        assert_eq!(snapshot.resident_private_total_bytes, 75);
+        assert_eq!(snapshot.resident_shared_total_bytes, 10);
+        assert_eq!(snapshot.swapped_total_bytes, 75);
+    }
+
+    #[test]
+    fn aggregate_treats_pss_as_native() {
+        let snapshot = aggregate_snapshot(
+            10,
+            vec![process(1, 100, MemoryMetricKind::Pss)],
+            AttributionStatus::Complete,
+            Vec::new(),
+        );
+        assert_eq!(snapshot.measurement, EffectiveMeasurement::Native);
+    }
+
+    #[test]
+    fn aggregate_split_totals_saturate() {
+        let mut huge = process(1, u64::MAX, MemoryMetricKind::RssFallback);
+        huge.resident_private_bytes = u64::MAX;
+        huge.swapped_bytes = u64::MAX;
+        let mut other = process(2, 1, MemoryMetricKind::RssFallback);
+        other.resident_private_bytes = 1;
+        other.swapped_bytes = 1;
+        let snapshot =
+            aggregate_snapshot(10, vec![huge, other], AttributionStatus::Complete, Vec::new());
+        assert_eq!(snapshot.resident_private_total_bytes, u64::MAX);
+        assert_eq!(snapshot.swapped_total_bytes, u64::MAX);
+    }
+
+    #[test]
+    fn smaps_rollup_parser_reads_pss_private_and_swap() {
+        let text = "\
+00400000-7fff0000 ---p 00000000 00:00 0                          [rollup]
+Rss:              123456 kB
+Pss:               98304 kB
+Pss_Dirty:         90000 kB
+Pss_Anon:          80000 kB
+Shared_Clean:      20000 kB
+Private_Clean:      4096 kB
+Private_Dirty:     81920 kB
+Swap:              12288 kB
+SwapPss:            8192 kB
+";
+        let rollup = parse_smaps_rollup(text).expect("rollup parses");
+        assert_eq!(rollup.pss, 98304 * 1024);
+        assert_eq!(rollup.private_clean, 4096 * 1024);
+        assert_eq!(rollup.private_dirty, 81920 * 1024);
+        assert_eq!(rollup.swap_pss, 8192 * 1024);
+    }
+
+    #[test]
+    fn smaps_rollup_parser_requires_pss() {
+        assert_eq!(parse_smaps_rollup("Rss: 10 kB\nPrivate_Dirty: 5 kB\n"), None);
+        assert_eq!(parse_smaps_rollup(""), None);
     }
 
     #[test]
@@ -994,11 +1349,26 @@ mod tests {
             vec![22],
         );
         let value = serde_json::to_value(snapshot).expect("snapshot serializes");
-        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["schema_version"], 2);
         assert_eq!(value["measurement"], "native");
         assert_eq!(value["attribution"], "partial");
         assert_eq!(value["processes"][0]["metric_kind"], "physical_footprint");
+        assert_eq!(value["processes"][0]["breakdown_kind"], "vm_region_walk");
+        assert_eq!(value["processes"][0]["resident_private_bytes"], 50);
+        assert_eq!(value["processes"][0]["swapped_bytes"], 50);
+        assert_eq!(value["processes"][0]["peak_effective_memory_bytes"], 200);
+        assert_eq!(value["resident_private_total_bytes"], 50);
+        assert_eq!(value["swapped_total_bytes"], 50);
         assert!(value["processes"][0].get("memory_mb").is_none());
+    }
+
+    #[test]
+    fn wire_contract_serializes_missing_peak_as_null() {
+        let mut no_peak = process(1, 100, MemoryMetricKind::Pss);
+        no_peak.peak_effective_memory_bytes = None;
+        let value = serde_json::to_value(no_peak).expect("process serializes");
+        assert!(value["peak_effective_memory_bytes"].is_null());
+        assert_eq!(value["metric_kind"], "pss");
     }
 
     #[cfg(target_os = "macos")]
@@ -1073,5 +1443,67 @@ mod tests {
         let usage = macos_rusage(std::process::id()).expect("current process rusage");
         assert!(usage.ri_phys_footprint > 0);
         assert!(usage.ri_proc_start_abstime > 0);
+        assert!(usage.ri_lifetime_max_phys_footprint >= usage.ri_phys_footprint);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_region_walk_splits_current_process() {
+        // Pin a private allocation so the walk has something unambiguous to find.
+        let pinned = vec![7_u8; 32 * 1024 * 1024];
+        std::hint::black_box(&pinned);
+        let breakdown = macos_region_breakdown(std::process::id());
+        assert_eq!(breakdown.kind, MemoryBreakdownKind::VmRegionWalk);
+        assert!(
+            breakdown.resident_private_bytes >= 32 * 1024 * 1024,
+            "private resident {} should cover the pinned 32 MiB",
+            breakdown.resident_private_bytes
+        );
+        assert!(breakdown.resident_shared_bytes > 0, "dyld cache must be shared-resident");
+        let usage = macos_rusage(std::process::id()).expect("current process rusage");
+        // footprint ≈ private resident + private swapped (+ graphics / purgeable).
+        let explained = breakdown
+            .resident_private_bytes
+            .saturating_add(breakdown.swapped_bytes);
+        assert!(
+            explained * 2 >= usage.ri_phys_footprint,
+            "split {explained} explains less than half of footprint {}",
+            usage.ri_phys_footprint
+        );
+        drop(pinned);
+    }
+
+    /// Manual cross-check against a live process, e.g. a WebContent helper
+    /// owned by a running ORG2:
+    /// `ORG2_MEMORY_PROBE_PID=<pid> cargo test -p perf_utils probe_live -- --ignored --nocapture`
+    /// then compare with `/usr/bin/footprint -p <pid> --swapped --noCategories`.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore]
+    fn macos_region_walk_probe_live_pid() {
+        let pid: u32 = std::env::var("ORG2_MEMORY_PROBE_PID")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .expect("set ORG2_MEMORY_PROBE_PID");
+        let usage = macos_rusage(pid).expect("rusage for probe pid");
+        let breakdown = macos_region_breakdown(pid);
+        let mib = |bytes: u64| bytes as f64 / (1024.0 * 1024.0);
+        println!(
+            "pid {pid}: footprint {:.0} MiB (peak {:.0}) | resident private {:.0} MiB, shared {:.0} MiB, swapped {:.0} MiB [{:?}]",
+            mib(usage.ri_phys_footprint),
+            mib(usage.ri_lifetime_max_phys_footprint),
+            mib(breakdown.resident_private_bytes),
+            mib(breakdown.resident_shared_bytes),
+            mib(breakdown.swapped_bytes),
+            breakdown.kind
+        );
+        assert_eq!(breakdown.kind, MemoryBreakdownKind::VmRegionWalk);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_region_walk_reports_unavailable_for_dead_pid() {
+        // PID 0 is the kernel task; proc_pidinfo refuses it for user callers.
+        assert_eq!(macos_region_breakdown(0).kind, MemoryBreakdownKind::Unavailable);
     }
 }

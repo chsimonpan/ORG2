@@ -969,7 +969,19 @@
     "excludedFromAppMemory": "excluded from App memory",
     "noToolProcesses": "No terminal, CLI, MCP, or tool processes detected",
     "categoryAgentCli": "CLI agent",
-    "categoryMcpOrTool": "MCP / tool process"
+    "categoryMcpOrTool": "MCP / tool process",
+    "metricKinds": {
+      "physical_footprint": "phys_footprint · совпадает с «Память» в Мониторинге системы",
+      "private_working_set": "Частный рабочий набор · совпадает с «Память» в Диспетчере задач",
+      "private_bytes": "Частные байты (commit)",
+      "pss": "PSS (пропорциональный размер)",
+      "rss_fallback": "Резерв RSS"
+    },
+    "attributionPartial": "частичная атрибуция",
+    "residentPrivate": "Резидентно в ОЗУ (частная)",
+    "swappedMemory": "Сжато / выгружено",
+    "peakSuffix": "пик {{value}}",
+    "categoryBrowser": "Процесс браузера WebView"
   },
   "dependencies": {
     "systemDependencies": "Системные Dependencies",

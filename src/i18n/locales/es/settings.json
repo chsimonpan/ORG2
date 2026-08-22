@@ -969,7 +969,19 @@
     "excludedFromAppMemory": "excluded from App memory",
     "noToolProcesses": "No terminal, CLI, MCP, or tool processes detected",
     "categoryAgentCli": "CLI agent",
-    "categoryMcpOrTool": "MCP / tool process"
+    "categoryMcpOrTool": "MCP / tool process",
+    "metricKinds": {
+      "physical_footprint": "phys_footprint · coincide con «Memoria» del Monitor de Actividad",
+      "private_working_set": "Conjunto de trabajo privado · coincide con «Memoria» del Administrador de tareas",
+      "private_bytes": "Bytes privados (commit)",
+      "pss": "PSS (tamaño proporcional)",
+      "rss_fallback": "Respaldo RSS"
+    },
+    "attributionPartial": "atribución parcial",
+    "residentPrivate": "Residente en RAM (privada)",
+    "swappedMemory": "Comprimida / intercambiada",
+    "peakSuffix": "pico {{value}}",
+    "categoryBrowser": "Proceso navegador de WebView"
   },
   "storage": {
     "dataDirectory": "Directorio de datos",

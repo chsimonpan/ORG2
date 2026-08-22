@@ -969,7 +969,19 @@
     "excludedFromAppMemory": "excluded from App memory",
     "noToolProcesses": "No terminal, CLI, MCP, or tool processes detected",
     "categoryAgentCli": "CLI agent",
-    "categoryMcpOrTool": "MCP / tool process"
+    "categoryMcpOrTool": "MCP / tool process",
+    "metricKinds": {
+      "physical_footprint": "phys_footprint · アクティビティモニタの「メモリ」列と一致",
+      "private_working_set": "プライベートワーキングセット · タスクマネージャーの「メモリ」列と一致",
+      "private_bytes": "プライベートバイト（コミット）",
+      "pss": "PSS（比例セットサイズ）",
+      "rss_fallback": "RSS フォールバック"
+    },
+    "attributionPartial": "一部のみ帰属",
+    "residentPrivate": "RAM 常駐（プライベート）",
+    "swappedMemory": "圧縮 / スワップ済み",
+    "peakSuffix": "ピーク {{value}}",
+    "categoryBrowser": "WebView ブラウザプロセス"
   },
   "dependencies": {
     "systemDependencies": "システム Dependencies",
