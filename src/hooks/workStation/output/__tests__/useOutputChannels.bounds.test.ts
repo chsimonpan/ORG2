@@ -19,10 +19,7 @@ import {
   vi,
 } from "vitest";
 
-import {
-  MAX_OUTPUT_CHANNELS,
-  useOutputChannels,
-} from "@src/modules/WorkStation/CodeEditor/hooks/output/useOutputChannels";
+import { MAX_OUTPUT_CHANNELS, useOutputChannels } from "../useOutputChannels";
 
 type OutputController = ReturnType<typeof useOutputChannels>;
 
