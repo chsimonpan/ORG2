@@ -183,7 +183,6 @@ const InputAreaInteractive: React.FC<InputAreaProps> = memo(
       handleInputBlur,
       handleContentChange,
       compactHintVisible,
-      canvasHintVisible,
       handleAtMention,
       handleAtMentionClose,
       isInputEmpty,
@@ -535,11 +534,7 @@ const InputAreaInteractive: React.FC<InputAreaProps> = memo(
                 inlineLeadingContent={isContextual ? topRowPills : undefined}
                 placeholder={placeholder}
                 trailingHint={
-                  compactHintVisible
-                    ? t("input.compactArgHint")
-                    : canvasHintVisible
-                      ? t("input.canvasArgHint", "what to build")
-                      : undefined
+                  compactHintVisible ? t("input.compactArgHint") : undefined
                 }
                 currentInputEmpty={currentInputEmpty}
                 stopSuppressedForEmptyInput={stopSuppressedForEmptyInput}
