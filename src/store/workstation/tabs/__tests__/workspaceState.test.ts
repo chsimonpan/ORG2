@@ -48,7 +48,6 @@ const EXPECTED_OWNERSHIP: Record<WorkStationTabType, WorkstationTabOwnership> =
     "lint-scan": "workspace-local",
     "ai-impact": "workspace-local",
     "search-sessions": "workspace-local",
-    benchmark: "shared-resource",
     "url-preview": "workspace-local",
     "browser-session": "shared-resource",
     devtools: "shared-resource",
@@ -122,7 +121,7 @@ describe("WorkStation tab ownership policy", () => {
       })
     );
 
-    expect(results).toHaveLength(42);
+    expect(results).toHaveLength(41);
     expect(results.every(({ actual, expected }) => actual === expected)).toBe(
       true
     );
