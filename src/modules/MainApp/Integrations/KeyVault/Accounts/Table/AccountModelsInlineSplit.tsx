@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import AnyIcon from "@src/components/AnyIcon";
@@ -23,6 +23,7 @@ import {
 } from "@src/modules/MainApp/Integrations/KeyVault/shared/InlineSplitRows";
 import ModelVariantInlineCard from "@src/modules/MainApp/Integrations/KeyVault/shared/ModelTable/ModelVariantInlineCard";
 import type { ModelTableVariantInfo } from "@src/types/modelTable";
+import { filterAccountModelGroups } from "@src/util/accountModelSearch";
 import {
   MODEL_GROUP_SORT_MODE,
   type ModelGroup,
@@ -64,6 +65,9 @@ const AccountModelsInlineSplit: React.FC<AccountModelsInlineSplitProps> = ({
     MODEL_GROUP_SORT_MODE.ENABLED_FIRST
   );
 
+  const [query, setQuery] = useState("");
+  useEffect(() => setQuery(""), [account.id]);
+
   const availableModels = useMemo(() => accountModelIds(account), [account]);
 
   const groups = useMemo(() => groupModels(availableModels), [availableModels]);
@@ -78,6 +82,16 @@ const AccountModelsInlineSplit: React.FC<AccountModelsInlineSplitProps> = ({
       onUpdateEnabledModels(nextEnabledModels);
     },
     [onUpdateEnabledModels]
+  );
+
+  const visibleGroups = useMemo(
+    () =>
+      filterAccountModelGroups(
+        sortedGroups,
+        query,
+        [account.name, account.modelType].join(" ")
+      ),
+    [sortedGroups, query, account.name, account.modelType]
   );
 
   const defaultVariantByBaseModel = useMemo(() => {
@@ -295,7 +309,27 @@ const AccountModelsInlineSplit: React.FC<AccountModelsInlineSplitProps> = ({
     // The account detail panel is the container here; a card would nest.
     <InlineCardScrollList wrapInCard={false}>
       {groups.length > 0 ? renderAllModelsRow() : null}
-      {sortedGroups.map((group) => renderGroupRow(group))}
+      <div className="flex flex-col gap-1 px-1">
+        <input
+          type="search"
+          aria-label="Search account models"
+          placeholder="Search model ID, name or provider"
+          value={query}
+          onChange={(event) => setQuery(event.currentTarget.value)}
+          className="w-full rounded border border-border-1 bg-bg-1 px-2 py-1 text-sm text-text-1"
+        />
+        <span role="status" className="text-xs text-text-3">
+          {visibleGroups.reduce(
+            (count, group) => count + group.models.length,
+            0
+          )}{" "}
+          / {availableModels.length} models
+        </span>
+      </div>
+      {visibleGroups.map((group) => renderGroupRow(group))}
+      {query.trim() && visibleGroups.length === 0 ? (
+        <span role="status">No matching models</span>
+      ) : null}
       {groups.length === 0 ? (
         <span className="px-1 text-xs text-text-3">
           {t("keyVault.info.noModelsConfigured")}
