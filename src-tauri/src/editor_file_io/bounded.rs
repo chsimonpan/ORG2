@@ -85,7 +85,12 @@ pub fn write_bounded(path: &Path, content: &str, create: bool, expected: Option<
             return Err("refusing empty overwrite without loaded-content proof".into());
         }
     }
-    let parent = path.parent().ok_or("missing parent")?;
+    // User requires every staging object beneath the dedicated private root.
+    // Absence / cross-filesystem staging must fail, never switch to /tmp or
+    // an arbitrary target parent. Environment setup defines this explicitly.
+    let stage_root = std::env::var_os("ORG2_EDITOR_STAGE_DIR").ok_or("editor staging directory not configured")?;
+    let parent = PathBuf::from(stage_root);
+    if !parent.is_absolute() || !parent.is_dir() { return Err("invalid editor staging directory".into()); }
     let name = path.file_name().ok_or("missing filename")?.to_string_lossy();
     let tmp_path = parent.join(format!(".{name}.org2-save-{}-{}", std::process::id(), SAVE_ID.fetch_add(1, Ordering::Relaxed)));
     let mut opts = OpenOptions::new(); opts.write(true).create_new(true);
