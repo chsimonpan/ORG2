@@ -11,6 +11,12 @@ import {
 
 import { createLogger } from "@src/hooks/logger";
 import type { EditOperation } from "@src/types/editor/document";
+import {
+  EditorFileBlockedError,
+  LARGE_FILE_LIMIT_BYTES,
+  assertEditorFileReadable,
+  utf8ByteLength,
+} from "@src/util/file/editorFilePolicy";
 
 import {
   MAX_LOADED_FILES_SIZE,
@@ -286,6 +292,13 @@ export async function popUnsavedContent(
   if (!cached) {
     return null;
   }
+  if (
+    cached.content !== null &&
+    utf8ByteLength(cached.content) > LARGE_FILE_LIMIT_BYTES
+  )
+    throw new EditorFileBlockedError(filePath, utf8ByteLength(cached.content));
+  if (cached.content === null && cached.draftPath !== null)
+    await assertEditorFileReadable(cached.draftPath);
   unsavedContentCache.delete(filePath);
   if (cached.content !== null) {
     // A write may still be in flight; `spillDraftToDisk` notices the entry is

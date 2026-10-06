@@ -26,6 +26,7 @@ import {
   presentedWorkstationWorkspaceKeyAtom,
 } from "@src/store/workstation/tabs";
 import { getInstrumentedStore } from "@src/util/core/state/instrumentedStore";
+import { guardEditorFileOpen } from "@src/util/file/editorFilePolicy";
 import { revealMyStation } from "@src/util/ui/revealMyStation";
 
 export interface OpenFileInWorkStationOptions {
@@ -46,13 +47,15 @@ export function openFileInWorkStation(
   const trimmed = path.trim();
   if (trimmed.length === 0) return;
 
-  const store = getInstrumentedStore();
-  revealMyStation({ path: ROUTES.workStation.code.path });
+  void guardEditorFileOpen(trimmed, () => {
+    const store = getInstrumentedStore();
+    revealMyStation({ path: ROUTES.workStation.code.path });
 
-  const tab = createFileTab(trimmed, {
-    targetLine: options?.line,
-    defaultPreviewMode: options?.defaultPreviewMode,
+    const tab = createFileTab(trimmed, {
+      targetLine: options?.line,
+      defaultPreviewMode: options?.defaultPreviewMode,
+    });
+    const workspace = store.get(presentedWorkstationWorkspaceKeyAtom);
+    store.set(openWorkstationTabAtom, { workspace, tab });
   });
-  const workspace = store.get(presentedWorkstationWorkspaceKeyAtom);
-  store.set(openWorkstationTabAtom, { workspace, tab });
 }

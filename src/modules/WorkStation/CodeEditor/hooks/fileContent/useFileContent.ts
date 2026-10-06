@@ -12,6 +12,10 @@ import {
   isBinaryByExtension,
   isBinaryContent,
 } from "@src/util/file/binaryDetection";
+import {
+  EditorFileBlockedError,
+  assertEditorFileReadable,
+} from "@src/util/file/editorFilePolicy";
 import { toFsPluginPath } from "@src/util/file/pathUtils";
 
 import {
@@ -203,6 +207,9 @@ export function useFileContent(
 
       // Read file content from disk
       // Note: OS file cache makes repeated reads fast (~1-5ms for recently accessed files)
+      await assertEditorFileReadable(filePath);
+      if (!mounted.current || activeIdentity.current !== documentIdentity)
+        return;
       const fileContent = await readTextFile(toFsPluginPath(filePath));
 
       // Check for stale response
@@ -331,7 +338,11 @@ export function useFileContent(
         err instanceof Error ? err.message : String(err)
       );
 
-      setError(typedError);
+      setError(
+        err instanceof EditorFileBlockedError
+          ? { type: "too_large", size: err.size, message: err.message }
+          : { ...typedError, message: `${filePath}: ${typedError.message}` }
+      );
       setContent("");
       setOriginalContent("");
       setIsBinary(false);
@@ -405,6 +416,7 @@ export function useFileContent(
   // Update content with source attribution (for editing)
   const updateContent = useCallback(
     (newContent: string, source: EditSource) => {
+      if (error || isBinary || !hasLoadedCurrentFile) return;
       const nextVersion = versionRef.current + 1;
 
       // Record only the changed span: the log is for attribution, and the
@@ -424,7 +436,7 @@ export function useFileContent(
       );
       setHasUnsavedChanges(newContent !== originalContentRef.current);
     },
-    [setContent, setVersion]
+    [setContent, setVersion, error, isBinary, hasLoadedCurrentFile]
   );
 
   // Mark as saved

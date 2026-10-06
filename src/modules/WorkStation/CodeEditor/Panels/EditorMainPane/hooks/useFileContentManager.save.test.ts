@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { ask } from "@tauri-apps/plugin-dialog";
+import { stat } from "@tauri-apps/plugin-fs";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
 import React, { act, useLayoutEffect } from "react";
 import { type Root, createRoot } from "react-dom/client";
@@ -15,6 +16,7 @@ import { useFileContentManager } from "./useFileContentManager";
 const disk = vi.hoisted(() => new Map<string, string>());
 vi.mock("@tauri-apps/plugin-dialog", () => ({ ask: vi.fn(async () => false) }));
 vi.mock("@tauri-apps/plugin-fs", () => ({
+  stat: vi.fn(async () => ({ isFile: true, size: 8 })),
   readTextFile: vi.fn(async (path: string) => disk.get(path) ?? `${path}-disk`),
   writeTextFile: vi.fn(),
 }));
@@ -201,4 +203,19 @@ it("preserves external disk changes when overwrite is declined", async () => {
   expect(writeTextFile).not.toHaveBeenCalled();
   expect(controller.hasUnsavedChanges).toBe(true);
   expect(controller.saving).toBe(false);
+});
+
+it("R7-U05 save preserves dirty draft when disk grows, zero writes", async () => {
+  await render();
+  act(() => controller.handleContentChange("precious draft"));
+  vi.mocked(stat).mockResolvedValue({
+    isFile: true,
+    size: 564 * 1024 * 1024,
+  } as never);
+  await act(async () => {
+    await controller.handleSave();
+  });
+  expect(writeTextFile).not.toHaveBeenCalled();
+  expect(controller.content).toBe("precious draft");
+  expect(controller.hasUnsavedChanges).toBe(true);
 });

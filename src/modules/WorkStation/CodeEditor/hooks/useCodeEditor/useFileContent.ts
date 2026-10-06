@@ -6,7 +6,7 @@
  */
 import { readTextFile } from "@tauri-apps/plugin-fs";
 import { useAtom, useAtomValue, useStore } from "jotai";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 
 import { createLogger } from "@src/hooks/logger";
 import { writeTextFileSerial } from "@src/services/file/writeTextFileSerial";
@@ -26,6 +26,10 @@ import {
   isBinaryByExtension,
   isBinaryContent,
 } from "@src/util/file/binaryDetection";
+import {
+  assertEditorFileReadable,
+  assertEditorFileWritable,
+} from "@src/util/file/editorFilePolicy";
 import { toFsPluginPath } from "@src/util/file/pathUtils";
 
 const log = createLogger("useCodeEditor");
@@ -65,6 +69,8 @@ export function useFileContent(): UseFileContentReturn {
   const [saveError, setSaveError] = useAtom(fileSaveErrorAtom);
   const hasUnsavedChanges = useAtomValue(fileHasUnsavedChangesAtom);
 
+  const loadGeneration = useRef(0);
+
   // ============================================
   // Load file content from disk
   // ============================================
@@ -72,6 +78,7 @@ export function useFileContent(): UseFileContentReturn {
   const loadFileContent = useCallback(
     async (filePath: string) => {
       if (!filePath) return;
+      const generation = ++loadGeneration.current;
 
       setLoadingContent(true);
       setContentError(null);
@@ -87,8 +94,11 @@ export function useFileContent(): UseFileContentReturn {
           return;
         }
 
+        await assertEditorFileReadable(filePath);
+        if (generation !== loadGeneration.current) return;
         const content = await readTextFile(toFsPluginPath(filePath));
 
+        if (generation !== loadGeneration.current) return;
         // Check if content is binary
         if (isBinaryContent(content)) {
           setIsBinary(true);
@@ -102,6 +112,7 @@ export function useFileContent(): UseFileContentReturn {
         setSavedContent(content);
         setIsBinary(false);
       } catch (err) {
+        if (generation !== loadGeneration.current) return;
         const errorMessage =
           err instanceof Error ? err.message : "Failed to load file content";
         setContentError(errorMessage);
@@ -110,7 +121,7 @@ export function useFileContent(): UseFileContentReturn {
         setSavedContent("");
         setIsBinary(false);
       } finally {
-        setLoadingContent(false);
+        if (generation === loadGeneration.current) setLoadingContent(false);
       }
     },
     [
@@ -134,6 +145,9 @@ export function useFileContent(): UseFileContentReturn {
       setSaveError(null);
 
       try {
+        if (contentError || isBinary)
+          throw new Error(`Read-only or unavailable file: ${filePath}`);
+        await assertEditorFileWritable(filePath, content);
         await writeTextFileSerial(filePath, content);
         if (store.get(fileSelectedPathAtom) === filePath)
           setSavedContent(content);
@@ -156,7 +170,7 @@ export function useFileContent(): UseFileContentReturn {
         setSaving(false);
       }
     },
-    [setSaving, setSaveError, setSavedContent, store]
+    [setSaving, setSaveError, setSavedContent, store, contentError, isBinary]
   );
 
   // ============================================

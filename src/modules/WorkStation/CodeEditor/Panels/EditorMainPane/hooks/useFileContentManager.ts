@@ -33,6 +33,10 @@ import {
   writeTextFileSerial,
 } from "@src/services/file/writeTextFileSerial";
 import { registerBranchSwitchEditor } from "@src/services/git/operations/branchSwitchEditors";
+import {
+  assertEditorFileReadable,
+  assertEditorFileWritable,
+} from "@src/util/file/editorFilePolicy";
 
 import type { UseFileContentManagerOptions } from "../types";
 
@@ -122,13 +126,19 @@ export function useFileContentManager(
         const content = state.content;
         if (
           activeFilePathRef.current !== activeFilePath ||
-          (await readTextFile(activeFilePath)) !== state.originalContent
+          (await assertEditorFileReadable(activeFilePath).then(() =>
+            readTextFile(activeFilePath)
+          )) !== state.originalContent
         )
           throw new Error(
             "The file changed on disk; review it before switching"
           );
         await updateTextFileSerial(activeFilePath, async (target) => {
-          if ((await readTextFile(target)) !== state.originalContent)
+          if (
+            (await assertEditorFileReadable(target).then(() =>
+              readTextFile(target)
+            )) !== state.originalContent
+          )
             throw new Error(
               "The file changed on disk; review it before switching"
             );
@@ -137,7 +147,9 @@ export function useFileContentManager(
         if (
           activeFilePathRef.current !== activeFilePath ||
           fileContentStateRef.current.content !== content ||
-          (await readTextFile(activeFilePath)) !== content
+          (await assertEditorFileReadable(activeFilePath).then(() =>
+            readTextFile(activeFilePath)
+          )) !== content
         )
           throw new Error("The file changed while saving");
         flushSync(() => state.markSaved());
@@ -155,7 +167,14 @@ export function useFileContentManager(
     const filePath = activeFilePathRef.current;
     const contentState = fileContentStateRef.current;
 
-    if (!filePath || !contentState.hasUnsavedChanges) return;
+    if (
+      !filePath ||
+      !contentState.hasUnsavedChanges ||
+      contentState.error ||
+      contentState.isBinary ||
+      !contentState.contentReady
+    )
+      return;
 
     pendingSaves.current.set(
       filePath,
@@ -170,6 +189,7 @@ export function useFileContentManager(
         ))
       )
         return;
+      await assertEditorFileWritable(filePath, contentState.content);
       await writeTextFileSerial(filePath, contentState.content);
       contentState.markSaved();
 

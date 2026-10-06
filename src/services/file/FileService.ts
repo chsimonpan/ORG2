@@ -39,6 +39,7 @@ import {
   isBinaryByExtension,
   isBinaryContent,
 } from "@src/util/file/binaryDetection";
+import { assertEditorFileReadable } from "@src/util/file/editorFilePolicy";
 import { createGitignoreChecker } from "@src/util/file/gitignoreParser";
 
 const log = createLogger("FileService");
@@ -188,6 +189,7 @@ export const FileService = {
         return;
       }
 
+      await assertEditorFileReadable(path);
       const content = await readTextFile(path);
 
       // Check content for binary
@@ -434,7 +436,7 @@ export const FileService = {
         }
       }
 
-      await writeTextFileSerial(path, content);
+      await writeTextFileSerial(path, content, { create: true });
       // Refresh tree to show new file
       await this.refresh();
 

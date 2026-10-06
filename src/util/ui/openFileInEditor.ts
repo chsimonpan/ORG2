@@ -1,3 +1,5 @@
+import { guardEditorFileOpen } from "@src/util/file/editorFilePolicy";
+
 /**
  * openFileInEditor — single entry point for "jump to source" from chat blocks.
  *
@@ -25,13 +27,17 @@ export function openFileInEditor(
   const trimmed = path.trim();
   if (trimmed.length === 0) return;
 
-  document.dispatchEvent(
-    new CustomEvent<OpenFileInEditorDetail>("open-file-in-editor", {
-      detail: {
-        path: trimmed,
-        isDirectory: options?.isDirectory ?? false,
-        line: options?.line,
-      },
-    })
-  );
+  const dispatch = () => {
+    document.dispatchEvent(
+      new CustomEvent<OpenFileInEditorDetail>("open-file-in-editor", {
+        detail: {
+          path: trimmed,
+          isDirectory: options?.isDirectory ?? false,
+          line: options?.line,
+        },
+      })
+    );
+  };
+  if (options?.isDirectory) dispatch();
+  else void guardEditorFileOpen(trimmed, dispatch);
 }

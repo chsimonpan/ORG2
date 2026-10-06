@@ -29,6 +29,7 @@ import { activeStatusBarStateAtom } from "@src/store/ui/workStationLayout/status
 import { fileClipboardAtom } from "@src/store/workstation/codeEditor/file/clipboardAtom";
 import { createFileTab } from "@src/store/workstation/tabs";
 import { getInstrumentedStore } from "@src/util/core/state/instrumentedStore";
+import { assertEditorFileReadable } from "@src/util/file/editorFilePolicy";
 
 import { FileService } from "./FileService";
 
@@ -64,6 +65,7 @@ export const FileOperationsService = {
   async open(path: string): Promise<FileOperationResult> {
     try {
       // First, load the file content via FileService
+      await assertEditorFileReadable(path);
       await FileService.open(path);
 
       // Create a tab using the same helper as file tree clicks
@@ -93,6 +95,7 @@ export const FileOperationsService = {
       const originCursor = origin ? currentCursor() : null;
 
       // First, load the file content via FileService
+      await assertEditorFileReadable(path);
       await FileService.open(path);
 
       // Create a tab with targetLine for navigation

@@ -3,6 +3,7 @@ import { type Setter, atom } from "jotai";
 import { createLogger } from "@src/hooks/logger";
 import { closeAllTerminalSessionsAtom } from "@src/store/workstation/codeEditor/terminal";
 import { clearTerminalTargetForWorkspaceAtom } from "@src/store/workstation/codeEditor/terminalTargetAtom";
+import { guardEditorFileOpen } from "@src/util/file/editorFilePolicy";
 
 import {
   isSameWorkstationWorkspace,
@@ -10,6 +11,10 @@ import {
   recordWorkstationTabTransitionAtom,
   removeRecentWorkstationTabAtom,
 } from "./recentTabs";
+import {
+  hydrateSafeFileTabs,
+  withoutUnverifiedFileTabs,
+} from "./safeHydration";
 import {
   deletePersistedWorkstationWorkspace,
   loadWorkstationTabsState,
@@ -59,9 +64,26 @@ export const recentWorkstationTabsAtom = atom((get) => {
 recentWorkstationTabsAtom.debugLabel = "recentWorkstationTabsAtom";
 
 /** Canonical persisted state. Feature code writes through scoped actions below. */
-export const workstationTabsStateAtom = atom<WorkstationTabsStateV4>(
-  loadWorkstationTabsState()
-);
+const persistedTabsForHydration = loadWorkstationTabsState();
+const initialSafeTabs = withoutUnverifiedFileTabs(persistedTabsForHydration);
+export const workstationTabsStateAtom =
+  atom<WorkstationTabsStateV4>(initialSafeTabs);
+let hydrationCommitted = false;
+workstationTabsStateAtom.onMount = (setState) => {
+  if (hydrationCommitted) return;
+  let mounted = true;
+  void hydrateSafeFileTabs(persistedTabsForHydration).then((verified) => {
+    if (!mounted) return;
+    setState((current) => {
+      hydrationCommitted = true;
+      // A newer user/session action wins; stale startup restoration cannot overwrite it.
+      return current === initialSafeTabs ? verified : current;
+    });
+  });
+  return () => {
+    mounted = false;
+  };
+};
 workstationTabsStateAtom.debugLabel = "workstationTabsStateAtom";
 
 function workspaceFor(
@@ -324,11 +346,20 @@ function updateScopedPanel(
 export const openWorkstationTabAtom = atom(
   null,
   (get, set, request: ScopedWorkstationTabRequest) => {
-    const state = get(workstationTabsStateAtom);
-    const previousPanel = composePanel(state, request.workspace);
-    const nextPanel = openTabMutation(previousPanel, request.tab);
-    recordPanelTransition(set, request.workspace, previousPanel, nextPanel);
-    setAndPersist(set, splitPanel(state, request.workspace, nextPanel));
+    const open = () => {
+      const state = get(workstationTabsStateAtom);
+      const previousPanel = composePanel(state, request.workspace);
+      const nextPanel = openTabMutation(previousPanel, request.tab);
+      recordPanelTransition(set, request.workspace, previousPanel, nextPanel);
+      setAndPersist(set, splitPanel(state, request.workspace, nextPanel));
+    };
+    if (request.tab.type !== "file") {
+      open();
+      return;
+    }
+    const path = request.tab.data?.filePath;
+    if (typeof path !== "string") return;
+    return guardEditorFileOpen(path, open);
   }
 );
 openWorkstationTabAtom.debugLabel = "openWorkstationTabAtom";

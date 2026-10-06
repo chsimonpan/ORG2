@@ -1,5 +1,6 @@
+import { stat } from "@tauri-apps/plugin-fs";
 import { createStore } from "jotai/vanilla";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { workstationActiveSessionIdAtom } from "@src/store/session/viewAtom";
 import {
@@ -179,7 +180,7 @@ describe("workspace projection and isolation", () => {
     ).toEqual({ owner: "B" });
   });
 
-  it("stores one shared resource copy while each workspace remembers its own selection", () => {
+  it("stores one shared resource copy while each workspace remembers its own selection", async () => {
     const store = createStore();
     store.set(workstationTabsStateAtom, stateWithWorkspaces());
     const settings = tab("project-settings:main", "project-settings");
@@ -188,9 +189,9 @@ describe("workspace projection and isolation", () => {
       workspace: sessionWorkstationWorkspaceKey("A"),
       tab: settings,
     });
-    store.set(openWorkstationTabAtom, {
+    await store.set(openWorkstationTabAtom, {
       workspace: sessionWorkstationWorkspaceKey("B"),
-      tab: tab("file:/b-active.ts"),
+      tab: { ...tab("file:/b-active.ts"), data: { filePath: "/b-active.ts" } },
     });
 
     const state = store.get(workstationTabsStateAtom);
@@ -325,4 +326,23 @@ describe("legacy seed claim", () => {
       store.get(workstationTabsStateAtom).sessionWorkspaces.A.tabs
     ).toEqual([tab("file:/existing.ts")]);
   });
+});
+
+vi.mock("@tauri-apps/plugin-fs", () => ({
+  stat: vi.fn(async () => ({ isFile: true, size: 8 })),
+}));
+
+it("R7-U06 direct file tab atom refuses oversized metadata before activation", async () => {
+  const store = createStore();
+  store.set(workstationTabsStateAtom, stateWithWorkspaces());
+  const before = store.get(workstationTabsStateAtom);
+  vi.mocked(stat).mockResolvedValueOnce({
+    isFile: true,
+    size: 564 * 1024 * 1024,
+  } as never);
+  await store.set(openWorkstationTabAtom, {
+    workspace: sessionWorkstationWorkspaceKey("B"),
+    tab: { ...tab("file:/large"), data: { filePath: "/fixture/large" } },
+  });
+  expect(store.get(workstationTabsStateAtom)).toBe(before);
 });

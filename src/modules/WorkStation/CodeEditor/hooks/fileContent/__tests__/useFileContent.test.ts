@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { readTextFile } from "@tauri-apps/plugin-fs";
+import { readTextFile, stat } from "@tauri-apps/plugin-fs";
 import React, { act, useEffect } from "react";
 import { type Root, createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import { type UseFileContentReturn, useFileContent } from "../useFileContent";
 
 vi.mock("@tauri-apps/plugin-fs", () => ({
   readTextFile: vi.fn(async () => "text content"),
+  stat: vi.fn(async () => ({ isFile: true, size: 12 })),
 }));
 
 vi.mock("../mtime", () => ({
@@ -47,6 +48,23 @@ describe("useFileContent binary tab lifecycle", () => {
     act(() => root.unmount());
     clearFileCache();
     Reflect.deleteProperty(actEnvironment, "IS_REACT_ACT_ENVIRONMENT");
+  });
+
+  it("R7-U04 blocks 564MB metadata without read or editable content", async () => {
+    vi.mocked(stat).mockResolvedValueOnce({
+      isFile: true,
+      size: 564 * 1024 * 1024,
+    } as never);
+    await selectFile("/fixture/large.txt");
+    expect(readTextFile).not.toHaveBeenCalled();
+    expect(state.error?.type).toBe("too_large");
+    expect(state.error?.message).toContain("/fixture/large.txt");
+    expect(state.content).toBe("");
+    await act(async () =>
+      state.updateContent("must not become editable", { type: "human" })
+    );
+    expect(state.content).toBe("");
+    expect(state.hasUnsavedChanges).toBe(false);
   });
 
   it.each(["numbers", "pages", "zip"])(

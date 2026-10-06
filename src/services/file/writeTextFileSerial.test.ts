@@ -1,9 +1,12 @@
-import { writeTextFile } from "@tauri-apps/plugin-fs";
+import { stat, writeTextFile } from "@tauri-apps/plugin-fs";
 import { expect, it, vi } from "vitest";
 
 import { writeTextFileSerial } from "./writeTextFileSerial";
 
-vi.mock("@tauri-apps/plugin-fs", () => ({ writeTextFile: vi.fn() }));
+vi.mock("@tauri-apps/plugin-fs", () => ({
+  writeTextFile: vi.fn(),
+  stat: vi.fn(async () => ({ isFile: true, size: 8 })),
+}));
 it("serializes two owners of the same file, permits other files and releases failed queues", async () => {
   const releases: (() => void)[] = [];
   vi.mocked(writeTextFile).mockImplementation(
@@ -41,4 +44,16 @@ it("bounds queued operations including repeated writes to one target", async () 
   );
   await Promise.all(saves);
   await writeTextFileSerial("/fixture/cap", "retry");
+});
+
+it("R7-U05 an explicitly new small file is allowed but normal save cannot recreate a deleted target", async () => {
+  vi.mocked(stat).mockRejectedValue(new Error("ENOENT"));
+  vi.mocked(writeTextFile).mockResolvedValue();
+  await expect(
+    writeTextFileSerial("/fixture/new", "small", { create: true })
+  ).resolves.toBeUndefined();
+  await expect(
+    writeTextFileSerial("/fixture/deleted", "draft")
+  ).rejects.toThrow("ENOENT");
+  vi.mocked(stat).mockResolvedValue({ isFile: true, size: 8 } as never);
 });

@@ -1,5 +1,5 @@
 import { createStore } from "jotai/vanilla";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   getSettingsDefaults,
@@ -69,16 +69,21 @@ function open(
   type: "file" | "terminal" = "file",
   data: Record<string, unknown> = {}
 ) {
-  store.set(openWorkstationTabAtom, {
+  return store.set(openWorkstationTabAtom, {
     workspace: store.get(presentedWorkstationWorkspaceKeyAtom),
-    tab: { id, type, title: id, data },
+    tab: {
+      id,
+      type,
+      title: id,
+      data: type === "file" ? { filePath: `/fixture/${id}`, ...data } : data,
+    },
   });
 }
 
 beforeEach(() => localStorage.clear());
 
 describe("Workstation sharing policy", () => {
-  it("defaults to directory sharing and validates the two policy values", () => {
+  it("defaults to directory sharing and validates the two policy values", async () => {
     expect(getSettingsDefaults()["general.myStationSharing"]).toBe(
       "working-directory"
     );
@@ -89,10 +94,10 @@ describe("Workstation sharing policy", () => {
     ).toBe("chat-tab");
   });
 
-  it("shares tabs, active selection, tab data, recent tabs, terminal selection and editor cache", () => {
+  it("shares tabs, active selection, tab data, recent tabs, terminal selection and editor cache", async () => {
     const store = setup();
-    open(store, "one", "file", { viewMode: "split" });
-    open(store, "two");
+    await open(store, "one", "file", { viewMode: "split" });
+    await open(store, "two");
     const workspace = store.get(presentedWorkstationWorkspaceKeyAtom);
     store.set(focusWorkstationTabAtom, { workspace, tabId: "one" });
     store.set(codeEditorTerminalTargetAtom, {
@@ -130,9 +135,9 @@ describe("Workstation sharing policy", () => {
     ]);
   });
 
-  it("isolates different working directories including worktrees", () => {
+  it("isolates different working directories including worktrees", async () => {
     const store = setup();
-    open(store, "one");
+    await open(store, "one");
     store.set(codeEditorTerminalTargetAtom, {
       kind: "pty",
       ptySessionId: "pty-A",
@@ -141,25 +146,25 @@ describe("Workstation sharing policy", () => {
     expect(store.get(mainPaneStateAtom).tabs).toEqual([]);
     expect(store.get(codeEditorTerminalTargetAtom)).toBeNull();
     expect(store.get(editorCacheAtom)).toEqual({});
-    open(store, "other");
+    await open(store, "other");
     store.set(workstationActiveSessionIdAtom, "A");
     expect(store.get(mainPaneStateAtom).tabs.map((tab) => tab.id)).toEqual([
       "one",
     ]);
   });
 
-  it("switches policies without overwriting either saved workspace", () => {
+  it("switches policies without overwriting either saved workspace", async () => {
     const store = setup();
-    open(store, "shared");
+    await open(store, "shared");
     store.set(settingsAtom, {
       ...store.get(settingsAtom),
       "general.myStationSharing": "chat-tab",
     });
     expect(store.get(mainPaneStateAtom).tabs).toEqual([]);
-    open(store, "only-A");
+    await open(store, "only-A");
     store.set(workstationActiveSessionIdAtom, "B");
     expect(store.get(mainPaneStateAtom).tabs).toEqual([]);
-    open(store, "only-B");
+    await open(store, "only-B");
     store.set(settingsAtom, {
       ...store.get(settingsAtom),
       "general.myStationSharing": "working-directory",
@@ -176,14 +181,14 @@ describe("Workstation sharing policy", () => {
     ]);
   });
 
-  it("round-trips directory state without losing the per-tab partition", () => {
+  it("round-trips directory state without losing the per-tab partition", async () => {
     const store = setup();
-    open(store, "shared");
+    await open(store, "shared");
     store.set(settingsAtom, {
       ...store.get(settingsAtom),
       "general.myStationSharing": "chat-tab",
     });
-    open(store, "session-only");
+    await open(store, "session-only");
     const loaded = loadWorkstationTabsState();
     expect(loaded.directoryWorkspaces?.["/repo"].tabs[0].id).toBe("shared");
     expect(loaded.sessionWorkspaces.A.tabs[0].id).toBe("session-only");
@@ -195,26 +200,26 @@ describe("Workstation sharing policy", () => {
     expect(store.get(mainPaneStateAtom).tabs[0].id).toBe("shared");
   });
 
-  it("preserves a shared directory when one of its chat sessions is deleted", () => {
+  it("preserves a shared directory when one of its chat sessions is deleted", async () => {
     const store = setup();
-    open(store, "shared");
+    await open(store, "shared");
     store.set(disposeWorkstationWorkspaceAtom, "A");
     store.set(workstationActiveSessionIdAtom, "B");
     expect(store.get(mainPaneStateAtom).tabs[0].id).toBe("shared");
   });
 
-  it("removes closed live resource references from every directory", () => {
+  it("removes closed live resource references from every directory", async () => {
     const store = setup();
-    open(store, "pty", "terminal");
+    await open(store, "pty", "terminal");
     store.set(workstationActiveSessionIdAtom, "C");
-    open(store, "pty", "terminal");
+    await open(store, "pty", "terminal");
     store.set(removeSharedWorkstationTabAtom, "pty");
     expect(store.get(mainPaneStateAtom).tabs).toEqual([]);
     store.set(workstationActiveSessionIdAtom, "A");
     expect(store.get(mainPaneStateAtom).tabs).toEqual([]);
   });
 
-  it("keeps delayed opens attached to their captured directory", () => {
+  it("keeps delayed opens attached to their captured directory", async () => {
     const store = setup();
     const workspace = store.get(presentedWorkstationWorkspaceKeyAtom);
     queueFileOpens(workspace, [{ path: "/repo/file.ts" }]);
@@ -228,7 +233,7 @@ describe("Workstation sharing policy", () => {
     ).toEqual([{ path: "/repo/file.ts" }]);
   });
 
-  it("uses the target session's directory for background context", () => {
+  it("uses the target session's directory for background context", async () => {
     const store = setup();
     store.set(workstationActiveSessionIdAtom, "C");
     expect(resolveSessionWorkstationWorkspaceKey(store.get, "B")).toEqual({
@@ -237,7 +242,7 @@ describe("Workstation sharing policy", () => {
     });
   });
 
-  it("ignores stale view metadata and isolates sessions without a known directory", () => {
+  it("ignores stale view metadata and isolates sessions without a known directory", async () => {
     const store = setup();
     store.set(sessionViewAtom, {
       activeSessionId: "unhydrated",
@@ -253,9 +258,9 @@ describe("Workstation sharing policy", () => {
     });
   });
 
-  it("clears a deleted agent terminal without removing the shared workspace", () => {
+  it("clears a deleted agent terminal without removing the shared workspace", async () => {
     const store = setup();
-    open(store, "shared");
+    await open(store, "shared");
     store.set(codeEditorTerminalTargetAtom, { kind: "agent", sessionId: "A" });
     store.set(disposeWorkstationWorkspaceAtom, "A");
     store.set(workstationActiveSessionIdAtom, "B");
@@ -263,7 +268,7 @@ describe("Workstation sharing policy", () => {
     expect(store.get(mainPaneStateAtom).tabs[0].id).toBe("shared");
   });
 
-  it("never shares a remote guest's identically named directory with a local chat", () => {
+  it("never shares a remote guest's identically named directory with a local chat", async () => {
     const store = setup();
     const remote: Session = {
       ...session("remote", "/repo"),
@@ -277,7 +282,7 @@ describe("Workstation sharing policy", () => {
       },
     };
     store.set(sessionsAtom, (sessions) => [...sessions, remote]);
-    open(store, "local-file");
+    await open(store, "local-file");
     store.set(workstationActiveSessionIdAtom, "remote");
     expect(store.get(presentedWorkstationWorkspaceKeyAtom)).toEqual({
       kind: "session",
@@ -298,7 +303,7 @@ describe("Workstation sharing policy", () => {
     }
   );
 
-  it("does not invalidate workspace subscribers for session status changes", () => {
+  it("does not invalidate workspace subscribers for session status changes", async () => {
     const store = setup();
     let notifications = 0;
     const unsubscribe = store.sub(
@@ -327,3 +332,7 @@ describe("Workstation sharing policy", () => {
     expect(normalizeWorkstationDirectory(path)).toBe(expected);
   });
 });
+
+vi.mock("@tauri-apps/plugin-fs", () => ({
+  stat: vi.fn(async () => ({ isFile: true, size: 8 })),
+}));
