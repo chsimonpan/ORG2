@@ -125,7 +125,7 @@ mod tests {
     impl Fixture { fn new() -> Self {
         let root = std::env::var("ORG2_TEST_TMP").expect("controlled fixture path required");
         let p = PathBuf::from(root).join(format!("bounded-{}-{}", std::process::id(), SAVE_ID.fetch_add(1, Ordering::Relaxed)));
-        fs::create_dir_all(&p).unwrap(); Self(p)
+        fs::create_dir_all(&p).unwrap(); std::env::set_var("ORG2_EDITOR_STAGE_DIR", &p); Self(p)
     } fn path(&self) -> PathBuf { self.0.join("file.txt") } }
     impl Drop for Fixture { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
     #[test] fn boundaries_and_utf8() {
