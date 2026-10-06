@@ -16,7 +16,7 @@
  * load, and re-stamped on every successful save. Comparing against it answers
  * exactly "did anything change since the buffer last agreed with disk".
  */
-import { readTextFile } from "@tauri-apps/plugin-fs";
+import { readEditorTextFile } from "@src/services/file/editorBoundedIO";
 import i18next from "i18next";
 
 import { createLogger } from "@src/hooks/logger";
@@ -27,23 +27,21 @@ const log = createLogger("fileContent/diskGuard");
 /**
  * Whether the bytes on disk still match `baseline`.
  *
- * A failed read resolves `true`: the file being unreadable (deleted by a
- * checkout, a transient permission blip) must not block the user from
- * persisting the buffer they are looking at. Refusing the save would risk the
- * edits it is meant to protect.
+ * A failed bounded read rejects: keep the dirty buffer, never interpret an
+ * unreadable or oversized file as permission to overwrite it.
  */
 export async function isFileUnchangedOnDisk(
   filePath: string,
   baseline: string
 ): Promise<boolean> {
   try {
-    return (await readTextFile(toFsPluginPath(filePath))) === baseline;
+    return (await readEditorTextFile(toFsPluginPath(filePath))) === baseline;
   } catch (error) {
     log.warn(
-      "[diskGuard] Could not read file to compare before save; continuing",
+      "[diskGuard] Could not read file to compare before save; preserving dirty buffer",
       error
     );
-    return true;
+    throw error;
   }
 }
 

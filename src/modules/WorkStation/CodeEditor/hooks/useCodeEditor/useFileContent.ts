@@ -4,11 +4,11 @@
  * Handles loading, saving, updating, and discarding file content.
  * Manages binary file detection and unsaved changes tracking.
  */
-import { readTextFile } from "@tauri-apps/plugin-fs";
 import { useAtom, useAtomValue, useStore } from "jotai";
 import { useCallback, useRef } from "react";
 
 import { createLogger } from "@src/hooks/logger";
+import { readEditorTextFile } from "@src/services/file/editorBoundedIO";
 import { writeTextFileSerial } from "@src/services/file/writeTextFileSerial";
 import {
   fileContentAtom,
@@ -96,7 +96,7 @@ export function useFileContent(): UseFileContentReturn {
 
         await assertEditorFileReadable(filePath);
         if (generation !== loadGeneration.current) return;
-        const content = await readTextFile(toFsPluginPath(filePath));
+        const content = await readEditorTextFile(toFsPluginPath(filePath));
 
         if (generation !== loadGeneration.current) return;
         // Check if content is binary
@@ -148,7 +148,9 @@ export function useFileContent(): UseFileContentReturn {
         if (contentError || isBinary)
           throw new Error(`Read-only or unavailable file: ${filePath}`);
         await assertEditorFileWritable(filePath, content);
-        await writeTextFileSerial(filePath, content);
+        await writeTextFileSerial(filePath, content, {
+          expectedContent: store.get(fileSavedContentAtom),
+        });
         if (store.get(fileSelectedPathAtom) === filePath)
           setSavedContent(content);
 

@@ -599,6 +599,8 @@ project_management::projects::commands::linear_issue_create,
 project_management::projects::commands::linear_issue_update,
 project_management::projects::commands::linear_issue_archive,
 // File operations commands (binary detection, ignore filtering)
+editor_file_io::editor_read_bounded,
+editor_file_io::editor_write_bounded,
 file_ops::is_binary_by_extension,
 file_ops::is_binary_content,
 file_ops::is_binary_file,

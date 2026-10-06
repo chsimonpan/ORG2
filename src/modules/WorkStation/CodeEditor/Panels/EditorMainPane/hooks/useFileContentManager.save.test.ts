@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { ask } from "@tauri-apps/plugin-dialog";
 import { stat } from "@tauri-apps/plugin-fs";
-import { writeTextFile } from "@tauri-apps/plugin-fs";
 import React, { act, useLayoutEffect } from "react";
 import { type Root, createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -10,15 +9,22 @@ import {
   _resetUnsavedContentCacheForTests,
   clearFileCache,
 } from "@src/modules/WorkStation/CodeEditor/hooks/fileContent/cache";
+import { writeEditorTextFile as writeTextFile } from "@src/services/file/editorBoundedIO";
 
 import { useFileContentManager } from "./useFileContentManager";
 
 const disk = vi.hoisted(() => new Map<string, string>());
 vi.mock("@tauri-apps/plugin-dialog", () => ({ ask: vi.fn(async () => false) }));
+vi.mock("@src/services/file/editorBoundedIO", () => ({
+  readEditorTextFile: vi.fn(
+    async (path: string) => disk.get(path) ?? `${path}-disk`
+  ),
+  writeEditorTextFile: vi.fn(),
+}));
+
 vi.mock("@tauri-apps/plugin-fs", () => ({
   stat: vi.fn(async () => ({ isFile: true, size: 8 })),
   readTextFile: vi.fn(async (path: string) => disk.get(path) ?? `${path}-disk`),
-  writeTextFile: vi.fn(),
 }));
 vi.mock("@src/modules/WorkStation/CodeEditor/hooks/fileContent/mtime", () => ({
   fetchFileMtime: vi.fn(async () => 1),
@@ -73,7 +79,9 @@ it("keeps newer input dirty after v1 save, then saves v2 and confirms its exact 
   await act(async () => {
     saving = controller.handleSave();
   });
-  expect(writeTextFile).toHaveBeenCalledWith("/fixture/A.txt", "v1");
+  expect(writeTextFile).toHaveBeenCalledWith("/fixture/A.txt", "v1", {
+    expectedContent: "/fixture/A.txt-disk",
+  });
   act(() => controller.handleContentChange("v2"));
   await act(async () => {
     finish[0]();
@@ -115,6 +123,7 @@ it("failed save keeps dirty contents and retry succeeds", async () => {
   vi.mocked(writeTextFile).mockRejectedValueOnce(new Error("disk failure"));
   await act(async () => controller.handleSave());
   expect(controller.hasUnsavedChanges).toBe(true);
+  expect(controller.saveError).toContain("disk failure");
   let saving!: Promise<void>;
   await act(async () => {
     saving = controller.handleSave();

@@ -1,14 +1,20 @@
 // @vitest-environment jsdom
-import { readTextFile, stat } from "@tauri-apps/plugin-fs";
+import { stat } from "@tauri-apps/plugin-fs";
 import React, { act, useEffect } from "react";
 import { type Root, createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readEditorTextFile as readTextFile } from "@src/services/file/editorBoundedIO";
+
 import { clearFileCache, getCachedBinaryStatus } from "../cache";
 import { type UseFileContentReturn, useFileContent } from "../useFileContent";
 
+vi.mock("@src/services/file/editorBoundedIO", () => ({
+  readEditorTextFile: vi.fn(async () => "text content"),
+  writeEditorTextFile: vi.fn(),
+}));
+
 vi.mock("@tauri-apps/plugin-fs", () => ({
-  readTextFile: vi.fn(async () => "text content"),
   stat: vi.fn(async () => ({ isFile: true, size: 12 })),
 }));
 
@@ -62,6 +68,20 @@ describe("useFileContent binary tab lifecycle", () => {
     expect(state.content).toBe("");
     await act(async () =>
       state.updateContent("must not become editable", { type: "human" })
+    );
+    expect(state.content).toBe("");
+    expect(state.hasUnsavedChanges).toBe(false);
+  });
+
+  it("R7-I02 native growth refusal cannot become editable or a clean empty save", async () => {
+    vi.mocked(readTextFile).mockRejectedValueOnce(
+      "too_large: grew during read"
+    );
+    await selectFile("/fixture/grew.txt");
+    expect(state.error?.type).toBe("too_large");
+    expect(state.contentReady).toBe(false);
+    await act(async () =>
+      state.updateContent("must remain blocked", { type: "human" })
     );
     expect(state.content).toBe("");
     expect(state.hasUnsavedChanges).toBe(false);

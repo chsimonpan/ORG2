@@ -3,12 +3,12 @@ import {
   exists,
   mkdir,
   readDir,
-  readTextFile,
   remove,
   stat,
   writeTextFile,
 } from "@tauri-apps/plugin-fs";
 
+import { readEditorTextFile } from "@src/services/file/editorBoundedIO";
 import { createLogger } from "@src/hooks/logger";
 import type { EditOperation } from "@src/types/editor/document";
 import {
@@ -299,10 +299,10 @@ export async function popUnsavedContent(
     throw new EditorFileBlockedError(filePath, utf8ByteLength(cached.content));
   if (cached.content === null && cached.draftPath !== null)
     await assertEditorFileReadable(cached.draftPath);
-  unsavedContentCache.delete(filePath);
   if (cached.content !== null) {
     // A write may still be in flight; `spillDraftToDisk` notices the entry is
     // no longer live when it lands and removes the orphaned file.
+    unsavedContentCache.delete(filePath);
     return toUnsavedContentCache(cached, cached.content);
   }
   const draftPath = cached.draftPath;
@@ -310,7 +310,8 @@ export async function popUnsavedContent(
     return null;
   }
   try {
-    const content = await readTextFile(draftPath);
+    const content = await readEditorTextFile(draftPath);
+    unsavedContentCache.delete(filePath);
     removeDraftFile(draftPath);
     return toUnsavedContentCache(cached, content);
   } catch (error) {
@@ -319,7 +320,7 @@ export async function popUnsavedContent(
       draftPath,
       error,
     });
-    return null;
+    throw error;
   }
 }
 
@@ -346,18 +347,18 @@ export async function saveCachedBufferForSwitch(
   await entry.pendingWrite;
   const content =
     entry.content ??
-    (entry.draftPath ? await readTextFile(entry.draftPath) : null);
+    (entry.draftPath ? await readEditorTextFile(entry.draftPath) : null);
   if (content === null || unsavedContentCache.get(filePath) !== entry)
     throw new Error("The editor buffer changed; save it before switching");
   if (
-    (await contentDigest(await readTextFile(filePath))) !==
+    (await contentDigest(await readEditorTextFile(filePath))) !==
     (await entry.baseDigest)
   )
     throw new Error("The file changed on disk; review it before switching");
   await writeTextFile(filePath, content);
   if (
     unsavedContentCache.get(filePath) !== entry ||
-    (await readTextFile(filePath)) !== content
+    (await readEditorTextFile(filePath)) !== content
   )
     throw new Error("The editor buffer changed while saving");
   clearUnsavedContentCache(filePath);

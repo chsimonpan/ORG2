@@ -1,7 +1,7 @@
-import { readTextFile } from "@tauri-apps/plugin-fs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createLogger } from "@src/hooks/logger";
+import { readEditorTextFile } from "@src/services/file/editorBoundedIO";
 import type { EditOperation, EditSource } from "@src/types/editor/document";
 import {
   createMinimalEditOperation,
@@ -210,7 +210,7 @@ export function useFileContent(
       await assertEditorFileReadable(filePath);
       if (!mounted.current || activeIdentity.current !== documentIdentity)
         return;
-      const fileContent = await readTextFile(toFsPluginPath(filePath));
+      const fileContent = await readEditorTextFile(toFsPluginPath(filePath));
 
       // Check for stale response
       if (
@@ -504,7 +504,7 @@ export function useFileContent(
       error: exposedError,
       isBinary: exposedIsBinary,
       hasUnsavedChanges: exposedHasUnsavedChanges,
-      contentReady,
+      contentReady: contentReady && !exposedError,
       // Versioning
       version,
       diskVersion,

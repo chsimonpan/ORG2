@@ -18,8 +18,8 @@ const fs = vi.hoisted(() => ({
   failRead: false,
 }));
 
-vi.mock("@tauri-apps/plugin-fs", () => ({
-  readTextFile: vi.fn(async (path: string) => {
+vi.mock("@src/services/file/editorBoundedIO", () => ({
+  readEditorTextFile: vi.fn(async (path: string) => {
     if (fs.failRead) throw new Error("ENOENT");
     return fs.contents.get(path) ?? "";
   }),
@@ -55,10 +55,10 @@ describe("disk guard", () => {
       );
     });
 
-    it("is true when the file cannot be read, so a save is never blocked", async () => {
+    it("R7 rejects unreadable files and preserves the dirty draft", async () => {
       // Refusing here would risk the very edits the guard exists to protect.
       fs.failRead = true;
-      await expect(isFileUnchangedOnDisk(FILE, "original")).resolves.toBe(true);
+      await expect(isFileUnchangedOnDisk(FILE, "original")).rejects.toThrow("ENOENT");
     });
   });
 

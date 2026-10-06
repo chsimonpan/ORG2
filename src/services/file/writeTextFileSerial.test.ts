@@ -1,10 +1,16 @@
-import { stat, writeTextFile } from "@tauri-apps/plugin-fs";
+import { stat } from "@tauri-apps/plugin-fs";
 import { expect, it, vi } from "vitest";
+
+import { writeEditorTextFile as writeTextFile } from "@src/services/file/editorBoundedIO";
 
 import { writeTextFileSerial } from "./writeTextFileSerial";
 
+vi.mock("@src/services/file/editorBoundedIO", () => ({
+  readEditorTextFile: vi.fn(async () => "text content"),
+  writeEditorTextFile: vi.fn(),
+}));
+
 vi.mock("@tauri-apps/plugin-fs", () => ({
-  writeTextFile: vi.fn(),
   stat: vi.fn(async () => ({ isFile: true, size: 8 })),
 }));
 it("serializes two owners of the same file, permits other files and releases failed queues", async () => {
@@ -17,14 +23,14 @@ it("serializes two owners of the same file, permits other files and releases fai
   const c = writeTextFileSerial("/fixture/B", "c");
   await vi.waitFor(() => expect(releases).toHaveLength(2));
   expect(vi.mocked(writeTextFile).mock.calls).toEqual([
-    ["/fixture/A", "a"],
-    ["/fixture/B", "c"],
+    ["/fixture/A", "a", undefined],
+    ["/fixture/B", "c", undefined],
   ]);
   releases[0]();
   releases[1]();
   await Promise.all([a, c]);
   await vi.waitFor(() => expect(releases).toHaveLength(3));
-  expect(writeTextFile).toHaveBeenLastCalledWith("/fixture/A", "b");
+  expect(writeTextFile).toHaveBeenLastCalledWith("/fixture/A", "b", undefined);
   releases[2]();
   await b;
   vi.mocked(writeTextFile).mockRejectedValueOnce(new Error("failure"));

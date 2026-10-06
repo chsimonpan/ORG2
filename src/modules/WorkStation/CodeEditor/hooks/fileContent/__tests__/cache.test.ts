@@ -77,9 +77,19 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
       }))
   ),
   stat: vi.fn(async (path: string) => ({
+    isFile: true,
+    size: new TextEncoder().encode(fakeFs.files.get(path) ?? "").byteLength,
     mtime: new Date(fakeFs.mtimes.get(path) ?? Date.now()),
   })),
 }));
+vi.mock("@src/services/file/editorBoundedIO", () => ({
+  readEditorTextFile: vi.fn(async (path: string) => {
+    const content = fakeFs.files.get(path);
+    if (content === undefined) throw new Error(`ENOENT: ${path}`);
+    return content;
+  }),
+}));
+
 
 const DRAFT_DIR = `/app-data/${UNSAVED_DRAFT_DIR_NAME}`;
 
@@ -89,6 +99,16 @@ describe("fileContent/cache", () => {
     clearFileCache();
     _resetUnsavedContentCacheForTests();
     fakeFs.reset();
+  });
+
+  it("R7 failed disk draft read retains dirty entry for retry", async () => {
+    const { readEditorTextFile } = await import("@src/services/file/editorBoundedIO");
+    cacheUnsavedContent("/fixture/draft", "draft", "old", 1, 0, []);
+    await _flushUnsavedDraftIoForTests();
+    vi.mocked(readEditorTextFile).mockRejectedValueOnce(new Error("too_large: growth"));
+    await expect(popUnsavedContent("/fixture/draft")).rejects.toThrow("too_large");
+    expect(getDirtyCachedPaths()).toContain("/fixture/draft");
+    expect((await popUnsavedContent("/fixture/draft"))?.content).toBe("draft");
   });
 
   describe("cacheFileMetadata and getCachedFileMetadata", () => {

@@ -10,7 +10,6 @@
  * - Uses refs for stable callback references
  * - Avoids recreating callbacks when content changes
  */
-import { readTextFile } from "@tauri-apps/plugin-fs";
 import {
   useCallback,
   useEffect,
@@ -28,6 +27,7 @@ import {
   invalidateFileCache,
   useFileContent,
 } from "@src/modules/WorkStation/CodeEditor/hooks/fileContent/useFileContent";
+import { readEditorTextFile } from "@src/services/file/editorBoundedIO";
 import {
   updateTextFileSerial,
   writeTextFileSerial,
@@ -57,6 +57,8 @@ function isCsvTableFile(filePath: string | null): boolean {
 // ============================================
 
 export interface UseFileContentManagerReturn extends UseFileContentReturn {
+  /** Save errors never replace buffer contents; UI can show/retry explicitly. */
+  saveError: string | null;
   /** Whether save is in progress */
   saving: boolean;
   /** Handle content change from editor */
@@ -88,6 +90,7 @@ export function useFileContentManager(
 
   // Local saving state
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const pendingSaves = useRef(new Map<string, number>());
   const mounted = useRef(false);
   useLayoutEffect(() => {
@@ -127,28 +130,32 @@ export function useFileContentManager(
         if (
           activeFilePathRef.current !== activeFilePath ||
           (await assertEditorFileReadable(activeFilePath).then(() =>
-            readTextFile(activeFilePath)
+            readEditorTextFile(activeFilePath)
           )) !== state.originalContent
         )
           throw new Error(
             "The file changed on disk; review it before switching"
           );
-        await updateTextFileSerial(activeFilePath, async (target) => {
-          if (
-            (await assertEditorFileReadable(target).then(() =>
-              readTextFile(target)
-            )) !== state.originalContent
-          )
-            throw new Error(
-              "The file changed on disk; review it before switching"
-            );
-          return content;
-        });
+        await updateTextFileSerial(
+          activeFilePath,
+          async (target) => {
+            if (
+              (await assertEditorFileReadable(target).then(() =>
+                readEditorTextFile(target)
+              )) !== state.originalContent
+            )
+              throw new Error(
+                "The file changed on disk; review it before switching"
+              );
+            return content;
+          },
+          { expectedContent: state.originalContent }
+        );
         if (
           activeFilePathRef.current !== activeFilePath ||
           fileContentStateRef.current.content !== content ||
           (await assertEditorFileReadable(activeFilePath).then(() =>
-            readTextFile(activeFilePath)
+            readEditorTextFile(activeFilePath)
           )) !== content
         )
           throw new Error("The file changed while saving");
@@ -181,6 +188,7 @@ export function useFileContentManager(
       (pendingSaves.current.get(filePath) ?? 0) + 1
     );
     setSaving(true);
+    setSaveError(null);
     try {
       if (
         !(await confirmSaveOverDiskChanges(
@@ -190,7 +198,9 @@ export function useFileContentManager(
       )
         return;
       await assertEditorFileWritable(filePath, contentState.content);
-      await writeTextFileSerial(filePath, contentState.content);
+      await writeTextFileSerial(filePath, contentState.content, {
+        expectedContent: contentState.originalContent,
+      });
       contentState.markSaved();
 
       // Dispatch file save event to Filesync output
@@ -207,6 +217,8 @@ export function useFileContentManager(
       if (mounted.current && activeFilePathRef.current === filePath)
         onSaveSuccessRef.current?.();
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setSaveError(message);
       log.error("[useFileContentManager] Save failed:", err);
     } finally {
       const remaining = (pendingSaves.current.get(filePath) ?? 1) - 1;
@@ -247,6 +259,7 @@ export function useFileContentManager(
     () => ({
       ...fileContentState,
       saving,
+      saveError,
       handleContentChange,
       handleSave,
       handleDiscard,
@@ -255,6 +268,8 @@ export function useFileContentManager(
     [
       fileContentState,
       saving,
+      saveError,
+      saveError,
       handleContentChange,
       handleSave,
       handleDiscard,

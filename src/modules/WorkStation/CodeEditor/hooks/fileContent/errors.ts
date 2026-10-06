@@ -17,6 +17,10 @@ function extractErrorReason(raw: string): string {
 export function classifyFileError(raw: string): FileError {
   const lower = raw.toLowerCase();
 
+  if (lower.includes("too_large")) {
+    return { type: "too_large", message: raw };
+  }
+
   if (
     lower.includes("no such file") ||
     lower.includes("not found") ||
@@ -29,6 +33,7 @@ export function classifyFileError(raw: string): FileError {
   }
 
   if (
+    lower.includes("scope denied") ||
     lower.includes("permission") ||
     lower.includes("forbidden") ||
     lower.includes("access denied") ||

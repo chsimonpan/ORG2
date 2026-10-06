@@ -47,6 +47,7 @@
 // directly as `agent_core::…`.
 
 // Workstation (IDE functionality and development tools)
+pub mod editor_file_io;
 pub mod agent_sessions; // Agent session management (CLI, event pipeline, persistence, aggregation)
 pub mod api;
 pub(crate) mod app; // Tauri application assembly: bootstrap, plugins, setup hook, lifecycle

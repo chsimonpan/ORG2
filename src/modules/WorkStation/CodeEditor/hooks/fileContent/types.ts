@@ -3,7 +3,7 @@ import type { EditOperation, EditSource } from "@src/types/editor/document";
 export type FileError =
   | { type: "not_found"; message: string }
   | { type: "permission"; message: string }
-  | { type: "too_large"; size: number; message: string }
+  | { type: "too_large"; size?: number; message: string }
   | { type: "binary"; message: string }
   | { type: "unknown"; message: string };
 
