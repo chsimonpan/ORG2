@@ -114,6 +114,7 @@ pub fn write_bounded(path: &Path, content: &str, create: bool, expected: Option<
     }
     // Atomic old-or-new contents are guaranteed; full power-loss directory
     // durability and a last-microsecond external replacement need a later gate.
+    // A filesystem mismatch fails explicitly: no copy/truncate fallback.
     Ok(())
 }
 
