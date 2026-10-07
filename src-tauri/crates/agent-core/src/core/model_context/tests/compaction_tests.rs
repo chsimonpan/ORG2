@@ -1803,3 +1803,37 @@ async fn weighted_spend_compacts_below_large_context_and_failure_retains_history
     assert!(matches!(outcome, CompactionOutcome::Failed { .. }));
     assert_eq!(unchanged, history);
 }
+
+#[tokio::test]
+async fn manual_provider_await_preserves_exclusion_and_drop_releases_state() {
+    use crate::providers::traits::{LLMProvider,LLMResponse,ProviderError};
+    use std::sync::Arc;
+    struct GatedProvider { entered: tokio::sync::Notify, release: tokio::sync::Notify }
+    #[async_trait::async_trait]
+    impl LLMProvider for GatedProvider {
+        async fn chat(&self,_:&[Value],_:Option<&[Value]>,model:&str,_:u32,_:f32)->Result<LLMResponse,ProviderError>{
+            assert_eq!(model,"gated-local-model");self.entered.notify_one();self.release.notified().await;
+            Ok(LLMResponse{content:Some("bounded fixture summary".into()),tool_calls:vec![],finish_reason:"stop".into(),usage:Default::default(),reasoning_content:None,blocks:vec![],stream_error_kind:None,retry_after_ms:None})
+        }
+        fn default_model(&self)->&str{"gated-local-model"}
+        fn provider_name(&self)->&str{"gated-inprocess-fixture"}
+    }
+    let provider=Arc::new(GatedProvider{entered:tokio::sync::Notify::new(),release:tokio::sync::Notify::new()});
+    let state=Arc::new(tokio::sync::Mutex::new(CompactionState::default()));
+    let mut history=vec![user_msg("keep original task")];
+    history.extend((0..40).map(|_|assistant_msg(&"x".repeat(400))));
+    let config=CompactionConfig{floor_tokens:0,..default_config()};
+    let shared=state.clone();let p=provider.clone();let original=history.clone();
+    let task=tokio::spawn(async move {
+        let mut guard=shared.lock().await;
+        ContextCompactor::compact_manual_force(&history,ContextCompactor::estimate_messages_tokens(&history)*2,&config,&mut guard,p.as_ref(),"gated-local-model",None).await
+    });
+    provider.entered.notified().await;
+    assert!(state.try_lock().is_err(),"provider await is the observed state exclusion stage");
+    // Drop this exact queued invocation, not a provider timeout and not any production task.
+    task.abort();assert!(task.await.unwrap_err().is_cancelled());
+    let actual=state.try_lock().expect("cancelled invocation must release its owned mutex");
+    assert_eq!(actual.summary,None);assert_eq!(actual.compacted_count,0);
+    assert_eq!(actual.recompaction_info.compaction_count,0);
+    assert_eq!(original.len(),41);assert_eq!(original[0],user_msg("keep original task"));
+}
