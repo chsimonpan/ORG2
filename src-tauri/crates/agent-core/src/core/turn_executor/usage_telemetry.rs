@@ -93,7 +93,7 @@ impl UsageTelemetryCollector {
         context_tokens: i64,
         tool_calls: &[ToolCallRequest],
         context_usage_snapshot: Option<&ContextUsageSnapshot>,
-    ) {
+    ) -> LlmUsageSpan {
         let prompt_tokens = usage.get(usage_key::PROMPT_TOKENS).copied().unwrap_or(0);
         let completion_tokens = usage
             .get(usage_key::COMPLETION_TOKENS)
@@ -114,7 +114,7 @@ impl UsageTelemetryCollector {
             .collect();
         let context_usage_json =
             context_usage_snapshot.and_then(|snapshot| serde_json::to_string(snapshot).ok());
-        self.spans.push(LlmUsageSpan {
+        let span = LlmUsageSpan {
             iteration_index,
             prompt_tokens,
             completion_tokens,
@@ -124,8 +124,10 @@ impl UsageTelemetryCollector {
             context_tokens,
             related_tool_call_ids,
             context_usage_json,
-        });
+        };
+        self.spans.push(span.clone());
         self.record_decision_completion(iteration_index, completion_tokens, tool_calls);
+        span
     }
 
     pub fn record_tool_results(

@@ -1092,6 +1092,18 @@ impl TurnEventHandler for UnifiedEventHandler {
         self.broadcast_tool_call_delta(session_id, index, tool_call_id, tool_name, arguments_delta);
     }
 
+    fn on_llm_usage_receipt(&self, session_id: &str, span: &crate::turn_executor::LlmUsageSpan) {
+        // Same active turn identity as completed-turn replay. Billed usage
+        // survives cancellation; duplicate telemetry does not double count.
+        let Some(turn_id) = self.config.turn_id.as_deref() else { return; };
+        if let Err(error) = crate::model_context::weighted_usage::record_turn(
+            session_id, turn_id, std::slice::from_ref(span),
+        ) {
+            warn!(session_id, turn_id, iteration=span.iteration_index,
+                "[weighted_usage] durable iteration receipt failed: {}",error);
+        }
+    }
+
     fn on_context_usage(&self, session_id: &str, usage: &ContextUsageSnapshot) {
         self.last_context_tokens
             .store(usage.used_tokens, Ordering::Relaxed);

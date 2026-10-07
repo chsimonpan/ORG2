@@ -184,13 +184,14 @@ pub(super) fn record_usage(
         Some(context_window),
     );
     handler.on_context_usage(session_id, &snapshot);
-    state.usage_telemetry.record_llm_span(
+    let span = state.usage_telemetry.record_llm_span(
         state.iteration as i64,
         &response.usage,
         state.usage.last_prompt,
         &response.tool_calls,
         Some(&snapshot),
     );
+    handler.on_llm_usage_receipt(session_id, &span);
 
     // Queue one model-side budget nudge for the next safe injection point.
     if !state.budget_nudge_sent {
@@ -314,5 +315,58 @@ mod tests {
     fn no_media_returns_zero() {
         let mut messages = vec![json!({"role": "user", "content": "plain text"})];
         assert_eq!(strip_historical_media_blocks(&mut messages), 0);
+    }
+}
+
+#[cfg(test)]
+mod weighted_iteration_receipt_tests {
+    use super::*;
+    use crate::core::session::turn::event_handler::{EventHandlerConfig, UnifiedEventHandler};
+    use crate::model_context::weighted_usage;
+    use crate::providers::traits::usage_key;
+    use std::sync::{Arc, atomic::AtomicBool};
+    #[test]
+    fn weighted_actual_iteration_receipt_survives_unfinished_turn() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let config = TurnConfig {
+            turn_intent_id: "durable-intent".into(), projected_inbox_ids: Vec::new(),
+            turn_process_control: None, model: "fixture-local".into(), account_id: None,
+            context_window_override: Some(200_000), max_iterations: None,
+            max_tokens: 4096, temperature: 0.5, max_tool_use_concurrency: 1,
+            screenshot_store: None, iteration_hook: None, persist_cancel_marker: false,
+            steering_queue: None, auto_continue: false,
+        };
+        let handler = UnifiedEventHandler::new(EventHandlerConfig {
+            turn_id: Some("active-turn".into()),
+            cancel_flag: Some(Arc::new(AtomicBool::new(true))), ..Default::default()
+        });
+        let response = LLMResponse {
+            content: Some("fixture".into()), tool_calls: vec![], finish_reason: "stop".into(),
+            usage: std::collections::HashMap::from([
+                (usage_key::PROMPT_TOKENS.into(), 10), (usage_key::COMPLETION_TOKENS.into(), 3),
+                (usage_key::CACHE_READ_TOKENS.into(), 20), (usage_key::CACHE_WRITE_TOKENS.into(), 2),
+                (usage_key::TOTAL_TOKENS.into(), 35),
+            ]), reasoning_content: None, blocks: vec![], stream_error_kind: None, retry_after_ms: None,
+        };
+        let request = PreparedRequest { messages: vec![serde_json::json!({"role":"user","content":"fixture"})], tool_definitions: vec![] };
+        let mut messages = request.messages.clone();
+        let mut state = TurnLoopState::new(&config, &mut messages);
+        state.iteration = 1;
+        record_usage(&response, &request, &mut state, &config, "owner-A", &handler);
+        assert_eq!(weighted_usage::snapshot("owner-A").unwrap().milli, 29_500);
+        state.iteration = 2;
+        record_usage(&response, &request, &mut state, &config, "owner-A", &handler);
+        assert_eq!(weighted_usage::snapshot("owner-A").unwrap().milli, 59_000);
+        drop(state); // No TurnResult / completed-turn telemetry persistence.
+        let conn = database::db::get_connection().unwrap();
+        assert_eq!(weighted_usage::snapshot_with_connection(&conn, "owner-A").unwrap().milli, 59_000);
+        assert_eq!(weighted_usage::snapshot_with_connection(&conn, "owner-B").unwrap().milli, 0);
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM session_weighted_usage_receipts WHERE session_id='owner-A' AND turn_id='active-turn'", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 2);
+        for iteration_index in [1,2] {
+            let span=crate::turn_executor::LlmUsageSpan {iteration_index,prompt_tokens:10,completion_tokens:3,cache_read_tokens:20,cache_write_tokens:2,total_tokens:35,context_tokens:10,related_tool_call_ids:vec![],context_usage_json:None};
+            weighted_usage::record_turn("owner-A", "active-turn", &[span]).unwrap();
+        }
+        assert_eq!(weighted_usage::snapshot("owner-A").unwrap().milli, 59_000);
     }
 }

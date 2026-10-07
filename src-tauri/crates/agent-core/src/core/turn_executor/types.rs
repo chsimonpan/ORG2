@@ -376,6 +376,9 @@ pub trait TurnEventHandler: Send + Sync {
     }
 
     /// Called when the final provider request payload's context usage estimate is available.
+    /// Persist billed iteration usage even if its Turn later crashes/cancels.
+    fn on_llm_usage_receipt(&self, _session_id: &str, _span: &super::LlmUsageSpan) {}
+
     fn on_context_usage(&self, _session_id: &str, _usage: &ContextUsageSnapshot) {}
 
     /// Called when a stream error is about to be retried. Low-key observability
