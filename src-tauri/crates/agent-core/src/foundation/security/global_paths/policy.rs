@@ -266,6 +266,9 @@ fn mutate(
             if g.recursive { "1" } else { "0" }
         ));
     }
+    if text.len() as u64 > MAX_STORE_BYTES {
+        return Err("grant store capacity exceeded".into());
+    }
     let stage = store.with_extension(format!("stage-{}", std::process::id()));
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
