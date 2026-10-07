@@ -397,6 +397,7 @@ fn insert_message_with_connection(
             msg.tool_is_error,
         ],
     )?;
+    if prefix == "agent" {crate::core::session::journey_runtime_persistence::assign_inserted_message(conn,&msg.session_id,&msg.id,sequence,&msg.role)?;}
     conn.execute(&touch_sql, params![msg.session_id, now])?;
     Ok((msg.id.clone(), true))
 }

@@ -163,6 +163,11 @@ pub fn load_llm_history(
     prefix: &str,
     session_id: &str,
 ) -> rusqlite::Result<Vec<serde_json::Value>> {
+    // The agent_core-only test binary does not link the app wire crate. Wire
+    // its database getter explicitly; production still requires startup registration
+    // and keeps the unregistered bridge fail-closed.
+    #[cfg(test)]
+    crate::foundation::db_bridge::register(database::db::get_connection);
     let messages = load_messages(prefix, session_id)?;
 
     // Debug: log raw message sequence
@@ -175,7 +180,8 @@ pub fn load_llm_history(
             .collect::<Vec<_>>()
     );
 
-    let result = reconstruct(&visible_rows(&messages));
+    let rows=visible_rows(&messages);
+    let result=if prefix=="agent"{let c=crate::foundation::db_bridge::get_connection()?;let(rows,capsules)=crate::core::session::journey_runtime_persistence::provider_visible_rows(&c,session_id,rows)?;let mut prompt=reconstruct(&rows);prompt.extend(capsules);prompt}else{reconstruct(&rows)};
 
     // Debug: log reconstructed message summary
     tracing::debug!(

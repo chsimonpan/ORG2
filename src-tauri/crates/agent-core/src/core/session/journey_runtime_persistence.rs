@@ -1,0 +1,25 @@
+//! Actual shared transcript insert and provider reconstruction Journey boundaries.
+//! Legacy sessions stay byte-compatible. Journey membership is inside original writer transaction.
+use rusqlite::{Connection,params,OptionalExtension};
+use super::journey_lifecycle::{SqliteJourneyRepository,ForkState};
+fn has_journeys(c:&Connection)->rusqlite::Result<bool>{Ok(c.query_row("SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_journeys'",[],|r|r.get::<_,i64>(0)).optional()?.is_some())}
+pub fn assign_inserted_message(c:&Connection,owner:&str,message:&str,sequence:i64,role:&str)->rusqlite::Result<()>{
+ if !has_journeys(c)?{return Ok(());}let Some(mut journey)=SqliteJourneyRepository::load(c,owner).map_err(|e|rusqlite::Error::ToSqlConversionFailure(Box::new(e)))? else{return Ok(());};
+ if sequence<0{return Err(rusqlite::Error::InvalidQuery);}let before=journey.revision;
+ if role=="user"{journey.on_user_message_persisted(before,sequence as u64).map_err(|e|rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;}
+ if journey.branches.get(&journey.active_branch_id).map(|b|&b.state)!=Some(&ForkState::Active){return Err(rusqlite::Error::InvalidQuery);}
+ if journey.revision!=before{SqliteJourneyRepository::compare_and_store_in_transaction(c,&journey,before).map_err(|e|rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;}
+ c.execute("INSERT INTO session_journey_memberships(session_id,message_id,sequence,branch_id,task_id) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(session_id,message_id) DO NOTHING",params![owner,message,sequence,journey.active_branch_id,journey.active_task_id])?;Ok(())
+}
+pub fn provider_visible_rows(c:&Connection,owner:&str,rows:Vec<crate::foundation::persistence::db_helpers::AgentMessageRow>)->rusqlite::Result<(Vec<crate::foundation::persistence::db_helpers::AgentMessageRow>,Vec<serde_json::Value>)>{
+ if !has_journeys(c)?{return Ok((rows,vec![]));}let Some(journey)=SqliteJourneyRepository::load(c,owner).map_err(|e|rusqlite::Error::ToSqlConversionFailure(Box::new(e)))? else{return Ok((rows,vec![]));};
+ let mut stmt=c.prepare("SELECT message_id,sequence,branch_id,task_id FROM session_journey_memberships WHERE session_id=?1")?;
+ let memberships=stmt.query_map([owner],|r|{let seq:i64=r.get(1)?;if seq<0{return Err(rusqlite::Error::InvalidQuery);}Ok(super::journey_context_visibility::JourneyMessageMembership{message_id:r.get(0)?,sequence:seq as u64,branch_id:r.get(2)?,task_id:r.get(3)?})})?.collect::<rusqlite::Result<Vec<_>>>()?;
+ if memberships.is_empty(){return Ok((rows,vec![]));}
+ let persisted=rows.iter().filter(|r|r.sequence>=0).map(|r|super::journey_context_visibility::PersistedContextMessage{message_id:r.id.clone(),sequence:r.sequence as u64}).collect::<Vec<_>>();
+ let ids=super::journey_context_visibility::project_prompt_message_ids(&journey,&journey.active_branch_id,&persisted,&memberships).map_err(|e|rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+ let capsules=journey.parent_handoff_capsules(&journey.active_branch_id).into_iter().map(super::journey_lifecycle::HandoffCapsule::synthetic_prompt_message).collect();Ok((rows.into_iter().filter(|r|ids.contains(&r.id)).collect(),capsules))
+}
+#[cfg(test)]mod tests{use super::*;use super::super::journey_application_service::{SessionJourneyApplicationService,CreateTaskRequest,TaskStartPosition};
+ #[test]fn actual_shared_insert_membership_activates_pending_user_and_rolls_back_closed_branch(){let mut c=Connection::open_in_memory().unwrap();c.execute_batch("CREATE TABLE agent_sessions(session_id TEXT PRIMARY KEY);CREATE TABLE agent_messages(id TEXT PRIMARY KEY,session_id TEXT,role TEXT,sequence INTEGER);INSERT INTO agent_sessions VALUES('A');").unwrap();SessionJourneyApplicationService::create_task(&mut c,CreateTaskRequest{session_id:"A".into(),expected_revision:0,task_id:"task".into(),name:"pending".into(),position:TaskStartPosition::下一条用户消息}).unwrap();let tx=c.transaction().unwrap();tx.execute("INSERT INTO agent_messages VALUES('user','A','user',1)",[]).unwrap();assign_inserted_message(&tx,"A","user",1,"user").unwrap();tx.commit().unwrap();let mut j=SqliteJourneyRepository::load(&c,"A").unwrap().unwrap();assert_eq!(j.tasks["task"].state,super::super::journey_lifecycle::TaskState::Active);assert_eq!(c.query_row("SELECT branch_id FROM session_journey_memberships WHERE message_id='user'",[],|r|r.get::<_,String>(0)).unwrap(),"main");let before=j.revision;j.branches.get_mut("main").unwrap().state=ForkState::Closed;j.revision+=1;{let tx=c.transaction().unwrap();SqliteJourneyRepository::compare_and_store_in_transaction(&tx,&j,before).unwrap();tx.commit().unwrap();}{let tx=c.transaction().unwrap();tx.execute("INSERT INTO agent_messages VALUES('bad','A','assistant',2)",[]).unwrap();assert!(assign_inserted_message(&tx,"A","bad",2,"assistant").is_err());}assert_eq!(c.query_row("SELECT COUNT(*) FROM agent_messages WHERE id='bad'",[],|r|r.get::<_,i64>(0)).unwrap(),0);}
+}

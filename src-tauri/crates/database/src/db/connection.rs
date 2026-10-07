@@ -198,6 +198,10 @@ fn file_identity(path: &Path) -> Option<FileIdentity> {
     }
 }
 
+// Per-path limits alone are insufficient: a long-lived process can touch
+// unbounded distinct sandbox/project paths and retain SQLite/WAL descriptors.
+const MAX_IDLE_CONNECTIONS_TOTAL: usize = 128;
+
 struct IdleConnection {
     conn: Connection,
     identity: Option<FileIdentity>,
@@ -474,7 +478,13 @@ impl Drop for PooledConnection {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         pool.checked_out.remove(&self.checkout_id);
-        if reusable && pool.phase == PoolPhase::Running && pool.generation == self.generation {
+        let idle_total: usize = pool.idle.values().map(Vec::len).sum();
+        if reusable
+            && pool.phase == PoolPhase::Running
+            && pool.generation == self.generation
+            && file_identity(&self.path) == self.identity
+            && idle_total < MAX_IDLE_CONNECTIONS_TOTAL
+        {
             let idle = pool.idle.entry(self.path.clone()).or_default();
             if idle.len() < MAX_IDLE_CONNECTIONS_PER_PATH {
                 idle.push(IdleConnection {
@@ -756,6 +766,26 @@ mod tests {
         SLOW_INIT_CALLS.fetch_add(1, Ordering::SeqCst);
         std::thread::sleep(Duration::from_millis(75));
         conn.execute_batch("CREATE TABLE cold_start_barrier (id INTEGER PRIMARY KEY);")
+    }
+
+    #[test]
+    fn idle_pool_is_bounded_across_distinct_database_paths() {
+        let _pool_guard = pool_test_guard();
+        resume_connection_pool_for_test();
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos();
+        let dir = std::env::temp_dir().join(format!("org2-pool-bound-{}-{nonce}", std::process::id()));
+        std::fs::create_dir(&dir).expect("distinct database sandbox");
+        for i in 0..(MAX_IDLE_CONNECTIONS_TOTAL + 32) {
+            let path = dir.join(format!("sessions-{i}.db"));
+            let conn = open_pooled(&path, None, configure_nothing).expect("open distinct database");
+            conn.execute_batch("CREATE TABLE probe (id INTEGER);").expect("write distinct database");
+            drop(conn);
+        }
+        let metrics = connection_pool_metrics();
+        let idle: usize = metrics.paths.iter().map(|p| p.idle).sum();
+        assert!(idle <= MAX_IDLE_CONNECTIONS_TOTAL, "unbounded idle descriptors: {idle}");
+        assert!(metrics.paths.iter().all(|p| p.checked_out == 0));
+        reset_connection_pool();
     }
 
     #[test]

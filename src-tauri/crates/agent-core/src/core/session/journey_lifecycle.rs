@@ -1750,7 +1750,7 @@ impl SqliteJourneyRepository {
     /// Store inside a caller-owned transaction. This is used when a durable
     /// transcript write must activate a pending task atomically.
     pub fn compare_and_store_in_transaction(
-        tx: &Transaction<'_>,
+        tx: &Connection,
         journey: &SessionJourney,
         expected_previous_revision: u64,
     ) -> Result<(), JourneyError> {
