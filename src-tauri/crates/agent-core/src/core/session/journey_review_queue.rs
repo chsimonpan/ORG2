@@ -19,7 +19,8 @@ use crate::core::session::journey_lifecycle::{
     HandoffCapsule, RuntimeProvenance, SessionJourney, SqliteJourneyRepository,
 };
 use crate::core::session::journey_application_service::SessionJourneyApplicationService;
-use crate::core::side_query::{side_query_typed, SideQueryConfig, StructuredOutput};
+use crate::core::side_query::StructuredOutput;
+#[cfg(test)]
 use crate::providers::traits::LLMProvider;
 
 const RECOVERY_TICK: Duration = Duration::from_secs(30);
