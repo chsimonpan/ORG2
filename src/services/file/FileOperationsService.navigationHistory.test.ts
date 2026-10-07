@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+vi.mock("@src/services/file/editorBoundedIO", () => ({statEditorTextFile: async (path: string) => (await import("@tauri-apps/plugin-fs")).stat(path)}));
 vi.mock("@tauri-apps/plugin-fs", () => ({
   stat: vi.fn(async () => ({ isFile: true, size: 8 })),
   copyFile: vi.fn(),

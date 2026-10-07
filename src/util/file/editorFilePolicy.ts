@@ -1,4 +1,4 @@
-import { stat } from "@tauri-apps/plugin-fs";
+import { statEditorTextFile as stat } from "@src/services/file/editorBoundedIO";
 
 import { toFsPluginPath } from "./pathUtils";
 

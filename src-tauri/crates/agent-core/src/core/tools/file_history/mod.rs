@@ -338,6 +338,19 @@ mod tests {
         });
     }
 
+    fn set_fixture_mtime(path: &std::path::Path, target: std::time::SystemTime) {
+        #[cfg(unix)] {
+            use std::os::unix::ffi::OsStrExt;
+            let p = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+            let d = target.duration_since(std::time::UNIX_EPOCH).unwrap();
+            let ts = libc::timespec { tv_sec: d.as_secs() as libc::time_t, tv_nsec: d.subsec_nanos() as libc::c_long };
+            assert_eq!(unsafe { libc::utimensat(libc::AT_FDCWD, p.as_ptr(), [ts, ts].as_ptr(), 0) }, 0, "path mtime setup failed");
+        }
+        #[cfg(not(unix))] std::fs::File::options().write(true).open(path).unwrap().set_modified(target).unwrap();
+        assert_eq!(std::fs::metadata(path).unwrap().modified().unwrap(), target, "fixture timestamp must actually change");
+    }
+
+
     #[test]
     fn prune_old_file_history_removes_aged_session_dirs() {
         with_sandbox(|_| {
@@ -355,14 +368,7 @@ mod tests {
             let target = std::time::SystemTime::now()
                 .checked_sub(std::time::Duration::from_secs(60 * 86_400))
                 .unwrap();
-            let dir_handle = std::fs::File::options()
-                .read(true)
-                .open(&aged_root)
-                .expect("open session dir read-only");
-            dir_handle
-                .set_modified(target)
-                .expect("set_modified on dir handle");
-            drop(dir_handle);
+            set_fixture_mtime(&aged_root, target);
 
             let stats = prune_old_file_history(30).unwrap();
             assert!(

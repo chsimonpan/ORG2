@@ -10,6 +10,7 @@ import { clearFileCache, getCachedBinaryStatus } from "../cache";
 import { type UseFileContentReturn, useFileContent } from "../useFileContent";
 
 vi.mock("@src/services/file/editorBoundedIO", () => ({
+  statEditorTextFile: async (path: string) => (await import("@tauri-apps/plugin-fs")).stat(path),
   readEditorTextFile: vi.fn(async () => "text content"),
   writeEditorTextFile: vi.fn(),
 }));

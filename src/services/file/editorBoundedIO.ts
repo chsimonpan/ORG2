@@ -19,3 +19,8 @@ export function writeEditorTextFile(
     expectedContent: options?.expectedContent ?? null,
   });
 }
+
+/** Metadata-only RPC shares the exact authority of the bounded body reader. */
+export function statEditorTextFile(path: string): Promise<{ isFile: boolean; size: number }> {
+  return invoke("editor_stat_bounded", { path: toFsPluginPath(path) });
+}

@@ -17,7 +17,7 @@
  * closing a `git-diff` tab deletes its file's draft (close means discard,
  * matching the pre-existing close behaviour).
  */
-import { readTextFile } from "@tauri-apps/plugin-fs";
+import { readEditorTextFile as readTextFile } from "@src/services/file/editorBoundedIO";
 
 import { updateTextFileSerial } from "@src/services/file/writeTextFileSerial";
 import { BoundedMap } from "@src/util/collections/BoundedMap";

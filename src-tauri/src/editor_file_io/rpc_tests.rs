@@ -2,7 +2,6 @@
 //! This exercises the real Tauri IPC handler and command implementations;
 //! it does not pretend to be a rendered desktop end-to-end test.
 use super::*;
-use tauri_plugin_fs::FsExt;
 use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
 use serde_json::{json, Value};
 use agent_core::foundation::security::global_paths::{self, policy::Access};
@@ -52,7 +51,7 @@ fn real_ipc_scope_bounded_io_and_management_revocation() {
     let app = mock_builder()
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
-            editor_read_bounded, editor_write_bounded,
+            editor_stat_bounded, editor_read_bounded, editor_write_bounded,
             global_paths::global_path_exemptions_list,
             global_paths::global_path_exemptions_add,
             global_paths::global_path_exemptions_remove,
@@ -60,7 +59,14 @@ fn real_ipc_scope_bounded_io_and_management_revocation() {
         .build(mock_context(noop_assets())).unwrap();
     let window = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
     assert!(invoke(&window, "editor_read_bounded", json!({"path":file})).is_err());
-    app.fs_scope().allow_directory(&root, true).unwrap();
+    invoke(&window, "global_path_exemptions_add", json!({"path":root,"mode":"read","recursive":true})).unwrap();
+    assert_eq!(invoke(&window, "editor_stat_bounded", json!({"path":file})).unwrap()["size"], json!("before中文".len()));
+    assert_eq!(invoke(&window, "editor_read_bounded", json!({"path":file})).unwrap(), json!("before中文"));
+    assert!(invoke(&window,"editor_write_bounded",json!({"path":file,"content":"denied","create":false})).is_err());
+    invoke(&window, "global_path_exemptions_remove", json!({"path":root})).unwrap();
+    assert!(invoke(&window, "editor_stat_bounded", json!({"path":file})).is_err());
+    assert!(invoke(&window, "editor_read_bounded", json!({"path":file})).is_err());
+    invoke(&window, "global_path_exemptions_add", json!({"path":root,"mode":"read_write","recursive":true})).unwrap();
     // Resolve the real platform local origin instead of assuming Windows' HTTP
     // workaround URL. An untrusted remote origin must still fail before dispatch,
     // even when the filesystem scope explicitly allows the fixture.
@@ -83,6 +89,7 @@ fn real_ipc_scope_bounded_io_and_management_revocation() {
         let link=root.join("linked.txt");std::os::unix::fs::symlink(&file,&link).unwrap();
         assert!(invoke(&window,"editor_read_bounded",json!({"path":link})).is_err());
     }
+    invoke(&window,"global_path_exemptions_remove",json!({"path":root})).unwrap();
     assert_eq!(invoke(&window,"global_path_exemptions_list",json!({})).unwrap(),json!([]));
     invoke(&window,"global_path_exemptions_add",json!({"path":root,"mode":"read","recursive":true})).unwrap();
     let workspace=sandbox.path().join("workspace");std::fs::create_dir(&workspace).unwrap();

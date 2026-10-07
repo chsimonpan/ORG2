@@ -296,15 +296,24 @@ mod tests {
     use std::path::Path;
     use std::time::{Duration, SystemTime};
 
+    fn set_fixture_mtime(path: &std::path::Path, target: std::time::SystemTime) {
+        #[cfg(unix)] {
+            use std::os::unix::ffi::OsStrExt;
+            let p = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+            let d = target.duration_since(std::time::UNIX_EPOCH).unwrap();
+            let ts = libc::timespec { tv_sec: d.as_secs() as libc::time_t, tv_nsec: d.subsec_nanos() as libc::c_long };
+            assert_eq!(unsafe { libc::utimensat(libc::AT_FDCWD, p.as_ptr(), [ts, ts].as_ptr(), 0) }, 0, "path mtime setup failed");
+        }
+        #[cfg(not(unix))] std::fs::File::options().write(true).open(path).unwrap().set_modified(target).unwrap();
+        assert_eq!(std::fs::metadata(path).unwrap().modified().unwrap(), target, "fixture timestamp must actually change");
+    }
+
     /// Test-only mtime helper (not compiled into release builds).
     fn set_mtime_days_ago(path: &Path, days: u64) -> std::io::Result<()> {
-        use std::fs::File;
         let target = SystemTime::now()
             .checked_sub(Duration::from_secs(days.saturating_mul(86_400)))
             .unwrap_or(SystemTime::UNIX_EPOCH);
-        let file = File::options().write(true).open(path)?;
-        file.set_modified(target)?;
-        drop(file);
+        set_fixture_mtime(path, target);
         Ok(())
     }
 

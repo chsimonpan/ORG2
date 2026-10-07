@@ -83,6 +83,7 @@ vi.mock("@tauri-apps/plugin-fs", () => ({
   })),
 }));
 vi.mock("@src/services/file/editorBoundedIO", () => ({
+  statEditorTextFile: async (path: string) => (await import("@tauri-apps/plugin-fs")).stat(path),
   readEditorTextFile: vi.fn(async (path: string) => {
     const content = fakeFs.files.get(path);
     if (content === undefined) throw new Error(`ENOENT: ${path}`);

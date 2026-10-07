@@ -16,6 +16,7 @@ import { useFileContentManager } from "./useFileContentManager";
 const disk = vi.hoisted(() => new Map<string, string>());
 vi.mock("@tauri-apps/plugin-dialog", () => ({ ask: vi.fn(async () => false) }));
 vi.mock("@src/services/file/editorBoundedIO", () => ({
+  statEditorTextFile: async (path: string) => (await import("@tauri-apps/plugin-fs")).stat(path),
   readEditorTextFile: vi.fn(
     async (path: string) => disk.get(path) ?? `${path}-disk`
   ),

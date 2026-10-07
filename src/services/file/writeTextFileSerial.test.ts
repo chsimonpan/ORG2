@@ -1,4 +1,4 @@
-import { stat } from "@tauri-apps/plugin-fs";
+import { statEditorTextFile as stat } from "@src/services/file/editorBoundedIO";
 import { expect, it, vi } from "vitest";
 
 import { writeEditorTextFile as writeTextFile } from "@src/services/file/editorBoundedIO";
@@ -6,6 +6,7 @@ import { writeEditorTextFile as writeTextFile } from "@src/services/file/editorB
 import { writeTextFileSerial } from "./writeTextFileSerial";
 
 vi.mock("@src/services/file/editorBoundedIO", () => ({
+  statEditorTextFile: vi.fn(async () => ({ isFile: true, size: 8 })),
   readEditorTextFile: vi.fn(async () => "text content"),
   writeEditorTextFile: vi.fn(),
 }));

@@ -13,6 +13,14 @@ import type { GitFile } from "@src/types/git/types";
 
 import { GitDiffContent } from "./index";
 
+vi.mock("@src/services/file/editorBoundedIO", async () => {
+  const fs = await import("@tauri-apps/plugin-fs");
+  return {
+    statEditorTextFile: async () => ({ isFile: true, size: 16 }),
+    readEditorTextFile: (...args: Parameters<typeof fs.readTextFile>) => fs.readTextFile(...args),
+    writeEditorTextFile: (path: string, content: string) => fs.writeTextFile(path, content),
+  };
+});
 vi.mock("@tauri-apps/plugin-fs", () => ({ writeTextFile: vi.fn() }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),

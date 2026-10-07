@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { readTextFile, stat, writeTextFile } from "@tauri-apps/plugin-fs";
+import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { statEditorTextFile as stat } from "@src/services/file/editorBoundedIO";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -10,6 +11,7 @@ import {
   utf8ByteLength,
 } from "./editorFilePolicy";
 
+vi.mock("@src/services/file/editorBoundedIO", () => ({ statEditorTextFile: vi.fn() }));
 vi.mock("@tauri-apps/plugin-fs", () => ({
   stat: vi.fn(),
   readTextFile: vi.fn(),

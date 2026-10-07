@@ -10,6 +10,7 @@ import type {
   WorkstationWorkspaceState,
 } from "../types";
 
+vi.mock("@src/services/file/editorBoundedIO", () => ({statEditorTextFile: async (path: string) => (await import("@tauri-apps/plugin-fs")).stat(path)}));
 vi.mock("@tauri-apps/plugin-fs", () => ({
   stat: vi.fn(),
   readTextFile: vi.fn(),
