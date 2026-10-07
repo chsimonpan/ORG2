@@ -106,7 +106,15 @@ describe("useAddToAgentInsertion", () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     await root.render(createElement("div"));
+    // Drain only due-now React/jsdom cleanup tasks from the completed commit;
+    // a leaked insertion retry is scheduled for 50ms and must remain visible.
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(vi.getTimerCount()).toBe(0);
+    expect(store.get(addToAgentAtom)).toBe(request);
+    const insertFilePill = vi.fn();
+    ref.current = { insertFilePill } as unknown as ComposerInputRef;
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(insertFilePill).not.toHaveBeenCalled();
     expect(store.get(addToAgentAtom)).toBe(request);
   });
 });
