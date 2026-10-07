@@ -38,3 +38,35 @@ fn read_canonical_snapshot(owner:&str)->Result<JourneySnapshot,String>{
 #[cfg(test)]mod tests{use super::*;
  #[test]fn canonical_snapshot_wire_identity_and_no_mutation_claim(){let s=JourneySnapshot{schema_version:1,owner_session_id:"A".into(),revision:3,nodes:vec![],edges:vec![],capabilities:Capabilities{read:true,fork:false,import:false,mutate:false}};let v=serde_json::to_value(s).unwrap();assert_eq!(v["ownerSessionId"],"A");assert_eq!(v["schemaVersion"],1);assert_eq!(v["capabilities"]["fork"],false);assert_eq!(v["capabilities"]["mutate"],false);}
 }
+
+#[derive(Debug,Serialize)]#[serde(rename_all="camelCase")]
+pub struct BoundaryPreview{pub owner_session_id:String,pub anchor:DurableAnchor,pub prefix_hash:String,pub records:Vec<PreviewRecord>}
+#[derive(Debug,Serialize)]#[serde(rename_all="camelCase")]
+pub struct PreviewRecord{pub durable_message_id:String,pub sequence:i64,pub role:String,pub content:String}
+#[tauri::command]
+pub async fn journey_boundary_preview(owner_session_id:String,anchor:DurableAnchor,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<BoundaryPreview,String>{
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_not_registered".into());}
+ if anchor.owner_session_id!=owner_session_id||anchor.source_session_id!=owner_session_id{return Err("journey_source_unauthorized".into());}
+ let conn=database::db::get_connection().map_err(|e|e.to_string())?;
+ let result=read_boundary_preview(&conn,&owner_session_id,&anchor)?;
+ // Native same-owner read authority is rechecked before publishing; no mutation inferred.
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_revoked".into());}Ok(result)
+}
+fn read_boundary_preview(conn:&rusqlite::Connection,owner:&str,anchor:&DurableAnchor)->Result<BoundaryPreview,String>{
+ if anchor.source_session_id!=owner{return Err("journey_source_unauthorized".into());}
+ let tx=conn.unchecked_transaction().map_err(|e|e.to_string())?;
+ agent_core::core::session::journey_canonical::validate_commit_with_connection(&tx,owner,anchor,anchor.boundary_version,true)?;
+ let end:i64=tx.query_row("SELECT sequence FROM agent_messages WHERE session_id=?1 AND id=?2",rusqlite::params![owner,anchor.durable_message_id],|r|r.get(0)).map_err(|e|e.to_string())?;
+ let records={let mut stmt=tx.prepare("SELECT id,sequence,role,content FROM agent_messages WHERE session_id=?1 AND sequence<=?2 ORDER BY sequence,id LIMIT 10001").map_err(|e|e.to_string())?;
+ let rows=stmt.query_map(rusqlite::params![owner,end],|r|Ok(PreviewRecord{durable_message_id:r.get(0)?,sequence:r.get(1)?,role:r.get(2)?,content:r.get(3)?})).map_err(|e|e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e|e.to_string())?;rows};
+ if records.len()>10000||records.iter().map(|r|r.content.len()).sum::<usize>()>2*1024*1024{return Err("journey_preview_limit".into());}
+ if records.last().map(|r|r.durable_message_id.as_str())!=Some(anchor.durable_message_id.as_str()){return Err("journey_ambiguous_durable_boundary".into());}
+ let wire=serde_json::to_vec(&records).map_err(|e|e.to_string())?;use sha2::Digest;let prefix_hash=format!("{:x}",sha2::Sha256::digest(&wire));tx.commit().map_err(|e|e.to_string())?;
+ Ok(BoundaryPreview{owner_session_id:owner.into(),anchor:anchor.clone(),prefix_hash,records})
+}
+#[cfg(test)]mod boundary_tests{use super::*;
+ #[test]fn earlier_explicit_boundary_preview_hash_is_exact_and_fails_closed_after_edit_delete_wrong_owner(){
+ let c=rusqlite::Connection::open_in_memory().unwrap();c.execute_batch("CREATE TABLE agent_messages(id TEXT,session_id TEXT,sequence INTEGER,created_at TEXT,role TEXT,content TEXT,compact_from_sequence INTEGER,PRIMARY KEY(session_id,id));INSERT INTO agent_messages VALUES('earlier','A',1,'fixture','user','original',NULL),('later','A',2,'fixture','user','later',NULL),('earlier','B',1,'fixture','user','unrelated',NULL);").unwrap();
+ let a=agent_core::core::session::journey_canonical::resolve_with_connection(&c,"A","A","session:A","earlier",2).unwrap();let p=read_boundary_preview(&c,"A",&a).unwrap();assert_eq!(p.records.len(),1);assert_eq!(p.records[0].content,"original");assert!(!p.prefix_hash.is_empty());assert!(read_boundary_preview(&c,"B",&a).is_err());c.execute("UPDATE agent_messages SET content='changed' WHERE session_id='A' AND id='earlier'",[]).unwrap();assert!(read_boundary_preview(&c,"A",&a).is_err());c.execute("DELETE FROM agent_messages WHERE session_id='A' AND id='earlier'",[]).unwrap();assert!(read_boundary_preview(&c,"A",&a).is_err());
+ }
+}
