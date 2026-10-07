@@ -496,6 +496,74 @@ impl SessionJourneyApplicationService {
         })
     }
 
+    pub fn create_fork_exact(
+        conn: &mut Connection,
+        request: CreateForkRequest,
+        expected_anchor: &crate::core::session::journey_canonical::DurableAnchor,
+    ) -> JourneyApplicationResult<JourneyWriteResponse> {
+        Self::ensure_session(conn, &request.session_id)?;
+        // Direct Fork must resolve the latest durable user row and validate its
+        // active-branch membership under one write transaction. This is not a
+        // generic fallback path for other lifecycle operations.
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| JourneyApplicationError::存储失败(error.to_string()))?;
+        if request.anchor_message_id.as_deref()!=Some(expected_anchor.durable_message_id.as_str())||expected_anchor.owner_session_id!=request.session_id||expected_anchor.source_session_id!=request.session_id{return Err(JourneyApplicationError::校验失败("精确源锚点不匹配。".into()));}
+        let source_revision:i64=tx.query_row("SELECT COALESCE(MAX(sequence),0) FROM agent_messages WHERE session_id=?1",[&request.session_id],|r|r.get(0)).map_err(|e|JourneyApplicationError::存储失败(e.to_string()))?;
+        if source_revision<0||source_revision as u64!=expected_anchor.boundary_version{return Err(JourneyApplicationError::校验失败("精确源修订已变化。".into()));}
+        crate::core::session::journey_canonical::validate_commit_with_connection(&tx,&request.session_id,expected_anchor,expected_anchor.boundary_version,true).map_err(JourneyApplicationError::校验失败)?;
+        let mut journey = Self::load_snapshot(&tx, &request.session_id)?;
+        if journey.revision != request.expected_revision {
+            return Err(JourneyApplicationError::修订冲突 {
+                expected: request.expected_revision,
+                actual: journey.revision,
+            });
+        }
+        let anchor = match request.anchor_message_id.as_deref() {
+            Some(message_id) => {
+                // An explicitly supplied id stays exact; an empty/malformed
+                // value is not allowed to silently become a direct Fork.
+                Self::message_anchor(&tx, &request.session_id, message_id)?
+            }
+            // This is intentionally a dedicated direct-Fork command semantic,
+            // not a generic anchor fallback. The query and active-branch
+            // membership check run in this one transaction, so an unrelated or
+            // stale row cannot anchor a fork.
+            None => Self::latest_active_branch_user_anchor(
+                &tx,
+                &request.session_id,
+                &journey.active_branch_id,
+            )?,
+        };
+        Self::validate_branch_anchor(
+            &tx,
+            &request.session_id,
+            &anchor,
+            &journey.active_branch_id,
+        )?;
+        journey
+            .start_fork(
+                journey.revision,
+                request.fork_id,
+                request.task_id,
+                request.task_name,
+                anchor.message_id.clone(),
+                anchor.sequence,
+            )
+            .map_err(Self::domain_error)?;
+        SqliteJourneyRepository::compare_and_store_in_transaction(
+            &tx,
+            &journey,
+            request.expected_revision,
+        )
+        .map_err(Self::domain_error)?;
+        tx.commit()
+            .map_err(|error| JourneyApplicationError::存储失败(error.to_string()))?;
+        Ok(JourneyWriteResponse {
+            revision: journey.revision,
+        })
+    }
+
     pub fn create_checkpoint(
         conn: &mut Connection,
         request: CreateCheckpointRequest,

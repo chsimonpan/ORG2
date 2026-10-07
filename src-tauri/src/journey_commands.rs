@@ -74,3 +74,85 @@ fn read_boundary_preview(conn:&rusqlite::Connection,owner:&str,anchor:&DurableAn
 
 #[tauri::command]
 pub async fn journey_domain_snapshot(owner_session_id:String,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<agent_core::core::session::journey_application_service::JourneySnapshotResponse,String>{if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_not_registered".into());}let conn=database::db::get_connection().map_err(|e|e.to_string())?;agent_core::core::session::journey_application_service::SessionJourneyApplicationService::snapshot(&conn,&owner_session_id).map_err(|e|e.to_string())}
+
+// Full historical lifecycle command batch. Actual canonical runtime identity and processing lock
+// are checked before mutation. Provider execution is never initiated by these commands.
+use agent_core::core::session::journey_application_service as journey_service;
+fn check_journey_owner(owner:&str,request_owner:&str)->Result<(),String>{if owner.is_empty()||owner.starts_with("cli:")||owner!=request_owner{return Err("journey_owner_mismatch".into());}Ok(())}
+async fn journey_mutation_lease(owner:&str,state:&agent_core::state::AgentAppState)->Result<tokio::sync::OwnedMutexGuard<()>,String>{
+ let session=state.get_session(owner).await.ok_or("journey_owner_not_registered")?;
+ session.processing_lock.clone().try_lock_owned().map_err(|_|"journey_session_busy".into())
+}
+
+#[tauri::command]
+pub async fn journey_task_start(owner_session_id:String,request:journey_service::CreateTaskRequest,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<journey_service::JourneyWriteResponse,String>{
+ check_journey_owner(&owner_session_id,&request.session_id)?;let _lease=journey_mutation_lease(&owner_session_id,&state).await?;
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_revoked".into());}
+ tokio::task::spawn_blocking(move||{database::db::with_sessions_writer(||{let mut c=database::db::get_connection().map_err(|e|e.to_string())?;journey_service::SessionJourneyApplicationService::create_task(&mut c,request).map_err(|e|e.to_string())})}).await.map_err(|e|e.to_string())?
+}
+
+#[tauri::command]
+pub async fn journey_entry_activate(owner_session_id:String,request:journey_service::ActivateJourneyEntryRequest,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<journey_service::JourneyWriteResponse,String>{
+ check_journey_owner(&owner_session_id,&request.session_id)?;let _lease=journey_mutation_lease(&owner_session_id,&state).await?;
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_revoked".into());}
+ tokio::task::spawn_blocking(move||{database::db::with_sessions_writer(||{let mut c=database::db::get_connection().map_err(|e|e.to_string())?;journey_service::SessionJourneyApplicationService::activate_entry(&mut c,request).map_err(|e|e.to_string())})}).await.map_err(|e|e.to_string())?
+}
+
+#[tauri::command]
+pub async fn journey_checkpoint(owner_session_id:String,request:journey_service::CreateCheckpointRequest,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<journey_service::JourneyWriteResponse,String>{
+ check_journey_owner(&owner_session_id,&request.session_id)?;let _lease=journey_mutation_lease(&owner_session_id,&state).await?;
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_revoked".into());}
+ tokio::task::spawn_blocking(move||{database::db::with_sessions_writer(||{let mut c=database::db::get_connection().map_err(|e|e.to_string())?;journey_service::SessionJourneyApplicationService::create_checkpoint(&mut c,request).map_err(|e|e.to_string())})}).await.map_err(|e|e.to_string())?
+}
+
+#[tauri::command]
+pub async fn journey_task_finish(owner_session_id:String,request:journey_service::FinishTaskRequest,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<journey_service::JourneyWriteResponse,String>{
+ check_journey_owner(&owner_session_id,&request.session_id)?;let _lease=journey_mutation_lease(&owner_session_id,&state).await?;
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_revoked".into());}
+ tokio::task::spawn_blocking(move||{database::db::with_sessions_writer(||{let mut c=database::db::get_connection().map_err(|e|e.to_string())?;journey_service::SessionJourneyApplicationService::finish_task(&mut c,request).map_err(|e|e.to_string())})}).await.map_err(|e|e.to_string())?
+}
+
+#[tauri::command]
+pub async fn journey_review_retry(owner_session_id:String,request:journey_service::RetryReviewRequest,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<journey_service::JourneyWriteResponse,String>{
+ check_journey_owner(&owner_session_id,&request.session_id)?;let _lease=journey_mutation_lease(&owner_session_id,&state).await?;
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_revoked".into());}
+ tokio::task::spawn_blocking(move||{database::db::with_sessions_writer(||{let mut c=database::db::get_connection().map_err(|e|e.to_string())?;journey_service::SessionJourneyApplicationService::retry_review(&mut c,request).map_err(|e|e.to_string())})}).await.map_err(|e|e.to_string())?
+}
+
+#[tauri::command]
+pub async fn journey_confirm(owner_session_id:String,request:journey_service::PromoteFactRequest,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<journey_service::JourneyWriteResponse,String>{
+ check_journey_owner(&owner_session_id,&request.session_id)?;let _lease=journey_mutation_lease(&owner_session_id,&state).await?;
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_revoked".into());}
+ tokio::task::spawn_blocking(move||{database::db::with_sessions_writer(||{let mut c=database::db::get_connection().map_err(|e|e.to_string())?;journey_service::SessionJourneyApplicationService::promote_confirmed_fact(&mut c,request).map_err(|e|e.to_string())})}).await.map_err(|e|e.to_string())?
+}
+
+#[tauri::command]
+pub async fn journey_discard(owner_session_id:String,request:journey_service::DiscardForkRequest,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<journey_service::DiscardForkResponse,String>{
+ check_journey_owner(&owner_session_id,&request.session_id)?;let _lease=journey_mutation_lease(&owner_session_id,&state).await?;
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_revoked".into());}
+ tokio::task::spawn_blocking(move||{database::db::with_sessions_writer(||{let mut c=database::db::get_connection().map_err(|e|e.to_string())?;journey_service::SessionJourneyApplicationService::discard_fork(&mut c,request).map_err(|e|e.to_string())})}).await.map_err(|e|e.to_string())?
+}
+
+#[tauri::command]
+pub async fn journey_return_parent(owner_session_id:String,request:journey_service::ReturnToParentRequest,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<journey_service::ReturnToParentResponse,String>{
+ check_journey_owner(&owner_session_id,&request.session_id)?;let _lease=journey_mutation_lease(&owner_session_id,&state).await?;
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_revoked".into());}
+ tokio::task::spawn_blocking(move||{database::db::with_sessions_writer(||{let mut c=database::db::get_connection().map_err(|e|e.to_string())?;journey_service::SessionJourneyApplicationService::return_to_parent(&mut c,request).map_err(|e|e.to_string())})}).await.map_err(|e|e.to_string())?
+}
+
+#[tauri::command]
+pub async fn journey_fork_start(owner_session_id:String,request:journey_service::CreateForkRequest,anchor:DurableAnchor,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<journey_service::JourneyWriteResponse,String>{
+ check_journey_owner(&owner_session_id,&request.session_id)?;if request.anchor_message_id.as_deref()!=Some(anchor.durable_message_id.as_str())||anchor.source_session_id!=owner_session_id{return Err("journey_explicit_anchor_required".into());}
+ let _lease=journey_mutation_lease(&owner_session_id,&state).await?;
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_revoked".into());}
+ tokio::task::spawn_blocking(move||database::db::with_sessions_writer(||{let mut c=database::db::get_connection().map_err(|e|e.to_string())?;
+ // Holding actual same-session processing lease + shared writer serializes canonical hash check
+ // and service CAS against normal user/assistant persistence. Explicit ID never latest fallback.
+ let _:BoundaryPreview=read_boundary_preview(&c,&owner_session_id,&anchor)?;
+ journey_service::SessionJourneyApplicationService::create_fork_exact(&mut c,request,&anchor).map_err(|e|e.to_string())})).await.map_err(|e|e.to_string())?
+}
+#[tauri::command]
+pub async fn journey_review_list(owner_session_id:String,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<Vec<agent_core::core::session::journey_lifecycle::ReviewItem>,String>{
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_not_registered".into());}let c=database::db::get_connection().map_err(|e|e.to_string())?;journey_service::SessionJourneyApplicationService::review_queue(&c,&owner_session_id).map_err(|e|e.to_string())
+}
+#[cfg(test)]mod lifecycle_owner_tests{use super::*;#[test]fn all_lifecycle_commands_require_exact_owner_not_ui_title_or_imported_cli(){assert!(check_journey_owner("A","A").is_ok());assert!(check_journey_owner("A","B").is_err());assert!(check_journey_owner("cli:A","cli:A").is_err());assert!(check_journey_owner("","").is_err());}}
