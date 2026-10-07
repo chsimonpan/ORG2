@@ -1,0 +1,32 @@
+// Licensed Journey canvas is a read-only canonical session surface. Never performs model work.
+import {useEffect,useRef,useState} from "react";
+import {JourneyCanvas} from "./JourneyCanvas";
+import {loadJourneySnapshot} from "./nativeAdapter";
+import {validateAnchor} from "./canonicalScope";
+import type {DurableAnchor,JourneySnapshot} from "./types";
+export function JourneyPopover({ownerSessionId}:{ownerSessionId:string}){
+ const [open,setOpen]=useState(false);
+ return <><button type="button" aria-label="Session Journey" aria-expanded={open} onClick={()=>setOpen(v=>!v)}>Journey</button>{open&&<JourneyOwnerPanel key={ownerSessionId} ownerSessionId={ownerSessionId} onClose={()=>setOpen(false)}/>}</>;
+}
+export function JourneyOwnerPanel({ownerSessionId,onClose}:{ownerSessionId:string;onClose:()=>void}){
+ const [snapshot,setSnapshot]=useState<JourneySnapshot|null>(null),[error,setError]=useState<string|null>(null),[selected,setSelected]=useState<DurableAnchor|null>(null),[reload,setReload]=useState(0);
+ const scope=useRef({owner:ownerSessionId,generation:0,request:0});
+ // Synchronous invalidation precedes effects. A-B-A cannot reuse A1 request authority.
+ if(scope.current.owner!==ownerSessionId){scope.current={owner:ownerSessionId,generation:scope.current.generation+1,request:scope.current.request+1};}
+ useEffect(()=>{
+  const s=scope.current;const generation=s.generation,request=++s.request;let live=true;
+  setSnapshot(null);setSelected(null);setError(null);
+  const current=()=>live&&scope.current.owner===ownerSessionId&&scope.current.generation===generation&&scope.current.request===request;
+  loadJourneySnapshot(ownerSessionId).then(result=>{if(current())setSnapshot(result);},e=>{if(current())setError(String(e));});
+  return ()=>{live=false;};
+ },[ownerSessionId,reload]);
+ const visible=snapshot?.ownerSessionId===ownerSessionId?snapshot:null;
+ const active=selected?.ownerSessionId===ownerSessionId&&visible?.nodes.some(n=>n.anchor.boundaryHash===selected.boundaryHash)?selected:null;
+ const pick=(a:DurableAnchor)=>{validateAnchor(a);if(a.ownerSessionId!==ownerSessionId||!visible?.nodes.some(n=>n.anchor.boundaryHash===a.boundaryHash&&n.anchor.durableMessageId===a.durableMessageId))throw Error("Journey explicit anchor unavailable");setSelected(a);};
+ return <section role="dialog" aria-label="Canonical Session Journey" className="absolute right-0 top-full z-50 max-h-[80vh] w-[min(900px,95vw)] overflow-auto rounded-lg border border-border-2 bg-chat-container p-3 text-text-1 shadow-lg" onKeyDown={e=>{if(e.key==="Escape")onClose();}}>
+  <header><strong>Session Journey</strong><button type="button" onClick={()=>setReload(v=>v+1)}>Refresh Journey</button><button type="button" onClick={onClose}>Close Journey</button></header>
+  <p>Canonical durable history. Read-only; preview, import, fork, facts and reviews require independently validated service permissions.</p>
+  {error&&<p role="alert">{error}</p>}{!visible&&!error&&<p role="status">Loading canonical Journey</p>}
+  {visible&&<><JourneyCanvas snapshot={visible} onSelect={pick}/><label>Historical endpoint<select aria-label="Journey historical endpoint" value={active?.durableMessageId??""} onChange={e=>{const n=visible.nodes.find(n=>n.anchor.durableMessageId===e.target.value);if(n)pick(n.anchor);else setSelected(null);}}><option value="">Select explicit durable endpoint</option>{visible.nodes.map(n=><option key={n.id} value={n.anchor.durableMessageId}>{n.kind}: {n.title}</option>)}</select></label><p>{visible.nodes.length} persisted milestones / revision {visible.revision}</p>{active&&<dl data-testid="journey-explicit-endpoint"><dt>Durable endpoint</dt><dd>{active.durableMessageId}</dd><dt>Source branch</dt><dd>{active.branchId}</dd><dt>Boundary hash</dt><dd>{active.boundaryHash}</dd></dl>}{visible.nodes.length===0&&<p>No persisted endpoints</p>}</>}
+ </section>;
+}

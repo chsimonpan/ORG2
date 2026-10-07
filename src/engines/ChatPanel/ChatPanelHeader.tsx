@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
 import { useAtomValue } from "jotai";
 import React from "react";
+import { JourneyPopover } from "@src/features/Journey/JourneyPopover";
 
 import Button from "@src/components/Button";
 import { KeyboardShortcutTooltipContent } from "@src/components/KeyboardShortcut";
@@ -159,6 +160,7 @@ export function ChatPanelHeader({
         style={CHAT_PANEL_HEADER_NO_DRAG_STYLE}
       >
         {showSessionContent && sessionHeaderExtras}
+        {showSessionContent && currentSessionId && !currentSessionId.startsWith("cli:") && <JourneyPopover ownerSessionId={currentSessionId} />}
         {showTuiModeToggle && (
           <Tooltip
             content={
