@@ -955,3 +955,18 @@ async fn compaction_dispatch_is_noop_without_matching_hooks() {
     super::dispatch::fire_pre_compaction(Some(&executor), "sess-x", "auto", 1).await;
     super::dispatch::fire_post_compaction(Some(&executor), "sess-x", "auto", 1, 1);
 }
+
+#[tokio::test]
+async fn pre_compaction_real_slow_hook_stage_is_not_provider_time() {
+    let dir=tempfile::tempdir_in(std::env::var("ORG2_TEST_TMP").unwrap()).unwrap();
+    let marker=dir.path().join("pre-provider-hook.done");
+    let command=format!("sleep 0.15; printf fixture > '{}'",marker.display());
+    let mut hooks=HashMap::new();hooks.insert(HookEvent::PreCompaction,vec![HookEntry::Command{command,timeout_ms:5000,matcher:None}]);
+    let executor=std::sync::Arc::new(HookExecutor::with_config(HooksConfig{hooks},dir.path().to_path_buf()));
+    let started=std::time::Instant::now();
+    crate::specialization::hooks::dispatch::fire_pre_compaction(Some(&executor),"fixture-session","manual",41).await;
+    assert!(started.elapsed()>=std::time::Duration::from_millis(100));
+    assert_eq!(std::fs::read(&marker).unwrap(),b"fixture");
+    // This is an actual shell hook delay before any provider: never attribute
+    // its elapsed time to a mocked LLM or enlarge SESSION_MEMORY_TIMEOUT.
+}
