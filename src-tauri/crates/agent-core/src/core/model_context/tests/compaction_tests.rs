@@ -1604,3 +1604,59 @@ async fn compact_with_fork_falls_back_to_side_query_on_fork_failure() {
         .contains("side-query summary"));
     assert!(provider.calls.load(Ordering::SeqCst) >= 2);
 }
+
+
+/// Regression for R4: virtual elapsed time is not an outer driver timeout.
+/// This tests the actual compactor with the runtime-pinned provider/model;
+/// it does not identify the production incident cause or prove GUI behavior.
+#[tokio::test(start_paused = true)]
+async fn manual_compact_survives_61s_provider_delay_without_losing_history() {
+    use crate::model_context::compaction::CompactionOutcome;
+    use crate::providers::traits::{LLMProvider, LLMResponse, ProviderError};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    struct DelayedProvider { fail: bool, calls: AtomicUsize }
+    #[async_trait::async_trait]
+    impl LLMProvider for DelayedProvider {
+        async fn chat(&self, _messages: &[Value], _tools: Option<&[Value]>,
+            model: &str, _max_tokens: u32, _temperature: f32,
+        ) -> Result<LLMResponse, ProviderError> {
+            assert_eq!(model, "runtime-pinned-model");
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_secs(61)).await;
+            if self.fail { return Err(ProviderError::RequestFailed("delayed provider failure".into())); }
+            Ok(LLMResponse {
+                content: Some("compact retained older context".into()), tool_calls: vec![],
+                finish_reason: crate::providers::finish_reason::STOP.into(),
+                usage: Default::default(), reasoning_content: None, blocks: vec![],
+                stream_error_kind: None, retry_after_ms: None,
+            })
+        }
+        fn default_model(&self) -> &str { "runtime-pinned-model" }
+        fn provider_name(&self) -> &str { "isolated-delay-provider" }
+    }
+    let big = "x".repeat(400);
+    let mut history = vec![user_msg("preserve the source session task")];
+    for _ in 0..40 { history.push(assistant_msg(&big)); }
+    let original = history.clone();
+    let budget = ContextCompactor::estimate_messages_tokens(&history) * 2;
+    let mut config = default_config(); config.floor_tokens = 0;
+    for fail in [false, true] {
+        let provider = DelayedProvider { fail, calls: AtomicUsize::new(0) };
+        let mut state = CompactionState::default();
+        let started = tokio::time::Instant::now();
+        let result = ContextCompactor::compact_manual_force(&history, budget, &config,
+            &mut state, &provider, "runtime-pinned-model", None).await;
+        assert!(started.elapsed() >= Duration::from_secs(61));
+        assert!(provider.calls.load(Ordering::SeqCst) >= 1);
+        assert_eq!(history, original, "failure/success must not mutate caller history");
+        if fail {
+            assert!(result.is_err(), "provider failure must remain explicit");
+        } else {
+            let (compacted, outcome) = result.expect("61s is not a compaction hard deadline");
+            assert_ne!(outcome, CompactionOutcome::Skipped);
+            assert!(compacted.len() < history.len());
+        }
+    }
+}

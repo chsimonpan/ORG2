@@ -172,6 +172,8 @@ foreign-types = "0.5"
 # Tests
 # ---------------------------------------------------------------------------
 [dev-dependencies]
+# Fake-clock compaction regression; test-only, no application timeout change.
+tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3.13"
 test_helpers = { path = "../test-helpers" }
 app_utils = { path = "../app-utils", features = ["testing"] }

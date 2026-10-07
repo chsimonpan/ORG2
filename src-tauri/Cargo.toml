@@ -550,6 +550,9 @@ tauri-plugin-updater = "=2.9.0"
 
 [dev-dependencies]
 
+# Real native IPC dispatch tests use Tauri MockRuntime; no production feature change.
+tauri = { workspace = true, features = ["test"] }
+
 # Parse ephemeral Codex profile layers in runner security/compatibility tests.
 toml = "0.8"
 

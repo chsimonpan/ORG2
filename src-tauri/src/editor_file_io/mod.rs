@@ -38,3 +38,6 @@ pub async fn editor_write_bounded<R: Runtime>(app: AppHandle<R>, path: String, c
     let path = permitted(&app, path)?;
     tauri::async_runtime::spawn_blocking(move || { let _guard = EDITOR_IO.lock().map_err(|_| "editor I/O lock failed")?; bounded::write_bounded(&path, &content, create.unwrap_or(false), expected_content.as_deref()) }).await.map_err(|e| format!("save task: {e}"))?
 }
+
+#[cfg(test)]
+mod rpc_tests;

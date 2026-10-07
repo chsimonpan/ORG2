@@ -121,13 +121,17 @@ pub fn write_bounded(path: &Path, content: &str, create: bool, expected: Option<
 #[cfg(test)]
 mod tests {
     use super::*;
-    struct Fixture(PathBuf);
+    struct Fixture(PathBuf, Option<std::ffi::OsString>);
     impl Fixture { fn new() -> Self {
         let root = std::env::var("ORG2_TEST_TMP").expect("controlled fixture path required");
         let p = PathBuf::from(root).join(format!("bounded-{}-{}", std::process::id(), SAVE_ID.fetch_add(1, Ordering::Relaxed)));
-        fs::create_dir_all(&p).unwrap(); std::env::set_var("ORG2_EDITOR_STAGE_DIR", &p); Self(p)
+        fs::create_dir_all(&p).unwrap(); let previous = std::env::var_os("ORG2_EDITOR_STAGE_DIR"); std::env::set_var("ORG2_EDITOR_STAGE_DIR", &p); Self(p, previous)
     } fn path(&self) -> PathBuf { self.0.join("file.txt") } }
-    impl Drop for Fixture { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
+    impl Drop for Fixture { fn drop(&mut self) {
+        if let Some(previous) = &self.1 { std::env::set_var("ORG2_EDITOR_STAGE_DIR", previous); }
+        else { std::env::remove_var("ORG2_EDITOR_STAGE_DIR"); }
+        let _ = fs::remove_dir_all(&self.0);
+    } }
     #[test] fn boundaries_and_utf8() {
         let f=Fixture::new(); let p=f.path();
         for size in [LARGE_FILE_LIMIT_BYTES-1, LARGE_FILE_LIMIT_BYTES, LARGE_FILE_LIMIT_BYTES+1] {

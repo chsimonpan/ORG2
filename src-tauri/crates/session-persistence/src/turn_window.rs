@@ -54,6 +54,14 @@ fn load_events_for_turn(
     turn: &turn_index::CachedTurnSummary,
     preview: bool,
 ) -> SqliteResult<Vec<CachedEvent>> {
+    // A durable turn descriptor is owned by exactly one session. Reject a
+    // caller/descriptor mismatch before querying, never reinterpret its ordinal
+    // against another session's rows.
+    if turn.session_id != session_id {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "historical turn belongs to a different source session".into(),
+        ));
+    }
     let (predicate, owner) = if let Some(execution) = &turn.execution {
         (
             format!("({EXECUTION_OWNER_SQL}) = ?2"),
@@ -263,6 +271,43 @@ mod tests {
             params![id, session_id, function_name, created_at],
         )
         .expect("insert event");
+    }
+
+    // R3 baseline for the real persistence query, not Journey fork acceptance.
+    // Same ordinals in unrelated sessions and rows after the selected endpoint
+    // must never contaminate a session-scoped historical turn window.
+    #[test]
+    fn historical_turn_window_excludes_other_session_and_end_boundary() {
+        let conn = events_test_conn();
+        for (session, id, seq) in [
+            ("source-session", "before", 9),
+            ("source-session", "first", 10),
+            ("source-session", "last", 19),
+            ("source-session", "endpoint", 20),
+            ("unrelated-session", "same-ordinal", 10),
+        ] {
+            insert_event(&conn, session, id, "assistant_message", "2026-10-07T00:00:00Z");
+            conn.execute("UPDATE events SET history_sequence=?1 WHERE session_id=?2 AND id=?3",
+                params![seq, session, id]).unwrap();
+        }
+        let mut turn = turn_index::CachedTurnSummary {
+            session_id: "source-session".into(), turn_id: "durable-turn".into(),
+            start_sequence: 10, end_sequence: Some(20), next_turn_id: None,
+            started_at: "2026-10-07T00:00:00Z".into(), ended_at: None, duration_ms: None,
+            user_event_ids: vec![], user_preview: "selected source".into(),
+            event_count: 2, body_event_count: 2, status: "completed".into(), interrupted: false,
+            turn_intent_id: None, execution: None, modified_files: vec![],
+            resource_interactions: vec![], git_artifacts: vec![],
+        };
+        let rows = load_events_for_turn(&conn, "source-session", &turn, false).unwrap();
+        assert_eq!(rows.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), vec!["first", "last"]);
+        assert!(rows.iter().all(|r| r.session_id == "source-session"));
+        assert!(load_events_for_turn(&conn, "unrelated-session", &turn, false).is_err(),
+            "durable source turn cannot be reinterpreted against another session");
+        // This owner guard is only a low-level historical query contract, not
+        // the still-missing full Journey message/branch/end-selection verifier.
+        turn.end_sequence = Some(10);
+        assert!(load_events_for_turn(&conn, "source-session", &turn, false).unwrap().is_empty());
     }
 
     #[test]
