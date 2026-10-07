@@ -64,16 +64,20 @@ impl Pair {
     }
 }
 fn mtime(path: &Path, seconds: u64) {
-    fs::File::options()
-        .write(true)
-        .open(path)
-        .unwrap()
-        .set_times(
-            fs::FileTimes::new()
-                .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds)),
-        )
-        .unwrap();
+    let expected = std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds);
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let path_c = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        let ts = libc::timespec { tv_sec: seconds as libc::time_t, tv_nsec: 0 };
+        assert_eq!(unsafe { libc::utimensat(libc::AT_FDCWD,path_c.as_ptr(),[ts,ts].as_ptr(),0) },0,"fixture timestamp setup");
+    }
+    #[cfg(not(unix))]
+    fs::File::options().write(true).open(path).unwrap()
+        .set_times(fs::FileTimes::new().set_modified(expected)).unwrap();
+    assert_eq!(fs::metadata(path).unwrap().modified().unwrap(),expected,"mtime fixture must set the requested source revision");
 }
+
 fn raw(label: &str) -> Vec<u8> {
     line(
         json!({"sessionId":SESSION,"type":"future-vendor-record","newField":{"mode":label},

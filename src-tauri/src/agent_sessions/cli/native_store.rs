@@ -223,10 +223,51 @@ pub(super) fn create_file_atomically_checked(
         write(&mut file)?;
         file.sync_all()
             .map_err(|error| format!("sync staged {label}: {error}"))?;
+        let owned = file.metadata()
+            .map_err(|error| format!("inspect staged {label}: {error}"))?;
         drop(file);
         check()?;
         match fs::hard_link(&staged, destination) {
-            Ok(()) => Ok(true),
+            Ok(()) => {
+                fs::remove_file(&staged)
+                    .map_err(|error| format!("unlink published {label} stage: {error}"))?;
+                // Reopen only the exact just-published inode. Closing the staged
+                // fd before final metadata commit matters on bind-mounted Unix
+                // filesystems; no-clobber contents and strict nlink checks remain.
+                let mut options = fs::OpenOptions::new();
+                options.read(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    options.custom_flags(libc::O_NOFOLLOW);
+                }
+                let published = options.open(destination)
+                    .map_err(|error| format!("inspect published {label}: {error}"))?;
+                let current = published.metadata()
+                    .map_err(|error| format!("inspect published {label} metadata: {error}"))?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    if (current.dev(),current.ino(),current.uid()) != (owned.dev(),owned.ino(),owned.uid()) {
+                        return Err(format!("published {label} identity changed"));
+                    }
+                }
+                if current.len() != owned.len() || !current.is_file() {
+                    return Err(format!("published {label} artifact changed"));
+                }
+                published.set_permissions(owned.permissions())
+                    .map_err(|error| format!("finalize published {label} permissions: {error}"))?;
+                published.sync_all()
+                    .map_err(|error| format!("sync published {label}: {error}"))?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    if published.metadata().map_err(|e|e.to_string())?.nlink() != 1 {
+                        return Err(format!("published {label} has unexpected links"));
+                    }
+                }
+                Ok(true)
+            },
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
             Err(error) => Err(format!(
                 "publish new {label} {}: {error}",
@@ -353,6 +394,23 @@ pub(super) fn append_suffix_atomically(path: &Path, suffix: &[u8]) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn complete_owned_publication_finishes_with_one_name_and_permissions() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("owned.jsonl");
+        assert!(create_file_atomically(&path,"owned row",|file| {
+            file.set_permissions(fs::Permissions::from_mode(0o600)).map_err(|e|e.to_string())?;
+            file.write_all(b"whole row").map_err(|e|e.to_string())
+        }).unwrap());
+        assert_eq!(fs::read(&path).unwrap(),b"whole row");
+        let metadata = fs::metadata(&path).unwrap();
+        assert_eq!(metadata.nlink(),1);
+        assert_eq!(metadata.permissions().mode() & 0o777,0o600);
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(),1);
+    }
+
 
     #[test]
     fn revoked_stage_is_never_published_after_fsync() {

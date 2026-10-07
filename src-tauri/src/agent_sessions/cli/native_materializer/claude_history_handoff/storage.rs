@@ -303,6 +303,27 @@ fn save_changed<T: Serialize>(path: &Path, value: &T, budget: &Budget) -> Result
     }
     write(path, &bytes)
 }
+// Finalize only an exact owned publication inode after its stage name is gone.
+// Filesystem namespace metadata may cache the pre-unlink hard-link count.
+#[cfg(unix)]
+fn finalize_unlinked_publication(path: &Path, owned: &fs::Metadata) -> Result<(), Status> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let file = fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW)
+        .open(path).map_err(|_| Status::Changed)?;
+    let current = file.metadata().map_err(|_| Status::Changed)?;
+    if !current.is_file()
+        || (current.dev(),current.ino(),current.uid(),current.len())
+            != (owned.dev(),owned.ino(),unsafe {libc::geteuid()},owned.len()) {
+        return Err(Status::Changed);
+    }
+    file.set_permissions(owned.permissions()).map_err(|_| Status::Failed)?;
+    file.sync_all().map_err(|_| Status::Failed)?;
+    if file.metadata().map_err(|_| Status::Changed)?.nlink() != 1 {
+        return Err(Status::Changed);
+    }
+    Ok(())
+}
+
 fn remove_stage(path: &Path, expected: &Fingerprint, budget: &Budget) -> Result<(), Status> {
     if let Some(current) = optional_snapshot(path, budget)? {
         if current.content != *expected {
@@ -501,7 +522,9 @@ fn recover_linked_publication(
         {
             return Err(Status::Changed);
         }
+        let owned = fs::symlink_metadata(target).map_err(|_| Status::Changed)?;
         remove(&staged)?;
+        finalize_unlinked_publication(target, &owned)?;
     }
     #[cfg(not(unix))]
     let _ = (primary, package, pending_path, binding, budget, guard);
@@ -868,7 +891,11 @@ fn reconcile_inner(
                 Status::Failed
             }
         })?;
+        #[cfg(unix)]
+        let owned = fs::symlink_metadata(destination).map_err(|_| Status::Changed)?;
         remove(&staged)?;
+        #[cfg(unix)]
+        finalize_unlinked_publication(destination, &owned)?;
     } else {
         fs::rename(&staged, destination).map_err(|_| Status::Failed)?;
     }
