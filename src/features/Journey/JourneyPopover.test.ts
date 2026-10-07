@@ -2,7 +2,7 @@
 import {it,expect,vi} from "vitest";import {createElement} from "react";
 import {createSmokeRoot,dispatch} from "@src/test/reactSmokeHarness";
 import {JourneyOwnerPanel} from "./JourneyPopover";import {loadJourneySnapshot} from "./nativeAdapter";import type {JourneySnapshot} from "./types";
-vi.mock("./nativeAdapter",()=>({loadJourneySnapshot:vi.fn()}));
+vi.mock("./nativeAdapter",()=>({loadJourneySnapshot:vi.fn(),loadJourneyBoundaryPreview:vi.fn(),loadJourneyDomainSnapshot:vi.fn(()=>new Promise(()=>{}))}));
 const snap=(owner:string,id:string):JourneySnapshot=>({schemaVersion:1,ownerSessionId:owner,revision:1,nodes:[{id,title:id,timestamp:1000,laneId:`session:${owner}`,kind:"question",anchor:{ownerSessionId:owner,sourceSessionId:owner,branchId:`session:${owner}`,durableMessageId:id,boundaryVersion:1,boundaryHash:`hash-${id}`}}],edges:[],capabilities:{read:true,fork:false,import:false,mutate:false}});
 it("mounted canonical entry rejects deferred A1 success/error after A-B-A and selects an explicit historical endpoint",async()=>{
  let a1!:(s:JourneySnapshot)=>void,a2!:(s:JourneySnapshot)=>void,bad!:(e:Error)=>void;
