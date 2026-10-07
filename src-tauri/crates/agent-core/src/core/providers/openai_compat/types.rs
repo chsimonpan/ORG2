@@ -559,3 +559,30 @@ mod tests {
         assert_eq!(usage[usage_key::CACHE_READ_TOKENS], 150);
     }
 }
+
+#[cfg(test)]
+mod weighted_normalization_tests {
+    use super::*;
+    #[test]
+    fn weighted_cache_is_subtracted_once_before_equivalent_accounting() {
+        for payload in [
+            serde_json::json!({"prompt_tokens":1000,"completion_tokens":20,"total_tokens":1020,
+                "prompt_tokens_details":{"cached_tokens":600,"cache_write_tokens":100}}),
+            serde_json::json!({"prompt_tokens":300,"completion_tokens":20,"total_tokens":1020,
+                "cache_read_tokens":600,"cache_write_tokens":100}),
+        ] {
+            let usage: Usage = serde_json::from_value(payload).unwrap();
+            let map = usage.to_usage_map();
+            assert_eq!(map[usage_key::PROMPT_TOKENS], 300);
+            assert_eq!(
+                crate::model_context::weighted_usage::weighted_milli(
+                    map[usage_key::PROMPT_TOKENS],
+                    map[usage_key::CACHE_READ_TOKENS],
+                    map[usage_key::CACHE_WRITE_TOKENS],
+                    map[usage_key::COMPLETION_TOKENS]
+                ),
+                585_000
+            );
+        }
+    }
+}
