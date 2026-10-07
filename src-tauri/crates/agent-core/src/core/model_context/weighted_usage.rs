@@ -125,6 +125,53 @@ pub fn record_turn(
 mod tests {
     use super::*;
     #[test]
+    fn weighted_crash_receipt_child() {
+        let Ok(path)=std::env::var("ORG2_WEIGHTED_CRASH_FIXTURE") else {return};
+        assert!(path.starts_with("/org2/fixtures/native/"));
+        let mut conn=Connection::open(path).unwrap();
+        let tx=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+        record_with_connection(&tx,"crash-owner","turn-before-crash",1,29_500).unwrap();
+        tx.commit().unwrap();
+        // Abrupt process termination, no Drop/unwind/end-of-turn persistence.
+        std::process::exit(86);
+    }
+    #[test]
+    fn weighted_committed_iteration_survives_abrupt_process_exit() {
+        let dir=tempfile::tempdir_in(std::env::var("ORG2_TEST_TMP").unwrap()).unwrap();
+        let path=dir.path().join("abrupt.sqlite");
+        let status=std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact","core::model_context::weighted_usage::tests::weighted_crash_receipt_child","--test-threads=1"])
+            .env("ORG2_WEIGHTED_CRASH_FIXTURE",&path).status().unwrap();
+        assert_eq!(status.code(),Some(86));
+        let mut conn=Connection::open(&path).unwrap();
+        assert_eq!(snapshot_with_connection(&conn,"crash-owner").unwrap().milli,29_500);
+        let tx=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+        record_with_connection(&tx,"crash-owner","turn-before-crash",1,29_500).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(snapshot_with_connection(&conn,"crash-owner").unwrap().milli,29_500);
+        assert_eq!(snapshot_with_connection(&conn,"other-owner").unwrap().milli,0);
+    }
+    #[test]
+    fn weighted_parallel_manual_checkpoints_reject_double_reset_and_preserve_late_usage() {
+        let dir=tempfile::tempdir_in(std::env::var("ORG2_TEST_TMP").unwrap()).unwrap();
+        let path=dir.path().join("parallel.sqlite");
+        let mut conn=Connection::open(&path).unwrap();
+        let tx=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+        record_with_connection(&tx,"owner","first",1,5_000_000_000).unwrap();tx.commit().unwrap();
+        let captured=snapshot_with_connection(&conn,"owner").unwrap();
+        let barrier=std::sync::Arc::new(std::sync::Barrier::new(3));
+        let workers:Vec<_>=(0..2).map(|_|{let path=path.clone();let c=captured.clone();let b=barrier.clone();std::thread::spawn(move||{
+            let mut conn=Connection::open(path).unwrap();conn.busy_timeout(std::time::Duration::from_secs(5)).unwrap();b.wait();
+            let tx=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();commit_with_connection(&tx,&c).unwrap();tx.commit().unwrap();
+        })}).collect();
+        let tx=conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+        record_with_connection(&tx,"owner","late",1,17_000).unwrap();tx.commit().unwrap();
+        barrier.wait();for worker in workers{worker.join().unwrap();}
+        let actual=snapshot_with_connection(&conn,"owner").unwrap();assert_eq!(actual.milli,17_000);assert_eq!(actual.generation,1);
+        let receipts:i64=conn.query_row("SELECT COUNT(*) FROM session_weighted_usage_receipts WHERE session_id='owner'",[],|r|r.get(0)).unwrap();assert_eq!(receipts,2);
+    }
+
+    #[test]
     fn weighted_formula_clamps_and_saturates_without_double_cache() {
         assert_eq!(weighted_milli(10, 20, 30, 40), 249_500);
         assert_eq!(weighted_milli(-1, -1, -1, -1), 0);
