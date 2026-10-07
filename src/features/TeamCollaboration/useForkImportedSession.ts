@@ -12,7 +12,7 @@
  * persisted share capability and keeps the writable fork in Personal.
  */
 import { useAtom, useAtomValue } from "jotai";
-import { useCallback, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
 import { createLogger } from "@src/hooks/logger";
 import type {
@@ -148,9 +148,42 @@ export function useForkImportedSession(session: Session | null | undefined) {
   );
 
   const importedFrom = session?.importedFrom;
+  const scopeRevisionRef = useRef(0);
+  const requestRef = useRef<object | null>(null);
+  const currentOwnerRef = useRef(session?.session_id);
+  const [stateOwner, setStateOwner] = useState(session?.session_id);
+  useLayoutEffect(() => {
+    scopeRevisionRef.current += 1;
+    currentOwnerRef.current = session?.session_id;
+    requestRef.current = null;
+    setStateOwner(session?.session_id);
+    setState("idle");
+    setErrorKind(null);
+    return () => {
+      scopeRevisionRef.current += 1;
+      currentOwnerRef.current = undefined;
+      requestRef.current = null;
+    };
+  }, [session?.session_id, importedFrom]);
 
   const fork = useCallback(async (): Promise<ForkImportedOutcome> => {
+    if (
+      !session?.session_id ||
+      currentOwnerRef.current !== session.session_id
+    ) {
+      return { ok: false, errorKind: "cancelled" };
+    }
+    const revision = scopeRevisionRef.current;
+    const token = {};
+    requestRef.current = token;
+    const isCurrent = () =>
+      scopeRevisionRef.current === revision && requestRef.current === token;
+    const cancelled = (): ForkImportedOutcome => ({
+      ok: false,
+      errorKind: "cancelled",
+    });
     const fail = (kind: ForkImportedErrorKind): ForkImportedOutcome => {
+      if (!isCurrent()) return cancelled();
       setErrorKind(kind);
       setState("error");
       return { ok: false, errorKind: kind };
@@ -169,6 +202,7 @@ export function useForkImportedSession(session: Session | null | undefined) {
 
       if (!auth) return fail("generic");
       const fresh = await ensureFreshSession(auth);
+      if (!isCurrent()) return cancelled();
       if (!fresh) return fail("generic");
       if (!commitRefreshedAuth(setAuth, auth, fresh)) return fail("generic");
 
@@ -178,6 +212,7 @@ export function useForkImportedSession(session: Session | null | undefined) {
           resolution.shareToken,
           resolution.shareEndpointUrl
         );
+        if (!isCurrent()) return cancelled();
         if (!result) return fail("generic");
         setState("idle");
         return {
@@ -196,6 +231,7 @@ export function useForkImportedSession(session: Session | null | undefined) {
         fresh.accessToken,
         importedFrom
       );
+      if (!isCurrent()) return cancelled();
       if (outcome.status === "gone") return fail("gone");
       const { result } = outcome;
       if (!result) {
@@ -212,6 +248,7 @@ export function useForkImportedSession(session: Session | null | undefined) {
         repoPath: result.repoPath,
       };
     } catch (error) {
+      if (!isCurrent()) return cancelled();
       if (error instanceof ForkCancelledError) {
         // Quiet cancel: user dismissed the mandatory checkout picker.
         setState("idle");
@@ -240,7 +277,11 @@ export function useForkImportedSession(session: Session | null | undefined) {
       }
       return fail("generic");
     }
-  }, [importedFrom, cloudOrgs, auth, setAuth]);
+  }, [session?.session_id, importedFrom, cloudOrgs, auth, setAuth]);
 
-  return { fork, state, errorKind };
+  return {
+    fork,
+    state: stateOwner === session?.session_id ? state : "idle",
+    errorKind: stateOwner === session?.session_id ? errorKind : null,
+  };
 }

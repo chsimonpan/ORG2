@@ -12,6 +12,7 @@ import {
   type SetStateAction,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -85,8 +86,30 @@ export interface UseTurnPageSelectionStateReturn {
 export function useTurnPageSelectionState(
   activeId: string | null
 ): UseTurnPageSelectionStateReturn {
-  const [turnPageSelection, setTurnPageSelection] = useState<TurnPageSelection>(
-    { pageIndex: null, sessionId: null }
+  // Keep independent explicit history boundaries while parallel sessions are
+  // visited. Selecting a B page must not erase a still-legal A selection.
+  const [selections, setSelections] = useState<
+    Record<string, TurnPageSelection>
+  >({});
+  const turnPageSelection = (activeId && selections[activeId]) || {
+    pageIndex: null,
+    sessionId: activeId,
+  };
+  const setTurnPageSelection = useCallback<
+    Dispatch<SetStateAction<TurnPageSelection>>
+  >(
+    (update) =>
+      setSelections((previous) => {
+        const current = (activeId && previous[activeId]) || {
+          pageIndex: null,
+          sessionId: activeId,
+        };
+        const next = typeof update === "function" ? update(current) : update;
+        const owner = next.sessionId ?? activeId;
+        if (!owner) return previous;
+        return { ...previous, [owner]: { ...next, sessionId: owner } };
+      }),
+    [activeId]
   );
   const [turnPageListOpen, setTurnPageListOpen] = useState(false);
   const [turnPageSortAscending, setTurnPageSortAscending] = useState(false);
@@ -178,8 +201,16 @@ export function useTurnPageNavigation({
   // replace just dropped.
   const transcriptReplaceEpoch = useAtomValue(transcriptReplaceEpochAtom);
 
-  useEffect(() => {
+  const scopeRevisionRef = useRef(0);
+  const loadRequestsRef = useRef(new Map<string, object>());
+  useLayoutEffect(() => {
+    scopeRevisionRef.current += 1;
     autoLoadedTurnKeysRef.current.clear();
+    loadRequestsRef.current.clear();
+    return () => {
+      scopeRevisionRef.current += 1;
+      loadRequestsRef.current.clear();
+    };
   }, [activeId, transcriptReplaceEpoch]);
 
   useEffect(() => {
@@ -232,14 +263,21 @@ export function useTurnPageNavigation({
 
         const startedForSession = activeId;
         const startedForEpoch = transcriptReplaceEpoch;
+        const revision = scopeRevisionRef.current;
+        const token = {};
+        loadRequestsRef.current.set(loadKey, token);
+        const isCurrentRequest = () =>
+          scopeRevisionRef.current === revision &&
+          loadRequestsRef.current.get(loadKey) === token;
 
         void loadSessionTurnBodyIntoStore({
           sessionId: startedForSession,
           turnId,
         })
           .then(async () => {
+            if (!isCurrentRequest()) return;
             setLoadedTurnIds((prev) => {
-              if (startedForSession !== activeId) return prev;
+              if (!isCurrentRequest()) return prev;
               const sameGeneration =
                 prev.sessionId === startedForSession &&
                 prev.epoch === startedForEpoch;
@@ -268,9 +306,12 @@ export function useTurnPageNavigation({
                 turnIds: next,
               };
             });
+            if (!isCurrentRequest()) return;
             await pruneLoadedTurnBodies(startedForSession, protectedTurnIds);
           })
           .catch((error: unknown) => {
+            if (!isCurrentRequest()) return;
+            loadRequestsRef.current.delete(loadKey);
             autoLoadedTurnKeysRef.current.delete(loadKey);
             logger.warn("Failed to lazy-load turn body", {
               sessionId: startedForSession,

@@ -265,6 +265,52 @@ describe("chat search highlight scheduling", () => {
     expect(store.get(chatSearchSyncAtomFamily("session-2")).query).toBe("");
     expect(search.query).toBe("");
   });
+  it("never publishes A search results into B's shared search/highlight atom", async () => {
+    options.chatHistory[0].displayText = "needle in session A";
+    query("needle");
+    await act(async () => search.nextResult());
+    expect(search.resultCount).toBe(1);
+    const foreignWrites: string[] = [];
+    const target = chatSearchSyncAtomFamily("session-2");
+    const unsubscribe = store.sub(target, () => {
+      const sync = store.get(target);
+      if (sync.query) foreignWrites.push(sync.query);
+    });
+    store.set(chatFindInChatOpenAtomFamily("session-2"), true);
+    options = { ...options, sessionId: "session-2", chatHistory: [] };
+    act(() =>
+      root.render(createElement(Provider, { store }, createElement(Harness)))
+    );
+    unsubscribe();
+    expect(foreignWrites).toEqual([]);
+    expect(search.results).toEqual([]);
+  });
+  it("A→B→A discards a late keyword result and keeps the newer A result", async () => {
+    let resolveOld!: (results: never[]) => void;
+    mocks.invoke.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveOld = resolve;
+        })
+    );
+    options.chatHistory[0].displayText = "old needle new needle";
+    query("old needle");
+    act(() => search.nextResult());
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    for (const sessionId of ["session-2", "session-1"]) {
+      store.set(chatFindInChatOpenAtomFamily(sessionId), true);
+      options = { ...options, sessionId };
+      act(() =>
+        root.render(createElement(Provider, { store }, createElement(Harness)))
+      );
+    }
+    query("new needle");
+    await act(async () => search.nextResult());
+    expect(syncedQuery()).toBe("new needle");
+    await act(async () => resolveOld([]));
+    expect(syncedQuery()).toBe("new needle");
+    expect(search.resultCount).toBe(1);
+  });
   it("applies a mode change once without leaving a duplicate draft timer", async () => {
     query("zen");
     await act(async () => search.toggleCaseSensitive());

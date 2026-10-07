@@ -1,5 +1,5 @@
 import { useAtomValue, useSetAtom } from "jotai";
-import React from "react";
+import React, { useLayoutEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import Button from "@src/components/Button";
@@ -51,6 +51,14 @@ const SessionForkHeaderExtras: React.FC<SessionForkHeaderExtrasProps> = ({
     forkedFrom?.orgId ?? null
   );
 
+  const navigationRevisionRef = useRef(0);
+  useLayoutEffect(() => {
+    navigationRevisionRef.current += 1;
+    return () => {
+      navigationRevisionRef.current += 1;
+    };
+  }, [session?.session_id]);
+
   if (!session) return null;
   // Cloud members continue directly through the canonical Agent composer.
   // Guest-share imports still need a separate local fork because they cannot
@@ -60,7 +68,11 @@ const SessionForkHeaderExtras: React.FC<SessionForkHeaderExtrasProps> = ({
 
   const handleFork = async (): Promise<void> => {
     if (state === "forking") return;
+    const revision = navigationRevisionRef.current;
     const outcome = await fork();
+    // A background fork may finish, but it cannot retarget a different tab
+    // after navigation (including A→B→A) or after this surface unmounts.
+    if (revision !== navigationRevisionRef.current) return;
     if (!outcome.ok) {
       if (outcome.errorKind !== "cancelled") {
         Message.error(t(FORK_ERROR_KEYS[outcome.errorKind]));

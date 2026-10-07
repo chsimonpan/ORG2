@@ -9,6 +9,7 @@ import {
   type SetStateAction,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -175,6 +176,8 @@ export function useChatSearch(
   const setChatSearchSync = useSetAtom(chatSearchSyncAtomFamily(sessionKey));
   useChatSearchShortcut(chatContainerRef, setIsSearchVisible, isSearchVisible);
 
+  const [searchStateOwner, setSearchStateOwner] = useState(sessionId);
+  const currentSessionIdRef = useRef(sessionId);
   const [query, setQueryState] = useState("");
   // Only publish a query alongside the results that were computed for it.
   // Draft input must not trigger DOM highlighting in every replay pane.
@@ -401,6 +404,9 @@ export function useChatSearch(
       searchQuery: string,
       searchModes: ChatSearchModes = modesRef.current
     ) => {
+      // A debounced callback retained from a departed surface cannot start a
+      // request or publish into the new surface's state.
+      if (sessionId !== currentSessionIdRef.current) return;
       const trimmedQuery = searchQuery.trim();
       if (!trimmedQuery || chatHistory.length === 0 || !sessionId) {
         setAppliedQuery("");
@@ -422,7 +428,11 @@ export function useChatSearch(
           maxResults
         );
 
-        if (generation !== searchGenerationRef.current) return;
+        if (
+          generation !== searchGenerationRef.current ||
+          sessionId !== currentSessionIdRef.current
+        )
+          return;
 
         setAppliedQuery(trimmedQuery);
         setResults(searchResults);
@@ -432,7 +442,11 @@ export function useChatSearch(
         const first = searchResults[0];
         if (first) scrollToSearchResult(first);
       } catch {
-        if (generation !== searchGenerationRef.current) return;
+        if (
+          generation !== searchGenerationRef.current ||
+          sessionId !== currentSessionIdRef.current
+        )
+          return;
         setAppliedQuery("");
         setResults([]);
         setCurrentResultIndex(0);
@@ -447,9 +461,16 @@ export function useChatSearch(
     debounceMs
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    currentSessionIdRef.current = sessionId;
     resetLocalSearch();
+    setSearchStateOwner(sessionId);
     debouncedPerformSearch.cancel();
+    return () => {
+      searchGenerationRef.current += 1;
+      currentSessionIdRef.current = null;
+      debouncedPerformSearch.cancel();
+    };
   }, [sessionId, resetLocalSearch, debouncedPerformSearch]);
 
   useEffect(() => {
@@ -559,9 +580,13 @@ export function useChatSearch(
       setChatSearchSync,
       buildChatSearchSyncState({
         isOpen: isSearchVisible,
-        query: appliedQuery,
-        results,
-        currentResultIndex,
+        // Effects from the first B render still close over A's local state,
+        // even if the layout reset already ran. Never publish that state into
+        // B's session-keyed shared atom/highlight/navigation consumers.
+        query: searchStateOwner === sessionId ? appliedQuery : "",
+        results: searchStateOwner === sessionId ? results : [],
+        currentResultIndex:
+          searchStateOwner === sessionId ? currentResultIndex : 0,
       })
     );
   }, [
@@ -569,6 +594,8 @@ export function useChatSearch(
     currentResultIndex,
     isSearchVisible,
     results,
+    searchStateOwner,
+    sessionId,
     setChatSearchSync,
   ]);
 
@@ -601,15 +628,15 @@ export function useChatSearch(
   }, [chatContainerRef, isSearchVisible, results]);
 
   return {
-    query,
+    query: searchStateOwner === sessionId ? query : "",
     setQuery: handleQueryChange,
-    results,
-    isSearching,
-    isSearchActive: query.trim().length > 0,
+    results: searchStateOwner === sessionId ? results : [],
+    isSearching: searchStateOwner === sessionId && isSearching,
+    isSearchActive: searchStateOwner === sessionId && query.trim().length > 0,
     isSearchVisible,
     closeSearch,
-    currentResultIndex,
-    resultCount: results.length,
+    currentResultIndex: searchStateOwner === sessionId ? currentResultIndex : 0,
+    resultCount: searchStateOwner === sessionId ? results.length : 0,
     nextResult,
     prevResult,
     caseSensitive: modes.caseSensitive,

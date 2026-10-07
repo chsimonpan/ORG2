@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { derivedSnapshotAtom, eventStoreVersionAtom } from "../../atoms/events";
 import { sessionIdAtom } from "../../atoms/metadata";
+import type { DerivedSnapshot } from "../EventStoreProxy";
 import { useEventStoreBridge } from "../useEventStoreBridge";
 
 const mock = vi.hoisted(() => ({
@@ -226,10 +227,9 @@ describe("real bridge ReactDOM session switch isolation", () => {
     baseline.eventIndex = { "A-earlier-message": 0 };
     await act(async () => request.resolve(baseline));
     const snapshot = store.get(derivedSnapshotAtom);
-    expect(snapshot?.events.map((event: any) => event.id)).toEqual([
-      "A-earlier-message",
-      "A-message",
-    ]);
+    expect(
+      (snapshot as DerivedSnapshot | null)?.events.map((event) => event.id)
+    ).toEqual(["A-earlier-message", "A-message"]);
     expect(snapshot?.chatEvents[0].id).toBe("A-message");
     expect(store.get(eventStoreVersionAtom)).toBe(12);
   });
