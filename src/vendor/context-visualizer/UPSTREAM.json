@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/Abudulaz/context-visualizer",
+  "commit": "bfd2b50d7ecb8bdbfff456bcbe00e7422311c759",
+  "index_html_blob": "3cf86cc814a3b4218bbe6994d65f0e034d767f2c",
+  "adapted_ranges": "index.html:245-271,403-441,641-686",
+  "notice": "MIT Copyright(c)2026 Zaheer; integrated ORG2 remains AGPL-3.0-or-later",
+  "reuse": "actual Catmull-Rom sample+ribbon normals+center path source, timeline compression repaired, marker geometry adapted to React",
+  "not_reused": "NodeHTTP/JSONL authorization/innerHTML/models; embedding and tree new"
+}
