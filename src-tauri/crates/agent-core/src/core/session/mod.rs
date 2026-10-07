@@ -63,3 +63,8 @@ pub use types::{
 pub use workspace::SessionWorkspace;
 
 pub mod journey_canonical;
+pub mod journey_lifecycle;
+pub mod journey_application_service;
+pub mod journey_context_visibility;
+pub mod journey_review_queue;
+pub mod journey_embedding;
