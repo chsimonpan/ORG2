@@ -215,7 +215,14 @@ fn inspect(bundle: &Path, agent: &str) -> Result<ResolvedNativeClient, String> {
     // Keep a fixed, bounded chain down to every artifact parent; reject
     // internal directory symlinks, but permit discovery aliases resolved above.
     // Generations are process-local cache identities, never persisted proofs.
-    let directories = std::iter::once(bundle.clone())
+    // The containing namespace is a replacement boundary too. Some Unix
+    // filesystems preserve a renamed directory's own ctime; replacing its
+    // name still changes its parent metadata. Fence both paths, rather than
+    // treating inode/mtime of unchanged pre-staged contents as launch proof.
+    // A sibling install may conservatively invalidate an in-flight inspection.
+    let parent = bundle.parent().ok_or("Native App bundle has no parent")?;
+    let directories = std::iter::once(parent.to_path_buf())
+        .chain(std::iter::once(bundle.clone()))
         .chain(
             [
                 "Contents",
