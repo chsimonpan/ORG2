@@ -70,3 +70,6 @@ fn read_boundary_preview(conn:&rusqlite::Connection,owner:&str,anchor:&DurableAn
  let a=agent_core::core::session::journey_canonical::resolve_with_connection(&c,"A","A","session:A","earlier",2).unwrap();let p=read_boundary_preview(&c,"A",&a).unwrap();assert_eq!(p.records.len(),1);assert_eq!(p.records[0].content,"original");assert!(!p.prefix_hash.is_empty());assert!(read_boundary_preview(&c,"B",&a).is_err());c.execute("UPDATE agent_messages SET content='changed' WHERE session_id='A' AND id='earlier'",[]).unwrap();assert!(read_boundary_preview(&c,"A",&a).is_err());c.execute("DELETE FROM agent_messages WHERE session_id='A' AND id='earlier'",[]).unwrap();assert!(read_boundary_preview(&c,"A",&a).is_err());
  }
 }
+
+#[tauri::command]
+pub async fn journey_domain_snapshot(owner_session_id:String,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<agent_core::core::session::journey_application_service::JourneySnapshotResponse,String>{if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_not_registered".into());}let conn=database::db::get_connection().map_err(|e|e.to_string())?;agent_core::core::session::journey_application_service::SessionJourneyApplicationService::snapshot(&conn,&owner_session_id).map_err(|e|e.to_string())}
