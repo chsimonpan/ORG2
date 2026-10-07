@@ -228,6 +228,31 @@ mod tests {
         }
     }
 
+
+    #[test]
+    fn local_vector_sqlite_roundtrip_scope_model_and_rank_are_real() {
+        let conn=Connection::open_in_memory().unwrap();init_learnings_table(&conn).unwrap();
+        let mut ids=Vec::new();
+        for (label,vector,scope,model,status) in [
+            ("first",vec![1.0,0.0],"agent:test","fixture-embedding-v1",LearningStatus::Active),
+            ("second",vec![0.8,0.6],"agent:test","fixture-embedding-v1",LearningStatus::Active),
+            ("orthogonal",vec![0.0,1.0],"agent:test","fixture-embedding-v1",LearningStatus::Active),
+            ("wrong_scope",vec![1.0,0.0],"agent:other","fixture-embedding-v1",LearningStatus::Active),
+            ("wrong_model",vec![1.0,0.0],"agent:test","fixture-embedding-v2",LearningStatus::Active),
+            ("pending",vec![1.0,0.0],"agent:test","fixture-embedding-v1",LearningStatus::Pending),
+        ] {
+            let mut l=make_learning(label,0.8,0.9);l.embedding=vector;l.agent_scope=scope.into();l.embedding_model=Some(model.into());l.status=status;
+            ids.push(insert_learning(&conn,&l).unwrap());
+        }
+        let first=super::super::load_learning_by_id(&conn,&ids[0]).unwrap().unwrap();
+        assert_eq!(first.embedding,vec![1.0,0.0]);assert_eq!(first.embedding_model.as_deref(),Some("fixture-embedding-v1"));
+        let hits=search_similar(&conn,"agent:test",&[1.0,0.0],Some("fixture-embedding-v1"),2,0.5).unwrap();
+        assert_eq!(hits.iter().map(|x|x.0.content.as_str()).collect::<Vec<_>>(),vec!["first","second"]);
+        assert!((hits[0].1-1.0).abs()<1e-6);assert!((hits[1].1-0.8).abs()<1e-6);
+        assert!(search_similar(&conn,"agent:test",&[1.0,0.0,0.0],Some("fixture-embedding-v1"),5,0.0).unwrap().is_empty());
+        assert_eq!(search_similar(&conn,"agent:test",&[1.0,0.0],Some("fixture-embedding-v2"),5,0.5).unwrap().iter().map(|x|x.0.content.as_str()).collect::<Vec<_>>(),vec!["wrong_model"]);
+    }
+
     fn make_dated_learning(
         content: &str,
         importance: f64,
