@@ -1,4 +1,5 @@
-import { readTextFile, stat } from "@tauri-apps/plugin-fs";
+import { readTextFile } from "@tauri-apps/plugin-fs";
+import { statEditorTextFile as stat } from "@src/services/file/editorBoundedIO";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -10,7 +11,7 @@ import type {
   WorkstationWorkspaceState,
 } from "../types";
 
-vi.mock("@src/services/file/editorBoundedIO", () => ({statEditorTextFile: async (path: string) => (await import("@tauri-apps/plugin-fs")).stat(path)}));
+vi.mock("@src/services/file/editorBoundedIO", () => ({statEditorTextFile: vi.fn()}));
 vi.mock("@tauri-apps/plugin-fs", () => ({
   stat: vi.fn(),
   readTextFile: vi.fn(),

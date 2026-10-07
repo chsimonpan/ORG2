@@ -1,4 +1,4 @@
-import { stat } from "@tauri-apps/plugin-fs";
+import { statEditorTextFile as stat } from "@src/services/file/editorBoundedIO";
 import { createStore } from "jotai/vanilla";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -328,8 +328,8 @@ describe("legacy seed claim", () => {
   });
 });
 
-vi.mock("@tauri-apps/plugin-fs", () => ({
-  stat: vi.fn(async () => ({ isFile: true, size: 8 })),
+vi.mock("@src/services/file/editorBoundedIO", () => ({
+  statEditorTextFile: vi.fn(async () => ({ isFile: true, size: 8 })),
 }));
 
 it("R7-U06 direct file tab atom refuses oversized metadata before activation", async () => {

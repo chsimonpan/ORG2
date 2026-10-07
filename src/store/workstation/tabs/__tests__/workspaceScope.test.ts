@@ -80,6 +80,13 @@ function open(
   });
 }
 
+vi.mock("@src/services/file/editorBoundedIO", () => ({
+  statEditorTextFile: vi.fn(async (path: string) => {
+    if (!path.startsWith("/fixture/")) throw new Error("unapproved fixture metadata path");
+    return { isFile: true, size: 8 };
+  }),
+}));
+
 beforeEach(() => localStorage.clear());
 
 describe("Workstation sharing policy", () => {
