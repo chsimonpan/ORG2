@@ -55,6 +55,7 @@ pub async fn journey_boundary_preview(owner_session_id:String,anchor:DurableAnch
 fn read_boundary_preview(conn:&rusqlite::Connection,owner:&str,anchor:&DurableAnchor)->Result<BoundaryPreview,String>{
  if anchor.source_session_id!=owner{return Err("journey_source_unauthorized".into());}
  let tx=conn.unchecked_transaction().map_err(|e|e.to_string())?;
+ let current_revision:i64=tx.query_row("SELECT COALESCE(MAX(sequence),0) FROM agent_messages WHERE session_id=?1",[owner],|r|r.get(0)).map_err(|e|e.to_string())?;if current_revision<0||current_revision as u64!=anchor.boundary_version{return Err("journey_revision_changed".into());}
  agent_core::core::session::journey_canonical::validate_commit_with_connection(&tx,owner,anchor,anchor.boundary_version,true)?;
  let end:i64=tx.query_row("SELECT sequence FROM agent_messages WHERE session_id=?1 AND id=?2",rusqlite::params![owner,anchor.durable_message_id],|r|r.get(0)).map_err(|e|e.to_string())?;
  let records={let mut stmt=tx.prepare("SELECT id,sequence,role,content FROM agent_messages WHERE session_id=?1 AND sequence<=?2 ORDER BY sequence,id LIMIT 10001").map_err(|e|e.to_string())?;
