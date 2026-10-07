@@ -253,6 +253,18 @@ mod tests {
         assert_eq!(search_similar(&conn,"agent:test",&[1.0,0.0],Some("fixture-embedding-v2"),5,0.5).unwrap().iter().map(|x|x.0.content.as_str()).collect::<Vec<_>>(),vec!["wrong_model"]);
     }
 
+
+    #[test]
+    fn vector_blob_corruption_is_not_silently_truncated_on_import_read() {
+        let conn=Connection::open_in_memory().unwrap();init_learnings_table(&conn).unwrap();
+        let mut l=make_learning("corrupted vector import",0.8,0.9);
+        l.embedding=vec![1.0,0.0];l.embedding_model=Some("fixture-embedding-v1".into());
+        let id=insert_learning(&conn,&l).unwrap();
+        let mut blob=1.0f32.to_le_bytes().to_vec();blob.extend(0.0f32.to_le_bytes());blob.push(7);
+        conn.execute("UPDATE learnings SET embedding=?1 WHERE id=?2",rusqlite::params![blob,id]).unwrap();
+        assert!(super::super::load_learning_by_id(&conn,&id).is_err(),"partial f32 bytes must not silently form a valid lower-dimensional vector");
+    }
+
     fn make_dated_learning(
         content: &str,
         importance: f64,

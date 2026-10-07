@@ -116,6 +116,13 @@ pub fn load_learning_by_id(conn: &Connection, id: &str) -> SqliteResult<Option<L
 ///   17: source_session_id, 18: created_at, 19: updated_at
 pub(super) fn row_to_learning(row: &rusqlite::Row<'_>) -> rusqlite::Result<Learning> {
     let embedding_blob: Option<Vec<u8>> = row.get(7)?;
+    if embedding_blob.as_ref().is_some_and(|blob| blob.len() % 4 != 0) {
+        return Err(rusqlite::Error::FromSqlConversionFailure(
+            7,rusqlite::types::Type::Blob,
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData,
+                "learning embedding contains a partial f32 value")),
+        ));
+    }
     let embedding = embedding_blob
         .map(|blob| {
             blob.chunks_exact(4)
