@@ -15,8 +15,8 @@
  * receive one we merge it on top of the previous DerivedSnapshot so that the
  * Simulator always has the full event list while chat gets the latest updates.
  */
-import { useAtomValue, useSetAtom } from "jotai";
-import { useEffect, useRef } from "react";
+import { useSetAtom, useStore } from "jotai";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 import { createLogger } from "@src/hooks/logger";
 
@@ -26,6 +26,7 @@ import type { SessionEvent } from "../types";
 import {
   type DerivedSnapshot,
   type Snapshot,
+  type StreamingSnapshot,
   eventStoreProxy,
   isStreamingSnapshot,
 } from "./EventStoreProxy";
@@ -79,39 +80,80 @@ function eventsForIds(
     .filter((event): event is SessionEvent => Boolean(event));
 }
 
+function mergeStreamingBaseline(
+  prev: DerivedSnapshot,
+  snapshot: StreamingSnapshot
+): DerivedSnapshot & { streaming: true } {
+  const { events, appended } = applyEventUpserts(
+    prev.events,
+    prev.eventIndex,
+    snapshot.simulatorEventUpserts ?? []
+  );
+  // In-place replacements keep every id → index mapping valid;
+  // only appends (membership growth) require rebuilding.
+  const eventIndex = appended ? buildEventIndex(events) : prev.eventIndex;
+  const sortedSimulatorEvents =
+    snapshot.sortedSimulatorEventIds &&
+    snapshot.sortedSimulatorEventIds.length > 0
+      ? eventsForIds(events, eventIndex, snapshot.sortedSimulatorEventIds)
+      : prev.sortedSimulatorEvents;
+  const merged: DerivedSnapshot & { streaming: true } = {
+    ...prev,
+    version: snapshot.version,
+    eventCount: snapshot.eventCount,
+    events,
+    eventIndex,
+    chatEvents: snapshot.chatEvents,
+    sortedSimulatorEvents,
+    lastEvent: snapshot.lastEvent,
+    hasRunningEvent: snapshot.hasRunningEvent,
+    sortedSimulatorEventIds: snapshot.sortedSimulatorEventIds,
+    eventPreviewById: snapshot.eventPreviewById,
+    createdAtById: snapshot.createdAtById,
+    threadIdById: snapshot.threadIdById,
+    functionNameById: snapshot.functionNameById,
+    displayStatusById: snapshot.displayStatusById,
+    displayVariantById: snapshot.displayVariantById,
+    streaming: true,
+  };
+  return merged;
+}
+
 export function useEventStoreBridge(): void {
   const setSnapshot = useSetAtom(derivedSnapshotAtom);
   const setVersion = useSetAtom(eventStoreVersionAtom);
-  const activeSessionId = useAtomValue(sessionIdAtom);
-  const activeSessionIdRef = useRef(activeSessionId);
+  const store = useStore();
+  const activeSessionIdRef = useRef<string | null>(null);
+  const scopeRevisionRef = useRef(0);
   const lastDerivedRef = useRef<DerivedSnapshot | null>(null);
-  // Sessions for which a full-snapshot hydration has already been requested.
-  // Prevents a getSnapshot() stampede when many StreamingSnapshots arrive
-  // before the first DerivedSnapshot baseline.
-  const hydrationRequestedRef = useRef<Set<string>>(new Set());
+  const latestStreamingRef = useRef<StreamingSnapshot | null>(null);
+  // Token identity, not just session ID: A→B→A must not reuse A's old request.
+  const hydrationRequestedRef = useRef(new Map<string, object>());
 
-  useEffect(() => {
-    activeSessionIdRef.current = activeSessionId;
-    // Clear the cached derived snapshot when the session changes so stale
-    // events from the previous session don't bleed into the new one.
-    lastDerivedRef.current = null;
-
-    // Proactively apply any cached snapshot for the incoming session.
-    // Closes the race where Rust pushes `es:changed` for the new session
-    // before `sessionIdAtom` updates — the subscribe callback would drop
-    // that snapshot because the ref still held the old ID. Applying the
-    // cached copy here recovers the lost frame.
-    if (activeSessionId) {
-      const cached = eventStoreProxy.getLatestSessionSnapshot(activeSessionId);
+  useLayoutEffect(() => {
+    const resetScope = () => {
+      const sessionId = store.get(sessionIdAtom);
+      activeSessionIdRef.current = sessionId;
+      scopeRevisionRef.current += 1;
+      lastDerivedRef.current = null;
+      latestStreamingRef.current = null;
+      hydrationRequestedRef.current.clear();
+      const cached = sessionId
+        ? eventStoreProxy.getLatestSessionSnapshot(sessionId)
+        : null;
       if (cached) {
-        if (!isStreamingSnapshot(cached)) {
-          lastDerivedRef.current = cached as DerivedSnapshot;
-        }
-        setSnapshot(cached);
-        setVersion(cached.version);
+        if (isStreamingSnapshot(cached)) latestStreamingRef.current = cached;
+        else lastDerivedRef.current = cached as DerivedSnapshot;
       }
-    }
-  }, [activeSessionId, setSnapshot, setVersion]);
+      // A new uncached session must never expose the departing session's atoms.
+      setSnapshot(cached ?? null);
+      setVersion(cached?.version ?? 0);
+    };
+    resetScope();
+    // Jotai changes synchronously, before React's passive effect/commit. This
+    // also records A→B→A changes batched into a single render.
+    return store.sub(sessionIdAtom, resetScope);
+  }, [store, setSnapshot, setVersion]);
 
   useEffect(() => {
     let destroyed = false;
@@ -126,13 +168,16 @@ export function useEventStoreBridge(): void {
       unsubscribe = eventStoreProxy.subscribe(
         (snapshot: Snapshot, sessionId: string) => {
           if (
-            activeSessionIdRef.current &&
+            destroyed ||
+            !store.get(sessionIdAtom) ||
+            sessionId !== store.get(sessionIdAtom) ||
             sessionId !== activeSessionIdRef.current
           ) {
             return;
           }
 
           if (isStreamingSnapshot(snapshot)) {
+            latestStreamingRef.current = snapshot;
             // StreamingSnapshot omits the full `events` array and `eventIndex`
             // for perf. Merge bounded simulator upserts onto the last
             // DerivedSnapshot so active simulator windows can hydrate live events.
@@ -145,44 +190,7 @@ export function useEventStoreBridge(): void {
             // mid-stream, showing "(plan is empty)" until the turn completes.
             const prev = lastDerivedRef.current;
             if (prev) {
-              const { events, appended } = applyEventUpserts(
-                prev.events,
-                prev.eventIndex,
-                snapshot.simulatorEventUpserts ?? []
-              );
-              // In-place replacements keep every id → index mapping valid;
-              // only appends (membership growth) require rebuilding.
-              const eventIndex = appended
-                ? buildEventIndex(events)
-                : prev.eventIndex;
-              const sortedSimulatorEvents =
-                snapshot.sortedSimulatorEventIds &&
-                snapshot.sortedSimulatorEventIds.length > 0
-                  ? eventsForIds(
-                      events,
-                      eventIndex,
-                      snapshot.sortedSimulatorEventIds
-                    )
-                  : prev.sortedSimulatorEvents;
-              const merged: DerivedSnapshot & { streaming: true } = {
-                ...prev,
-                version: snapshot.version,
-                eventCount: snapshot.eventCount,
-                events,
-                eventIndex,
-                chatEvents: snapshot.chatEvents,
-                sortedSimulatorEvents,
-                lastEvent: snapshot.lastEvent,
-                hasRunningEvent: snapshot.hasRunningEvent,
-                sortedSimulatorEventIds: snapshot.sortedSimulatorEventIds,
-                eventPreviewById: snapshot.eventPreviewById,
-                createdAtById: snapshot.createdAtById,
-                threadIdById: snapshot.threadIdById,
-                functionNameById: snapshot.functionNameById,
-                displayStatusById: snapshot.displayStatusById,
-                displayVariantById: snapshot.displayVariantById,
-                streaming: true,
-              };
+              const merged = mergeStreamingBaseline(prev, snapshot);
               lastDerivedRef.current = merged;
               setSnapshot(merged);
               setVersion(merged.version);
@@ -195,38 +203,52 @@ export function useEventStoreBridge(): void {
             // session as a baseline; subsequent streaming snapshots merge on
             // top of it via the branch above.
             if (!hydrationRequestedRef.current.has(sessionId)) {
-              hydrationRequestedRef.current.add(sessionId);
+              const token = {};
+              const revision = scopeRevisionRef.current;
+              hydrationRequestedRef.current.set(sessionId, token);
+              const isCurrentRequest = () =>
+                !destroyed &&
+                revision === scopeRevisionRef.current &&
+                store.get(sessionIdAtom) === sessionId &&
+                hydrationRequestedRef.current.get(sessionId) === token;
               void eventStoreProxy
                 .getSnapshot(sessionId)
                 .then((full) => {
-                  if (
-                    !full ||
-                    (activeSessionIdRef.current &&
-                      sessionId !== activeSessionIdRef.current)
-                  ) {
+                  if (!full || !isCurrentRequest()) {
                     return;
                   }
                   // Only apply if we still lack a derived baseline (a real
                   // DerivedSnapshot push may have landed in the meantime).
                   if (!lastDerivedRef.current) {
-                    lastDerivedRef.current = full;
-                    setSnapshot(full);
-                    setVersion(full.version);
+                    const live = latestStreamingRef.current;
+                    const baseline =
+                      live && live.version > full.version
+                        ? mergeStreamingBaseline(full, live)
+                        : full;
+                    lastDerivedRef.current = baseline;
+                    setSnapshot(baseline);
+                    setVersion(baseline.version);
                   }
                 })
                 .catch((err) => {
                   // Allow a retry on the next streaming snapshot.
+                  if (!isCurrentRequest()) return;
                   hydrationRequestedRef.current.delete(sessionId);
                   log.warn(
                     "[useEventStoreBridge] full snapshot hydration failed",
                     sessionId,
                     err
                   );
+                })
+                .finally(() => {
+                  if (isCurrentRequest())
+                    hydrationRequestedRef.current.delete(sessionId);
                 });
             }
             // Fall through and store the streaming snapshot as-is so chat
             // stays live while hydration is in flight.
           } else {
+            latestStreamingRef.current = null;
             lastDerivedRef.current = snapshot as DerivedSnapshot;
           }
 
@@ -247,5 +269,5 @@ export function useEventStoreBridge(): void {
       // reserved for app exit / tests.
       eventStoreProxy.detachTauri();
     };
-  }, [setSnapshot, setVersion]);
+  }, [store, setSnapshot, setVersion]);
 }
