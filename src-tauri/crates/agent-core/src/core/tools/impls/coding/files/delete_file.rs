@@ -17,15 +17,25 @@ pub struct DeleteFileTool {
     additional_allowed_dirs: Vec<PathBuf>,
     workspace_state: Option<WorkspaceStateHandle>,
     router: Option<ActionRouter>,
+    security_policy: Option<std::sync::Arc<crate::foundation::security::SecurityPolicy>>,
 }
 
 impl DeleteFileTool {
+    pub fn with_security_policy(
+        mut self,
+        policy: std::sync::Arc<crate::foundation::security::SecurityPolicy>,
+    ) -> Self {
+        self.security_policy = Some(policy);
+        self
+    }
+
     pub fn new(allowed_dir: Option<PathBuf>) -> Self {
         Self {
             allowed_dir,
             additional_allowed_dirs: Vec::new(),
             workspace_state: None,
             router: None,
+            security_policy: None,
         }
     }
 
@@ -99,6 +109,14 @@ impl Tool for DeleteFileTool {
     ) -> Result<String, ToolError> {
         ctx.require_tool_authority(self.name())?;
         let raw_path = required_string(&params, "path")?;
+        crate::foundation::security::global_paths::authorize(
+            &raw_path,
+            self.current_allowed_dir().as_deref(),
+            &(allowed_roots(&self.additional_allowed_dirs, self.workspace_state.as_ref())),
+            self.security_policy.as_deref(),
+            crate::foundation::security::global_paths::policy::Access::Write,
+        )
+        .map_err(ToolError::PermissionDenied)?;
 
         if let Some(ref router) = self.router {
             if router.should_route() {
@@ -113,10 +131,11 @@ impl Tool for DeleteFileTool {
 
         let allowed = self.current_allowed_dir();
         let extras = allowed_roots(&self.additional_allowed_dirs, self.workspace_state.as_ref());
-        let resolved = crate::tool_infra::file::resolve_path_with_extras(
+        let resolved = crate::tool_infra::file::resolve_path_with_access(
             &raw_path,
             allowed.as_deref(),
             &extras,
+            crate::foundation::security::global_paths::policy::Access::Write,
         )
         .map_err(map_err)?;
 

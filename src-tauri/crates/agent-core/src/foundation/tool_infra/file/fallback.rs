@@ -200,6 +200,7 @@ pub(crate) fn resolve_existing_entry(
     additional_allowed_dirs: &[PathBuf],
     kind: EntryKind,
 ) -> Result<PathBuf, String> {
+    crate::foundation::security::global_paths::check_store()?;
     if let Ok(resolved) = resolve_path_with_extras(raw, allowed_dir, additional_allowed_dirs) {
         if entry_matches(&resolved, kind) {
             return Ok(resolved);

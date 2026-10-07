@@ -26,7 +26,7 @@ mod subprocess;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tauri::async_runtime::Mutex as AsyncMutex;
@@ -503,14 +503,22 @@ impl Tool for ExecTool {
                 .unwrap_or_else(|| current_workspace_dir.clone())
         };
 
+        crate::foundation::security::global_paths::check_store()
+            .map_err(ToolError::PermissionDenied)?;
         let work_dir = if let Some(ref dir) = custom_dir {
-            let path = PathBuf::from(dir);
+            let path = if Path::new(dir).is_absolute() {
+                PathBuf::from(dir)
+            } else {
+                base_dir.join(dir)
+            };
             // Path syntax (null bytes, `..`, forbidden list) — command
             // policy owns this. Containment is decided below by the
             // live SessionWorkspace, the single path-authorization source.
             if let Some(ref policy) = self.security_policy {
                 policy
-                    .validate_path_syntax(dir)
+                    .validate_path_syntax(path.to_str().ok_or_else(|| {
+                        ToolError::PermissionDenied("invalid path encoding".into())
+                    })?)
                     .map_err(ToolError::PermissionDenied)?;
             }
             let workspace_only = self
@@ -521,10 +529,16 @@ impl Tool for ExecTool {
                 if let Some(ref workspace) = self.workspace_state {
                     let extra: Vec<PathBuf> =
                         self.active_repo.lock().await.clone().into_iter().collect();
-                    workspace
-                        .read()
-                        .is_path_allowed(&path, &extra)
-                        .map_err(ToolError::PermissionDenied)?;
+                    if let Err(error) = workspace.read().is_path_allowed(&path, &extra) {
+                        if !crate::foundation::security::global_paths::allowed(
+                            &path,
+                            crate::foundation::security::global_paths::policy::Access::Write,
+                        )
+                        .map_err(ToolError::PermissionDenied)?
+                        {
+                            return Err(ToolError::PermissionDenied(error));
+                        }
+                    }
                 } else if !path.starts_with(&current_workspace_dir) {
                     return Err(ToolError::PermissionDenied(
                         "Working directory is outside workspace".to_string(),
@@ -566,6 +580,33 @@ impl Tool for ExecTool {
                 )));
             }
         }
+
+        let restricted = self.restrict_to_workspace
+            || self
+                .security_policy
+                .as_ref()
+                .is_some_and(|p| p.workspace_only);
+        let primary = if restricted {
+            Some(current_workspace_dir.as_path())
+        } else {
+            None
+        };
+        let mut extras = self
+            .workspace_state
+            .as_ref()
+            .map(|s| s.read().effective_roots())
+            .unwrap_or_default();
+        extras.extend(self.active_repo.lock().await.clone());
+        crate::foundation::security::global_paths::authorize(
+            effective_dir
+                .to_str()
+                .ok_or_else(|| ToolError::PermissionDenied("invalid cwd encoding".into()))?,
+            primary,
+            &extras,
+            self.security_policy.as_deref(),
+            crate::foundation::security::global_paths::policy::Access::Write,
+        )
+        .map_err(ToolError::PermissionDenied)?;
 
         info!(
             "exec: {} (cwd: {}, interactive: {}, terminal_target: {:?})",

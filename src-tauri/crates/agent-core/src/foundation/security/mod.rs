@@ -24,3 +24,5 @@ pub mod policy;
 pub use policy::{
     requires_user_confirmation, AutonomyLevel, CommandRiskRules, SecurityPolicy, ValidationResult,
 };
+
+pub mod global_paths;

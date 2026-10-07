@@ -54,6 +54,7 @@ fn has_explicit_repo_scope(params: &Value) -> bool {
 
 /// Code and file search tool.
 pub struct SearchTool {
+    security_policy: Option<Arc<crate::foundation::security::SecurityPolicy>>,
     /// Default repo path to search in (config workspace).
     default_repo: PathBuf,
     /// Active IDE repo path — overrides default_repo when set.
@@ -69,8 +70,16 @@ pub struct SearchTool {
 }
 
 impl SearchTool {
+    pub fn with_security_policy(
+        mut self,
+        policy: Arc<crate::foundation::security::SecurityPolicy>,
+    ) -> Self {
+        self.security_policy = Some(policy);
+        self
+    }
     pub fn new(default_repo: PathBuf) -> Self {
         Self {
+            security_policy: None,
             default_repo,
             active_repo: TokioMutex::new(None),
             workspace_state: None,
@@ -123,6 +132,15 @@ impl SearchTool {
             let mut merged: Vec<PathBuf> = Vec::new();
             for candidate in candidates {
                 let path = PathBuf::from(candidate);
+                let path = if path.is_absolute() {
+                    path
+                } else {
+                    self.workspace_state
+                        .as_ref()
+                        .map(|s| s.read().working_dir().to_path_buf())
+                        .unwrap_or_else(|| self.default_repo.clone())
+                        .join(path)
+                };
                 if !path.as_os_str().is_empty() && !merged.contains(&path) {
                     merged.push(path);
                 }
@@ -143,15 +161,67 @@ impl SearchTool {
             })]
         };
 
+        for path in &paths {
+            if let Some(policy) = self.security_policy.as_ref() {
+                let root =
+                    crate::foundation::security::global_paths::policy::canonical_candidate(path)
+                        .map_err(ToolError::PermissionDenied)?;
+                for forbidden in &policy.forbidden_paths {
+                    let denied = if let Some(suffix) = forbidden.strip_prefix("~/") {
+                        app_paths::home_dir().join(suffix)
+                    } else {
+                        PathBuf::from(forbidden)
+                    };
+                    let denied =
+                        crate::foundation::security::global_paths::policy::canonical_candidate(
+                            &denied,
+                        )
+                        .map_err(ToolError::PermissionDenied)?;
+                    if denied.starts_with(&root) {
+                        return Err(ToolError::PermissionDenied(
+                            "search scope includes a forbidden descendant; choose a narrower root"
+                                .into(),
+                        ));
+                    }
+                }
+            }
+            let primary = if self.restrict_to_workspace {
+                self.workspace_state
+                    .as_ref()
+                    .map(|s| s.read().working_dir().to_path_buf())
+                    .or_else(|| Some(self.default_repo.clone()))
+            } else {
+                None
+            };
+            let mut extras = self
+                .workspace_state
+                .as_ref()
+                .map(|s| s.read().effective_roots())
+                .unwrap_or_default();
+            extras.extend(self.active_repo.lock().await.clone());
+            crate::foundation::security::global_paths::authorize_tree(
+                path,
+                primary.as_deref(),
+                &extras,
+                self.security_policy.as_deref(),
+            )
+            .map_err(ToolError::PermissionDenied)?;
+        }
         if self.restrict_to_workspace {
             if let Some(ref workspace) = self.workspace_state {
                 let extra: Vec<PathBuf> =
                     self.active_repo.lock().await.clone().into_iter().collect();
                 for path in &paths {
-                    workspace
-                        .read()
-                        .is_path_allowed(path, &extra)
-                        .map_err(ToolError::PermissionDenied)?;
+                    if let Err(error) = workspace.read().is_path_allowed(path, &extra) {
+                        if !crate::foundation::security::global_paths::allowed(
+                            path,
+                            crate::foundation::security::global_paths::policy::Access::Read,
+                        )
+                        .map_err(ToolError::PermissionDenied)?
+                        {
+                            return Err(ToolError::PermissionDenied(error));
+                        }
+                    }
                 }
             }
         }

@@ -5,6 +5,7 @@
  * and allows reading and editing their contents. Calls into the Tauri backend via
  * `rpc.workspaceMemory.*` commands.
  */
+import GlobalPathExemptionsPanel from "./GlobalPathExemptionsPanel";
 import React, { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -373,6 +374,7 @@ const WorkspaceMemoryBrowser: React.FC = () => {
 
   return (
     <div className="flex flex-col gap-3">
+      <GlobalPathExemptionsPanel />
       <SettingsTable<WorkspaceMemoryEntry>
         hover
         searchBar={{

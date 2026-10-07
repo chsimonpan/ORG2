@@ -42,7 +42,12 @@ pub fn register(registry: &mut ToolRegistry, deps: &ToolDeps, disabled: &HashSet
 
     // Restricted tools get the snapshot as constructor fallback; the live
     // workspace handle attached below supersedes it at call time.
-    let restricted_dir = if deps.restrict_to_workspace {
+    let restricted = deps.restrict_to_workspace
+        || deps
+            .security_policy
+            .as_ref()
+            .is_some_and(|p| p.workspace_only);
+    let restricted_dir = if restricted {
         Some(working_dir.clone())
     } else {
         None
@@ -68,6 +73,9 @@ pub fn register(registry: &mut ToolRegistry, deps: &ToolDeps, disabled: &HashSet
     if let Some(router) = make_router() {
         read = read.with_router(router);
     }
+    if let Some(ref policy) = deps.security_policy {
+        read = read.with_security_policy(Arc::clone(policy));
+    }
     register_if_enabled(registry, Box::new(read), disabled);
 
     let mut list_dir = ListDirTool::new(restricted_dir.clone());
@@ -77,6 +85,9 @@ pub fn register(registry: &mut ToolRegistry, deps: &ToolDeps, disabled: &HashSet
     list_dir = list_dir.with_workspace_state(Arc::clone(&deps.workspace));
     if let Some(router) = make_router() {
         list_dir = list_dir.with_router(router);
+    }
+    if let Some(ref policy) = deps.security_policy {
+        list_dir = list_dir.with_security_policy(Arc::clone(policy));
     }
     register_if_enabled(registry, Box::new(list_dir), disabled);
 
@@ -125,9 +136,12 @@ pub fn register(registry: &mut ToolRegistry, deps: &ToolDeps, disabled: &HashSet
     // ── Search ──
     let mut search = SearchTool::new(working_dir.clone())
         .with_workspace_state(Arc::clone(&deps.workspace))
-        .with_restrict_to_workspace(deps.restrict_to_workspace);
+        .with_restrict_to_workspace(restricted);
     if let Some(router) = make_router() {
         search = search.with_router(router);
+    }
+    if let Some(ref policy) = deps.security_policy {
+        search = search.with_security_policy(Arc::clone(policy));
     }
     register_if_enabled(registry, Box::new(search), disabled);
 
@@ -140,6 +154,9 @@ pub fn register(registry: &mut ToolRegistry, deps: &ToolDeps, disabled: &HashSet
         edit = edit.with_scratchpad(scratch.clone());
     }
     edit = edit.with_workspace_state(Arc::clone(&deps.workspace));
+    if let Some(ref policy) = deps.security_policy {
+        edit = edit.with_security_policy(Arc::clone(policy));
+    }
     register_if_enabled(registry, Box::new(edit), disabled);
 
     // ── Write env file (privileged consumer of `manage_secrets` tokens) ──
@@ -149,11 +166,18 @@ pub fn register(registry: &mut ToolRegistry, deps: &ToolDeps, disabled: &HashSet
     if let Some(ref broker) = deps.secret_broker {
         register_if_enabled(
             registry,
-            Box::new(WriteEnvFileTool::new(
-                Some(Arc::clone(&deps.workspace)),
-                deps.scratchpad_dir.clone(),
-                Arc::clone(broker),
-            )),
+            Box::new({
+                let tool = WriteEnvFileTool::new(
+                    Some(Arc::clone(&deps.workspace)),
+                    deps.scratchpad_dir.clone(),
+                    Arc::clone(broker),
+                );
+                if let Some(ref policy) = deps.security_policy {
+                    tool.with_security_policy(Arc::clone(policy))
+                } else {
+                    tool
+                }
+            }),
             disabled,
         );
     }
@@ -166,6 +190,9 @@ pub fn register(registry: &mut ToolRegistry, deps: &ToolDeps, disabled: &HashSet
     delete_file = delete_file.with_workspace_state(Arc::clone(&deps.workspace));
     if let Some(router) = make_router() {
         delete_file = delete_file.with_router(router);
+    }
+    if let Some(ref policy) = deps.security_policy {
+        delete_file = delete_file.with_security_policy(Arc::clone(policy));
     }
     register_if_enabled(registry, Box::new(delete_file), disabled);
     // ── LSP ──

@@ -93,9 +93,18 @@ pub struct ReadFileTool {
     workspace_state: Option<WorkspaceStateHandle>,
     router: Option<ActionRouter>,
     read_cache: Mutex<ReadFileCache>,
+    security_policy: Option<std::sync::Arc<crate::foundation::security::SecurityPolicy>>,
 }
 
 impl ReadFileTool {
+    pub fn with_security_policy(
+        mut self,
+        policy: std::sync::Arc<crate::foundation::security::SecurityPolicy>,
+    ) -> Self {
+        self.security_policy = Some(policy);
+        self
+    }
+
     pub fn new(allowed_dir: Option<PathBuf>) -> Self {
         Self {
             allowed_dir,
@@ -103,6 +112,7 @@ impl ReadFileTool {
             workspace_state: None,
             router: None,
             read_cache: Mutex::new(ReadFileCache::default()),
+            security_policy: None,
         }
     }
 
@@ -241,6 +251,14 @@ impl Tool for ReadFileTool {
         if let Some(output) = read_embedded_builtin_skill(&raw_path, offset, limit)? {
             return Ok(output);
         }
+        crate::foundation::security::global_paths::authorize(
+            &raw_path,
+            self.current_allowed_dir().as_deref(),
+            &(allowed_roots(&self.additional_allowed_dirs, self.workspace_state.as_ref())),
+            self.security_policy.as_deref(),
+            crate::foundation::security::global_paths::policy::Access::Read,
+        )
+        .map_err(ToolError::PermissionDenied)?;
 
         if let Some(ref router) = self.router {
             if router.should_route() {
@@ -260,6 +278,16 @@ impl Tool for ReadFileTool {
             crate::tool_infra::file::stat_file_with_extras(&raw_path, allowed.as_deref(), &extras)
                 .await
                 .map_err(map_err)?;
+        crate::foundation::security::global_paths::authorize(
+            stat.resolved_path
+                .to_str()
+                .ok_or_else(|| ToolError::PermissionDenied("invalid stat path encoding".into()))?,
+            self.current_allowed_dir().as_deref(),
+            &allowed_roots(&self.additional_allowed_dirs, self.workspace_state.as_ref()),
+            self.security_policy.as_deref(),
+            crate::foundation::security::global_paths::policy::Access::Read,
+        )
+        .map_err(ToolError::PermissionDenied)?;
         let cache_key = ReadCacheKey {
             resolved_path: stat.resolved_path.clone(),
             offset,
@@ -290,6 +318,17 @@ impl Tool for ReadFileTool {
         let total_bytes = result.total_bytes;
         let modified_millis = result.modified_millis;
         let resolved_path = result.resolved_path.clone();
+        crate::foundation::security::global_paths::authorize(
+            resolved_path.to_str().ok_or_else(|| {
+                ToolError::PermissionDenied("invalid resolved path encoding".into())
+            })?,
+            self.current_allowed_dir().as_deref(),
+            &allowed_roots(&self.additional_allowed_dirs, self.workspace_state.as_ref()),
+            self.security_policy.as_deref(),
+            crate::foundation::security::global_paths::policy::Access::Read,
+        )
+        .map_err(ToolError::PermissionDenied)?;
+
         let mut output = result.content;
 
         if result.lines_read == 0 {

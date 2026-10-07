@@ -74,59 +74,57 @@ pub fn resolve_path_with_extras(
             .join(expanded)
     };
 
+    use crate::foundation::security::global_paths::{
+        self,
+        policy::{canonical_candidate, Access},
+    };
+    let canonical_path = canonical_candidate(&resolved)?;
     if let Some(allowed) = allowed_dir {
-        let canonical_allowed = allowed.canonicalize().map_err(|err| {
-            format!(
-                "Cannot resolve allowed directory '{}': {}",
-                allowed.display(),
-                err
-            )
-        })?;
-
-        let canonical_path = match resolved.canonicalize() {
-            Ok(path) => path,
-            Err(_) => {
-                let parent = resolved
-                    .parent()
-                    .ok_or_else(|| "Cannot determine parent directory".to_string())?;
-                let canonical_parent = parent.canonicalize().map_err(|_| {
-                    format!(
-                        "Parent directory '{}' does not exist or is inaccessible",
-                        parent.display()
-                    )
-                })?;
-                let filename = resolved
-                    .file_name()
-                    .ok_or_else(|| "Path has no filename".to_string())?;
-                canonical_parent.join(filename)
-            }
-        };
-
-        if !canonical_path.starts_with(&canonical_allowed) {
-            let in_extra = additional_allowed_dirs.iter().any(|extra_dir| {
-                let canonical_extra = extra_dir
-                    .canonicalize()
-                    .unwrap_or_else(|_| normalize_lexical(extra_dir));
-                canonical_path.starts_with(&canonical_extra)
-            });
-
-            if !in_extra {
-                let mut allowed_roots = vec![canonical_allowed.display().to_string()];
-                allowed_roots.extend(
-                    additional_allowed_dirs
-                        .iter()
-                        .map(|dir| dir.display().to_string()),
-                );
-                return Err(format!(
-                    "Path '{}' is outside the allowed directory '{}'. Allowed roots: {}",
-                    raw,
-                    canonical_allowed.display(),
-                    allowed_roots.join(", ")
-                ));
-            }
+        let canonical_allowed = allowed
+            .canonicalize()
+            .map_err(|_| "allowed directory unavailable")?;
+        let in_extra = additional_allowed_dirs.iter().any(|p| {
+            p.canonicalize()
+                .is_ok_and(|root| canonical_path.starts_with(root))
+        });
+        if !canonical_path.starts_with(&canonical_allowed)
+            && !in_extra
+            && !global_paths::allowed(&canonical_path, Access::Read)?
+        {
+            return Err(
+                "path is outside the allowed directory; no explicit global read grant".into(),
+            );
         }
     }
 
+    Ok(canonical_path)
+}
+
+/// Capability-specific resolver used by all mutating file tools.
+pub fn resolve_path_with_access(
+    raw: &str,
+    allowed_dir: Option<&Path>,
+    extras: &[PathBuf],
+    access: crate::foundation::security::global_paths::policy::Access,
+) -> Result<PathBuf, String> {
+    use crate::foundation::security::global_paths::{
+        self,
+        policy::{canonical_candidate, Access},
+    };
+    let resolved = resolve_path_with_extras(raw, allowed_dir, extras)?;
+    if access == Access::Write {
+        if let Some(root) = allowed_dir {
+            let root = canonical_candidate(root)?;
+            let local = resolved.starts_with(root)
+                || extras.iter().any(|p| {
+                    p.canonicalize()
+                        .is_ok_and(|root| resolved.starts_with(root))
+                });
+            if !local && !global_paths::allowed(&resolved, Access::Write)? {
+                return Err("global grant does not permit writing".into());
+            }
+        }
+    }
     Ok(resolved)
 }
 

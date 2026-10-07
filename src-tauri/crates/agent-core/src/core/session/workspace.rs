@@ -38,24 +38,6 @@ pub fn canonicalize_or_lexical(path: &Path) -> PathBuf {
         .unwrap_or_else(|_| crate::foundation::tool_infra::file::normalize_lexical(path))
 }
 
-/// Canonicalize a candidate path for containment checks. Unlike
-/// [`canonicalize_or_lexical`], a not-yet-existing leaf (e.g. a file
-/// about to be created) resolves through its parent: canonicalize the
-/// parent and re-append the filename, so symlinked parents cannot be
-/// used to escape. Falls back to lexical normalization when even the
-/// parent does not exist.
-fn canonicalize_candidate(path: &Path) -> PathBuf {
-    if let Ok(canonical) = path.canonicalize() {
-        return canonical;
-    }
-    if let (Some(parent), Some(file_name)) = (path.parent(), path.file_name()) {
-        if let Ok(canonical_parent) = parent.canonicalize() {
-            return canonical_parent.join(file_name);
-        }
-    }
-    crate::foundation::tool_infra::file::normalize_lexical(path)
-}
-
 /// Source that granted an [`AdditionalDirectory`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -224,7 +206,8 @@ impl SessionWorkspace {
         candidate: &Path,
         extra_allowed: &[PathBuf],
     ) -> Result<(), String> {
-        let resolved = canonicalize_candidate(candidate);
+        let resolved =
+            crate::foundation::security::global_paths::policy::canonical_candidate(candidate)?;
         let mut roots = self.effective_roots_canonical();
         roots.extend(extra_allowed.iter().map(|p| canonicalize_or_lexical(p)));
 

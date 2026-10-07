@@ -36,7 +36,7 @@ use super::FILE_IO_TIMEOUT;
 
 pub use list::list_dir_with_extras;
 pub(crate) use path_resolution::normalize_lexical;
-pub use path_resolution::resolve_path_with_extras;
+pub use path_resolution::{resolve_path_with_access, resolve_path_with_extras};
 pub(crate) use read::format_text_result;
 pub use read::{read_file_in_range, read_file_in_range_with_extras, stat_file_with_extras};
 

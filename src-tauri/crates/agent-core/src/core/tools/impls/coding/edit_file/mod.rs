@@ -66,9 +66,18 @@ pub struct EditTool {
     /// Live session workspace — merged with the static extras at call
     /// time so `/add-dir` mutations land without registry rebuilds.
     workspace_state: Option<WorkspaceStateHandle>,
+    security_policy: Option<std::sync::Arc<crate::foundation::security::SecurityPolicy>>,
 }
 
 impl EditTool {
+    pub fn with_security_policy(
+        mut self,
+        policy: std::sync::Arc<crate::foundation::security::SecurityPolicy>,
+    ) -> Self {
+        self.security_policy = Some(policy);
+        self
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -170,6 +179,28 @@ impl Tool for EditTool {
             ));
         }
 
+        crate::foundation::security::global_paths::authorize(
+            &file_path,
+            self.workspace_state
+                .as_ref()
+                .map(|s| s.read().working_dir().to_path_buf())
+                .or_else(|| self.workspace.clone())
+                .as_deref(),
+            &self
+                .additional_allowed_dirs
+                .iter()
+                .cloned()
+                .chain(
+                    self.workspace_state
+                        .as_ref()
+                        .map(|s| s.read().effective_roots())
+                        .unwrap_or_default(),
+                )
+                .collect::<Vec<_>>(),
+            self.security_policy.as_deref(),
+            crate::foundation::security::global_paths::policy::Access::Write,
+        )
+        .map_err(ToolError::PermissionDenied)?;
         // Validate path against the live session workspace (single source
         // of truth): primary root = live working_dir(); extras = every
         // effective root (workspace_root, worktree working_dir, `/add-dir`
@@ -189,10 +220,11 @@ impl Tool for EditTool {
         } else {
             None
         };
-        let resolved = crate::tool_infra::file::resolve_path_with_extras(
+        let resolved = crate::tool_infra::file::resolve_path_with_access(
             &file_path,
             allowed_dir.as_deref(),
             &extras,
+            crate::foundation::security::global_paths::policy::Access::Write,
         )
         .map_err(|err| {
             if err.contains("outside the allowed directory") || err.contains("null byte") {

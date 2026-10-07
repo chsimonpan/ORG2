@@ -34,7 +34,7 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::foundation::tool_infra::file::resolve_path_with_extras;
+use crate::foundation::tool_infra::file::resolve_path_with_access;
 use crate::interaction::secret_broker::{Resolve, SecretBroker};
 use crate::tools::names as tool_names;
 use crate::tools::traits::{Tool, ToolError};
@@ -51,9 +51,18 @@ pub struct WriteEnvFileTool {
     workspace_state: Option<WorkspaceStateHandle>,
     scratchpad_dir: Option<PathBuf>,
     broker: Arc<SecretBroker>,
+    security_policy: Option<std::sync::Arc<crate::foundation::security::SecurityPolicy>>,
 }
 
 impl WriteEnvFileTool {
+    pub fn with_security_policy(
+        mut self,
+        policy: std::sync::Arc<crate::foundation::security::SecurityPolicy>,
+    ) -> Self {
+        self.security_policy = Some(policy);
+        self
+    }
+
     pub fn new(
         workspace_state: Option<WorkspaceStateHandle>,
         scratchpad_dir: Option<PathBuf>,
@@ -63,6 +72,7 @@ impl WriteEnvFileTool {
             workspace_state,
             scratchpad_dir,
             broker,
+            security_policy: None,
         }
     }
 
@@ -156,11 +166,27 @@ impl Tool for WriteEnvFileTool {
             )));
         }
 
+        crate::foundation::security::global_paths::authorize(
+            path_str,
+            self.allowed_dir().as_deref(),
+            &allowed_roots(
+                &self.scratchpad_dir.iter().cloned().collect::<Vec<_>>(),
+                self.workspace_state.as_ref(),
+            ),
+            self.security_policy.as_deref(),
+            crate::foundation::security::global_paths::policy::Access::Write,
+        )
+        .map_err(ToolError::PermissionDenied)?;
         let allowed_dir = self.allowed_dir();
         let static_dirs: Vec<PathBuf> = self.scratchpad_dir.iter().cloned().collect();
         let extras: Vec<PathBuf> = allowed_roots(&static_dirs, self.workspace_state.as_ref());
-        let resolved = resolve_path_with_extras(path_str, allowed_dir.as_deref(), &extras)
-            .map_err(ToolError::PermissionDenied)?;
+        let resolved = resolve_path_with_access(
+            path_str,
+            allowed_dir.as_deref(),
+            &extras,
+            crate::foundation::security::global_paths::policy::Access::Write,
+        )
+        .map_err(ToolError::PermissionDenied)?;
 
         ensure_dotenv_basename(&resolved)?;
 

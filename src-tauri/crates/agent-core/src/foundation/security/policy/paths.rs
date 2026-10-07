@@ -58,7 +58,12 @@ impl SecurityPolicy {
                 PathBuf::from(forbidden)
             };
 
-            if expanded.starts_with(&forbidden_expanded) {
+            let resolved =
+                crate::foundation::security::global_paths::policy::canonical_candidate(&expanded)?;
+            let denied = crate::foundation::security::global_paths::policy::canonical_candidate(
+                &forbidden_expanded,
+            )?;
+            if expanded.starts_with(&forbidden_expanded) || resolved.starts_with(&denied) {
                 return Err(format!("Path '{}' is in a forbidden location.", path));
             }
         }

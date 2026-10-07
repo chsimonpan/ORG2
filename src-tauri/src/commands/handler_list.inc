@@ -7,6 +7,11 @@
 system_services::tray::tray_update_sessions,
 system_services::tray::tray_take_pending_action,
 
+// Global path grant management (not model-accessible tools)
+agent_core::foundation::security::global_paths::global_path_exemptions_list,
+agent_core::foundation::security::global_paths::global_path_exemptions_add,
+agent_core::foundation::security::global_paths::global_path_exemptions_remove,
+
 // Diagnostics commands
 usage_diagnostics::commands::diagnostics_initialize,
 usage_diagnostics::commands::diagnostics_submit_usage_snapshot,

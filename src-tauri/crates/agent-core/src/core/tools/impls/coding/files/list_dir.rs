@@ -17,15 +17,25 @@ pub struct ListDirTool {
     additional_allowed_dirs: Vec<PathBuf>,
     workspace_state: Option<WorkspaceStateHandle>,
     router: Option<ActionRouter>,
+    security_policy: Option<std::sync::Arc<crate::foundation::security::SecurityPolicy>>,
 }
 
 impl ListDirTool {
+    pub fn with_security_policy(
+        mut self,
+        policy: std::sync::Arc<crate::foundation::security::SecurityPolicy>,
+    ) -> Self {
+        self.security_policy = Some(policy);
+        self
+    }
+
     pub fn new(allowed_dir: Option<PathBuf>) -> Self {
         Self {
             allowed_dir,
             additional_allowed_dirs: Vec::new(),
             workspace_state: None,
             router: None,
+            security_policy: None,
         }
     }
 
@@ -103,6 +113,14 @@ impl Tool for ListDirTool {
     ) -> Result<String, ToolError> {
         ctx.require_tool_authority(self.name())?;
         let raw_path = required_string(&params, "path")?;
+        crate::foundation::security::global_paths::authorize(
+            &raw_path,
+            self.current_allowed_dir().as_deref(),
+            &(allowed_roots(&self.additional_allowed_dirs, self.workspace_state.as_ref())),
+            self.security_policy.as_deref(),
+            crate::foundation::security::global_paths::policy::Access::Read,
+        )
+        .map_err(ToolError::PermissionDenied)?;
 
         if let Some(ref router) = self.router {
             if router.should_route() {

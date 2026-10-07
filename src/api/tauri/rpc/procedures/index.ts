@@ -21,3 +21,5 @@ export { validation } from "./validation";
 export { workspaceMemory } from "./workspaceMemory";
 export { cli } from "./cli";
 export { cloudFileOutbox } from "./cloudFileOutbox";
+
+export { globalPathExemptions } from "./globalPathExemptions";
