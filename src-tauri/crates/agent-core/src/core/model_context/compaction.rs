@@ -69,6 +69,10 @@ pub struct CompactionConfig {
     /// Fixed buffer to avoid hitting the exact context limit (default 13000).
     #[serde(default = "default_buffer_tokens")]
     pub buffer_tokens: usize,
+    /// Equivalent-token spend: uncached input 1, cache read .1, write 1.25, output 5.
+    /// Zero disables only the spend trigger; context safety remains independent.
+    #[serde(default = "default_weighted_token_threshold")]
+    pub weighted_token_threshold: u64,
 }
 
 fn default_enabled() -> bool {
@@ -103,6 +107,10 @@ fn default_buffer_tokens() -> usize {
     13_000
 }
 
+fn default_weighted_token_threshold() -> u64 {
+    5_000_000
+}
+
 impl Default for CompactionConfig {
     fn default() -> Self {
         Self {
@@ -115,6 +123,7 @@ impl Default for CompactionConfig {
             floor_tokens: default_floor_tokens(),
             reserved_summary_tokens: default_reserved_summary_tokens(),
             buffer_tokens: default_buffer_tokens(),
+            weighted_token_threshold: default_weighted_token_threshold(),
         }
     }
 }
@@ -467,6 +476,36 @@ impl ContextCompactor {
                 (history.to_vec(), CompactionOutcome::Failed { reason: err })
             }
         }
+    }
+
+    /// Spend-triggered automatic compaction bypasses only the size threshold.
+    /// It retains the automatic circuit breaker and the routed provider/model.
+    pub async fn compact_for_weighted_spend(
+        history: &[Value],
+        budget_tokens: usize,
+        config: &CompactionConfig,
+        state: &mut CompactionState,
+        provider: &dyn LLMProvider,
+        model: &str,
+        fork_inputs: Option<&ForkSummaryInputs<'_>>,
+    ) -> (Vec<Value>, CompactionOutcome) {
+        let mut spend_config = config.clone();
+        spend_config.trigger_ratio = 0.0;
+        // On a 1M model the ordinary keep budget can cover the entire history;
+        // keep only a recent fraction, never silently discard originals.
+        let history_tokens = Self::estimate_messages_tokens(history);
+        spend_config.floor_tokens = spend_config.floor_tokens.min(history_tokens / 2);
+        let spend_budget = budget_tokens.min(history_tokens.max(1));
+        Self::compact_with_fork(
+            history,
+            spend_budget,
+            &spend_config,
+            state,
+            provider,
+            model,
+            fork_inputs,
+        )
+        .await
     }
 
     /// Force a user-triggered compaction without changing automatic

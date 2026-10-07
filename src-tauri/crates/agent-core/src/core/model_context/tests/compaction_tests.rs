@@ -1605,7 +1605,6 @@ async fn compact_with_fork_falls_back_to_side_query_on_fork_failure() {
     assert!(provider.calls.load(Ordering::SeqCst) >= 2);
 }
 
-
 /// Regression for R4: virtual elapsed time is not an outer driver timeout.
 /// This tests the actual compactor with the runtime-pinned provider/model;
 /// it does not identify the production incident cause or prove GUI behavior.
@@ -1616,41 +1615,78 @@ async fn manual_compact_survives_61s_provider_delay_without_losing_history() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    struct DelayedProvider { fail: bool, calls: AtomicUsize }
+    struct DelayedProvider {
+        fail: bool,
+        calls: AtomicUsize,
+    }
     #[async_trait::async_trait]
     impl LLMProvider for DelayedProvider {
-        async fn chat(&self, _messages: &[Value], _tools: Option<&[Value]>,
-            model: &str, _max_tokens: u32, _temperature: f32,
+        async fn chat(
+            &self,
+            _messages: &[Value],
+            _tools: Option<&[Value]>,
+            model: &str,
+            _max_tokens: u32,
+            _temperature: f32,
         ) -> Result<LLMResponse, ProviderError> {
             assert_eq!(model, "runtime-pinned-model");
             self.calls.fetch_add(1, Ordering::SeqCst);
             tokio::time::sleep(Duration::from_secs(61)).await;
-            if self.fail { return Err(ProviderError::RequestFailed("delayed provider failure".into())); }
+            if self.fail {
+                return Err(ProviderError::RequestFailed(
+                    "delayed provider failure".into(),
+                ));
+            }
             Ok(LLMResponse {
-                content: Some("compact retained older context".into()), tool_calls: vec![],
+                content: Some("compact retained older context".into()),
+                tool_calls: vec![],
                 finish_reason: crate::providers::finish_reason::STOP.into(),
-                usage: Default::default(), reasoning_content: None, blocks: vec![],
-                stream_error_kind: None, retry_after_ms: None,
+                usage: Default::default(),
+                reasoning_content: None,
+                blocks: vec![],
+                stream_error_kind: None,
+                retry_after_ms: None,
             })
         }
-        fn default_model(&self) -> &str { "runtime-pinned-model" }
-        fn provider_name(&self) -> &str { "isolated-delay-provider" }
+        fn default_model(&self) -> &str {
+            "runtime-pinned-model"
+        }
+        fn provider_name(&self) -> &str {
+            "isolated-delay-provider"
+        }
     }
     let big = "x".repeat(400);
     let mut history = vec![user_msg("preserve the source session task")];
-    for _ in 0..40 { history.push(assistant_msg(&big)); }
+    for _ in 0..40 {
+        history.push(assistant_msg(&big));
+    }
     let original = history.clone();
     let budget = ContextCompactor::estimate_messages_tokens(&history) * 2;
-    let mut config = default_config(); config.floor_tokens = 0;
+    let mut config = default_config();
+    config.floor_tokens = 0;
     for fail in [false, true] {
-        let provider = DelayedProvider { fail, calls: AtomicUsize::new(0) };
+        let provider = DelayedProvider {
+            fail,
+            calls: AtomicUsize::new(0),
+        };
         let mut state = CompactionState::default();
         let started = tokio::time::Instant::now();
-        let result = ContextCompactor::compact_manual_force(&history, budget, &config,
-            &mut state, &provider, "runtime-pinned-model", None).await;
+        let result = ContextCompactor::compact_manual_force(
+            &history,
+            budget,
+            &config,
+            &mut state,
+            &provider,
+            "runtime-pinned-model",
+            None,
+        )
+        .await;
         assert!(started.elapsed() >= Duration::from_secs(61));
         assert!(provider.calls.load(Ordering::SeqCst) >= 1);
-        assert_eq!(history, original, "failure/success must not mutate caller history");
+        assert_eq!(
+            history, original,
+            "failure/success must not mutate caller history"
+        );
         if fail {
             assert!(result.is_err(), "provider failure must remain explicit");
         } else {
@@ -1659,4 +1695,111 @@ async fn manual_compact_survives_61s_provider_delay_without_losing_history() {
             assert!(compacted.len() < history.len());
         }
     }
+}
+
+#[test]
+fn weighted_cost_default_and_exact_threshold_runtime_contract() {
+    let value = serde_json::to_value(CompactionConfig::default()).unwrap();
+    assert_eq!(
+        value["weightedTokenThreshold"],
+        serde_json::json!(5_000_000)
+    );
+}
+
+/// Actual routed compactor: spend-only must not be a size-budget no-op.
+#[tokio::test]
+async fn weighted_spend_compacts_below_large_context_and_failure_retains_history() {
+    use crate::model_context::compaction::{CompactionOutcome, CompactionState};
+    use crate::providers::traits::{LLMProvider, LLMResponse, ProviderError};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Provider {
+        fail: bool,
+        calls: AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl LLMProvider for Provider {
+        async fn chat(
+            &self,
+            _messages: &[Value],
+            _tools: Option<&[Value]>,
+            model: &str,
+            _max_tokens: u32,
+            _temperature: f32,
+        ) -> Result<LLMResponse, ProviderError> {
+            assert_eq!(model, "runtime-pinned");
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if self.fail {
+                return Err(ProviderError::RequestFailed(
+                    "deterministic offline failure".into(),
+                ));
+            }
+            Ok(LLMResponse {
+                content: Some("weighted summary".into()),
+                tool_calls: vec![],
+                finish_reason: crate::providers::finish_reason::STOP.to_string(),
+                usage: std::collections::HashMap::new(),
+                reasoning_content: None,
+                blocks: vec![],
+                stream_error_kind: None,
+                retry_after_ms: None,
+            })
+        }
+        fn default_model(&self) -> &str {
+            "runtime-pinned"
+        }
+        fn provider_name(&self) -> &str {
+            "offline-weighted"
+        }
+    }
+    let history: Vec<Value> = (0..20)
+        .map(|i| {
+            json!({"role": if i%2==0 {"user"} else {"assistant"},
+        "content": format!("message {} {}", i, "x ".repeat(500))})
+        })
+        .collect();
+    let config = CompactionConfig::default();
+    let provider = Provider {
+        fail: false,
+        calls: AtomicUsize::new(0),
+    };
+    let (ordinary, ordinary_outcome) = ContextCompactor::compact(
+        &history,
+        1_000_000,
+        &config,
+        &mut CompactionState::default(),
+        &provider,
+        "runtime-pinned",
+    )
+    .await;
+    assert_eq!(ordinary_outcome, CompactionOutcome::Skipped);
+    assert_eq!(ordinary, history);
+    let (compacted, outcome) = ContextCompactor::compact_for_weighted_spend(
+        &history,
+        1_000_000,
+        &config,
+        &mut CompactionState::default(),
+        &provider,
+        "runtime-pinned",
+        None,
+    )
+    .await;
+    assert!(matches!(outcome, CompactionOutcome::Compacted { .. }));
+    assert!(compacted.len() < history.len());
+    assert!(provider.calls.load(Ordering::SeqCst) > 0);
+    let failed = Provider {
+        fail: true,
+        calls: AtomicUsize::new(0),
+    };
+    let (unchanged, outcome) = ContextCompactor::compact_for_weighted_spend(
+        &history,
+        1_000_000,
+        &config,
+        &mut CompactionState::default(),
+        &failed,
+        "runtime-pinned",
+        None,
+    )
+    .await;
+    assert!(matches!(outcome, CompactionOutcome::Failed { .. }));
+    assert_eq!(unchanged, history);
 }

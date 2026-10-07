@@ -1240,6 +1240,25 @@ pub fn append_compact_boundary(
     )
 }
 
+pub fn append_compact_boundary_with_checkpoint(
+    session_id: &str,
+    summary: &str,
+    from_sequence: i64,
+    tokens_before: Option<i64>,
+    tokens_after: Option<i64>,
+    checkpoint: &crate::model_context::weighted_usage::WeightedCheckpoint,
+) -> SqliteResult<(String, String)> {
+    shared::save_compact_boundary_msg_with_checkpoint(
+        SESSION_TABLE_PREFIX,
+        session_id,
+        summary,
+        from_sequence,
+        tokens_before,
+        tokens_after,
+        Some(checkpoint),
+    )
+}
+
 /// Update display-only token metadata on a compact-boundary row.
 pub fn update_compact_boundary_token_delta(
     session_id: &str,

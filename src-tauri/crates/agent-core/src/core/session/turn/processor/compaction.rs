@@ -33,6 +33,17 @@ use crate::model_context::session_memory;
 use crate::model_context::session_memory::SessionMemoryState;
 use crate::session::persistence as unified_persistence;
 
+fn weighted_trigger_due(
+    milli: i64,
+    config: &crate::model_context::compaction::CompactionConfig,
+    messages: usize,
+) -> bool {
+    config.enabled
+        && config.weighted_token_threshold > 0
+        && messages >= config.min_messages
+        && milli.max(0) as u128 >= config.weighted_token_threshold as u128 * 1000
+}
+
 fn message_role(message: &Value) -> Option<&str> {
     message.get("role").and_then(Value::as_str)
 }
@@ -112,7 +123,15 @@ impl UnifiedMessageProcessor {
             "compaction",
             self.runtime.account_id.as_deref(),
         );
-        let mut state = self.compaction_state.lock().await;
+        let lock_started = std::time::Instant::now();
+        let mut state = self.session.compaction.lock().await;
+        info!(
+            session_id,
+            wait_ms = lock_started.elapsed().as_millis(),
+            stage = "state_lock",
+            "[compaction_stage] reactive lock acquired"
+        );
+        let provider_started = std::time::Instant::now();
         let (compacted, outcome) = ContextCompactor::compact(
             tail,
             budget_tokens,
@@ -123,6 +142,12 @@ impl UnifiedMessageProcessor {
         )
         .await;
 
+        info!(
+            session_id,
+            elapsed_ms = provider_started.elapsed().as_millis(),
+            stage = "provider_summary",
+            "[compaction_stage] reactive provider completed"
+        );
         let CompactionOutcome::Failed { reason } = outcome else {
             return (compacted, outcome);
         };
@@ -385,15 +410,46 @@ impl UnifiedMessageProcessor {
             .load(std::sync::atomic::Ordering::SeqCst)
             .max(0) as usize;
 
-        if !(self.runtime.resolved.compaction.enabled
-            && ContextCompactor::needs_compaction_observed(
-                &compactable_tail,
-                context_window,
+        let weighted_checkpoint = match tokio::task::block_in_place(|| {
+            crate::model_context::weighted_usage::snapshot(session_id)
+        }) {
+            Ok(checkpoint) => Some(checkpoint),
+            Err(err) => {
+                warn!(
+                    "[weighted_usage] owner {} checkpoint unavailable: {}",
+                    session_id, err
+                );
+                None // DB failure cannot suppress independent context safety.
+            }
+        };
+        let cost_triggered = weighted_checkpoint.as_ref().is_some_and(|checkpoint| {
+            weighted_trigger_due(
+                checkpoint.milli,
                 &self.runtime.resolved.compaction,
-                observed_tokens,
-            ))
-        {
+                compactable_tail.len(),
+            )
+        });
+        let size_triggered = ContextCompactor::needs_compaction_observed(
+            &compactable_tail,
+            context_window,
+            &self.runtime.resolved.compaction,
+            observed_tokens,
+        );
+        if !(self.runtime.resolved.compaction.enabled && (size_triggered || cost_triggered)) {
             return CompactionPhaseOutcome::Continue;
+        }
+        info!(
+            session_id,
+            cost_triggered,
+            size_triggered,
+            weighted_milli = weighted_checkpoint.as_ref().map(|c| c.milli),
+            "[weighted_usage] pre-turn compaction trigger"
+        );
+        if cost_triggered {
+            broadcast_agent_warning(session_id, &format!(
+                "Automatic compaction: equivalent-token spend {} >= {} (context capacity is a separate trigger)",
+                weighted_checkpoint.as_ref().map(|c| c.milli / 1000).unwrap_or(0),
+                self.runtime.resolved.compaction.weighted_token_threshold), "compaction");
         }
 
         // Budget in ESTIMATED tokens for the compactors below: effective
@@ -431,8 +487,10 @@ impl UnifiedMessageProcessor {
         )
         .await;
 
-        // Try SM-compact first (zero API calls)
-        let sm_compacted = {
+        // Spend-only must rewrite the warm prefix; ordinary context SM remains.
+        let sm_compacted = if cost_triggered && !size_triggered {
+            None
+        } else {
             let sm_state = self.sm_state.lock().await;
             if self.sm_config.enabled {
                 let anchor_idx = resolve_sm_anchor_idx(session_id, &sm_state);
@@ -513,17 +571,45 @@ impl UnifiedMessageProcessor {
                 "compaction",
                 self.runtime.account_id.as_deref(),
             );
-            let mut state = self.compaction_state.lock().await;
-            let (compacted, outcome) = ContextCompactor::compact_with_fork(
-                &compactable_tail,
-                budget_tokens,
-                &self.runtime.resolved.compaction,
-                &mut state,
-                &attributed,
-                &self.runtime.model,
-                Some(&fork_inputs),
-            )
-            .await;
+            let lock_started = std::time::Instant::now();
+            let mut state = self.session.compaction.lock().await;
+            info!(
+                session_id,
+                wait_ms = lock_started.elapsed().as_millis(),
+                stage = "state_lock",
+                "[compaction_stage] pre-turn lock acquired"
+            );
+            let provider_started = std::time::Instant::now();
+            let (compacted, outcome) = if cost_triggered && !size_triggered {
+                ContextCompactor::compact_for_weighted_spend(
+                    &compactable_tail,
+                    budget_tokens,
+                    &self.runtime.resolved.compaction,
+                    &mut state,
+                    &attributed,
+                    &self.runtime.model,
+                    Some(&fork_inputs),
+                )
+                .await
+            } else {
+                ContextCompactor::compact_with_fork(
+                    &compactable_tail,
+                    budget_tokens,
+                    &self.runtime.resolved.compaction,
+                    &mut state,
+                    &attributed,
+                    &self.runtime.model,
+                    Some(&fork_inputs),
+                )
+                .await
+            };
+
+            info!(
+                session_id,
+                elapsed_ms = provider_started.elapsed().as_millis(),
+                stage = "provider_summary",
+                "[compaction_stage] pre-turn provider completed"
+            );
 
             // CC semantics: a failed compaction leaves the history UNCHANGED
             // and the turn proceeds with the original messages — no silent
@@ -545,6 +631,10 @@ impl UnifiedMessageProcessor {
             }
             if !matches!(outcome, CompactionOutcome::Compacted { .. }) {
                 *messages = pre_compact_messages;
+                return CompactionPhaseOutcome::Continue;
+            }
+
+            if matches!(outcome, CompactionOutcome::Skipped) {
                 return CompactionPhaseOutcome::Continue;
             }
 
@@ -584,6 +674,15 @@ impl UnifiedMessageProcessor {
         );
 
         let durable_compacted_messages = messages[prefix_len.min(messages.len())..].to_vec();
+
+        if self
+            .session
+            .cancel_flag
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            *messages = pre_compact_messages;
+            return CompactionPhaseOutcome::Continue;
+        }
 
         // 6b. Compact-fork — for channel-attached sessions only, persist the
         // compacted transcript as a new session id and return `fork_redirect`
@@ -649,6 +748,16 @@ impl UnifiedMessageProcessor {
         // rewriting the transcript. The durable view is `[summary] +
         // rows >= cutoff`; prior rows are never touched, so sequence and
         // created_at coordinates stay valid for truncation/replay.
+        // Cancellation after provider completion must not commit/reset the
+        // captured spend or publish an uncommitted candidate history.
+        if self
+            .session
+            .cancel_flag
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            *messages = pre_compact_messages;
+            return CompactionPhaseOutcome::Continue;
+        }
         let compacted_for_persist = durable_compacted_messages.clone();
         // Boundary display metadata: estimated context tokens either side of
         // the compaction, shown in the chat marker's subtitle.
@@ -658,11 +767,13 @@ impl UnifiedMessageProcessor {
         ));
         let persist_result = tokio::task::spawn_blocking({
             let sid = session_id.to_string();
+            let cancel = self.session.cancel_flag.clone();
             move || -> Result<(), String> {
-                super::super::super::compaction::persist::append_in_place_compact_boundary(
-                    &sid,
-                    &compacted_for_persist,
-                    boundary_token_delta,
+                if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                    return Err("compaction cancelled before durable commit".into());
+                }
+                super::super::super::compaction::persist::append_in_place_compact_boundary_with_checkpoint(
+                    &sid, &compacted_for_persist, boundary_token_delta, weighted_checkpoint.as_ref(),
                 )
                 .map(|_| ())
             }
@@ -695,14 +806,17 @@ impl UnifiedMessageProcessor {
                     durable_compacted_messages.len()
                 );
             }
-            Ok(Err(err)) => warn!(
-                "[unified_processor] Failed to persist compact boundary for session {}: {}",
-                session_id, err
-            ),
-            Err(err) => warn!(
-                "[unified_processor] Failed to join compact boundary persistence for session {}: {}",
-                session_id, err
-            ),
+            Ok(Err(err)) => {
+                *messages = pre_compact_messages;
+                warn!(
+                    "[unified_processor] Failed to persist compact boundary for session {}: {}",
+                    session_id, err
+                );
+            }
+            Err(err) => {
+                *messages = pre_compact_messages;
+                warn!("[unified_processor] Failed to join compact boundary persistence for session {}: {}", session_id, err);
+            }
         }
 
         CompactionPhaseOutcome::Continue
@@ -790,3 +904,36 @@ mod tests {
 #[cfg(test)]
 #[path = "reactive_memory_tests.rs"]
 mod reactive_memory_tests;
+
+#[cfg(test)]
+mod weighted_trigger_tests {
+    use super::*;
+    #[test]
+    fn exact_below_equal_above_zero_and_min_messages() {
+        let mut config = crate::model_context::compaction::CompactionConfig::default();
+        assert!(!weighted_trigger_due(4_999_999_000, &config, 8));
+        assert!(!weighted_trigger_due(4_999_999_999, &config, 8));
+        assert!(weighted_trigger_due(5_000_000_000, &config, 8));
+        assert!(weighted_trigger_due(5_000_001_000, &config, 8));
+        assert!(!weighted_trigger_due(5_000_000_000, &config, 7));
+        config.weighted_token_threshold = 0;
+        assert!(!weighted_trigger_due(i64::MAX, &config, 8));
+        config.weighted_token_threshold = u64::MAX;
+        assert!(!weighted_trigger_due(i64::MAX, &config, 8));
+        config.weighted_token_threshold = 5_000_000;
+        config.enabled = false;
+        assert!(!weighted_trigger_due(i64::MAX, &config, 8));
+    }
+    #[test]
+    fn weighted_zero_does_not_disable_context_safety() {
+        let mut config = crate::model_context::compaction::CompactionConfig::default();
+        config.weighted_token_threshold = 0;
+        let history: Vec<Value> = (0..12)
+            .map(|_| serde_json::json!({"role":"user","content":"x ".repeat(500)}))
+            .collect();
+        assert!(!weighted_trigger_due(i64::MAX, &config, history.len()));
+        assert!(ContextCompactor::needs_compaction_observed(
+            &history, 1000, &config, 900
+        ));
+    }
+}

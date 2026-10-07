@@ -32,3 +32,5 @@ pub mod tokenizer;
 // `model_context::session_memory::*`, `model_context::tokenizer::*`,
 // `model_context::microcompact::*`, etc.). Flattening here would only
 // add dead surface.
+
+pub mod weighted_usage;

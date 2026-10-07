@@ -70,6 +70,20 @@ pub(crate) fn append_in_place_compact_boundary(
     durable_compacted_messages: &[Value],
     token_delta: Option<(usize, usize)>,
 ) -> Result<AppendedCompactBoundary, String> {
+    append_in_place_compact_boundary_with_checkpoint(
+        session_id,
+        durable_compacted_messages,
+        token_delta,
+        None,
+    )
+}
+
+pub(crate) fn append_in_place_compact_boundary_with_checkpoint(
+    session_id: &str,
+    durable_compacted_messages: &[Value],
+    token_delta: Option<(usize, usize)>,
+    checkpoint: Option<&crate::model_context::weighted_usage::WeightedCheckpoint>,
+) -> Result<AppendedCompactBoundary, String> {
     let (summary_text, tail_len) = split_summary_and_tail(durable_compacted_messages);
     let cutoff = unified_persistence::compact_cutoff_sequence(session_id, tail_len)
         .map_err(|err| err.to_string())?;
@@ -77,13 +91,23 @@ pub(crate) fn append_in_place_compact_boundary(
         Some((before, after)) => (Some(before as i64), Some(after as i64)),
         None => (None, None),
     };
-    let (id, created_at) = unified_persistence::append_compact_boundary(
-        session_id,
-        &summary_text,
-        cutoff,
-        tokens_before,
-        None,
-    )
+    let (id, created_at) = match checkpoint {
+        Some(checkpoint) => unified_persistence::append_compact_boundary_with_checkpoint(
+            session_id,
+            &summary_text,
+            cutoff,
+            tokens_before,
+            None,
+            checkpoint,
+        ),
+        None => unified_persistence::append_compact_boundary(
+            session_id,
+            &summary_text,
+            cutoff,
+            tokens_before,
+            None,
+        ),
+    }
     .map_err(|err| err.to_string())?;
 
     let (durable_messages, durable_tokens_after) = match unified_persistence::load_llm_history(

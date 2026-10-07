@@ -406,20 +406,59 @@ fn insert_message_with_policy(
     msg: &AgentMessageRow,
     conflict_policy: MessageConflictPolicy,
 ) -> SqliteResult<(String, bool)> {
+    insert_message_with_policy_and_checkpoint(prefix, msg, conflict_policy, None)
+}
+
+fn insert_message_with_policy_and_checkpoint(
+    prefix: &str,
+    msg: &AgentMessageRow,
+    conflict_policy: MessageConflictPolicy,
+    checkpoint: Option<&crate::model_context::weighted_usage::WeightedCheckpoint>,
+) -> SqliteResult<(String, bool)> {
     with_sessions_writer(|| {
-        let conn = get_connection()?;
-        conn.execute_batch("BEGIN IMMEDIATE")?;
-        match insert_message_with_connection(&conn, prefix, msg, conflict_policy) {
-            Ok(outcome) => {
-                conn.execute_batch("COMMIT")?;
-                Ok(outcome)
-            }
-            Err(error) => {
-                let _ = conn.execute_batch("ROLLBACK");
-                Err(error)
-            }
-        }
+        let mut conn = get_connection()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let outcome = insert_message_and_checkpoint_with_connection(
+            &tx,
+            prefix,
+            msg,
+            conflict_policy,
+            checkpoint,
+        )?;
+        tx.commit()?;
+        Ok(outcome)
     })
+}
+
+fn insert_message_and_checkpoint_with_connection(
+    conn: &rusqlite::Connection,
+    prefix: &str,
+    msg: &AgentMessageRow,
+    conflict_policy: MessageConflictPolicy,
+    checkpoint: Option<&crate::model_context::weighted_usage::WeightedCheckpoint>,
+) -> SqliteResult<(String, bool)> {
+    // Validate before inserting: a retry/completion from an older compaction
+    // generation must not append a second boundary or reset newer spend.
+    let captured;
+    let reset = if checkpoint.is_some() && msg.compact_from_sequence.is_some() && prefix == "agent"
+    {
+        captured =
+            crate::model_context::weighted_usage::snapshot_with_connection(conn, &msg.session_id)?;
+        match checkpoint {
+            Some(c) if c.session_id != msg.session_id || c.generation != captured.generation => {
+                return Err(rusqlite::Error::InvalidQuery);
+            }
+            Some(c) => Some(c),
+            None => None,
+        }
+    } else {
+        None
+    };
+    let outcome = insert_message_with_connection(conn, prefix, msg, conflict_policy)?;
+    if let Some(checkpoint) = reset {
+        crate::model_context::weighted_usage::commit_with_connection(conn, checkpoint)?;
+    }
+    Ok(outcome)
 }
 
 fn insert_message(prefix: &str, msg: &AgentMessageRow) -> SqliteResult<String> {
@@ -528,3 +567,104 @@ mod messages;
 pub use messages::*;
 
 pub mod todos;
+
+#[cfg(test)]
+mod weighted_boundary_tests {
+    use super::*;
+    use crate::model_context::weighted_usage as weighted;
+    #[test]
+    fn weighted_boundary_insert_reset_are_atomic_and_stale_retry_rejected() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE agent_sessions(session_id TEXT PRIMARY KEY, updated_at TEXT);
+            CREATE TABLE agent_messages(id TEXT PRIMARY KEY, session_id TEXT, role TEXT, content TEXT,
+            tool_name TEXT, tool_call_id TEXT, tool_input TEXT, tool_output TEXT, model TEXT,
+            sequence INTEGER, created_at TEXT, images TEXT, compact_from_sequence INTEGER,
+            compact_tokens_before INTEGER, compact_tokens_after INTEGER, tool_is_error INTEGER);
+            INSERT INTO agent_sessions VALUES('A','old');").unwrap();
+        weighted::record_with_connection(&conn, "A", "t1", 1, 5_000_000_000).unwrap();
+        let checkpoint = weighted::snapshot_with_connection(&conn, "A").unwrap();
+        weighted::record_with_connection(&conn, "A", "t2", 1, 800).unwrap();
+        let msg = AgentMessageRow {
+            id: "boundary-1".into(),
+            session_id: "A".into(),
+            role: "system".into(),
+            content: "summary".into(),
+            tool_name: None,
+            tool_call_id: None,
+            tool_input: None,
+            tool_output: None,
+            model: None,
+            sequence: 0,
+            created_at: "now".into(),
+            images: None,
+            compact_from_sequence: Some(0),
+            compact_tokens_before: None,
+            compact_tokens_after: None,
+            tool_is_error: false,
+        };
+        conn.execute_batch("CREATE TRIGGER fail_boundary BEFORE INSERT ON agent_messages BEGIN SELECT RAISE(ABORT,'fixture'); END;").unwrap();
+        {
+            let tx = conn.transaction().unwrap();
+            assert!(insert_message_and_checkpoint_with_connection(
+                &tx,
+                "agent",
+                &msg,
+                MessageConflictPolicy::Replace,
+                Some(&checkpoint)
+            )
+            .is_err());
+        }
+        assert_eq!(
+            weighted::snapshot_with_connection(&conn, "A")
+                .unwrap()
+                .milli,
+            5_000_000_800
+        );
+        conn.execute_batch("DROP TRIGGER fail_boundary;").unwrap();
+        {
+            let tx = conn.transaction().unwrap();
+            insert_message_and_checkpoint_with_connection(
+                &tx,
+                "agent",
+                &msg,
+                MessageConflictPolicy::Replace,
+                Some(&checkpoint),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        assert_eq!(
+            weighted::snapshot_with_connection(&conn, "A")
+                .unwrap()
+                .milli,
+            800
+        );
+        let retry = AgentMessageRow {
+            id: "boundary-2".into(),
+            ..msg.clone()
+        };
+        {
+            let tx = conn.transaction().unwrap();
+            assert!(insert_message_and_checkpoint_with_connection(
+                &tx,
+                "agent",
+                &retry,
+                MessageConflictPolicy::Replace,
+                Some(&checkpoint)
+            )
+            .is_err());
+        }
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM agent_messages", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            weighted::snapshot_with_connection(&conn, "A")
+                .unwrap()
+                .milli,
+            800
+        );
+    }
+}

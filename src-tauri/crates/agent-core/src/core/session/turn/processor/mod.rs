@@ -43,7 +43,6 @@ use std::sync::Arc;
 use super::super::persistence as unified_persistence;
 use super::super::types::{AgentExecMode, IdeContext};
 use super::event_handler::EventHandlerConfig;
-use crate::model_context::compaction::CompactionState;
 use crate::model_context::microcompact::ReplacementState;
 use crate::model_context::session_memory::{
     SessionMemoryCompactConfig, SessionMemoryConfig, SessionMemoryState,
@@ -127,7 +126,6 @@ pub struct UnifiedMessageProcessor {
     event_handler_config: EventHandlerConfig,
 
     // ── Per-turn mutable state (not on session) ────────────────────────
-    compaction_state: tokio::sync::Mutex<CompactionState>,
     sm_state: Arc<tokio::sync::Mutex<SessionMemoryState>>,
     sm_config: SessionMemoryConfig,
     sm_compact_config: SessionMemoryCompactConfig,

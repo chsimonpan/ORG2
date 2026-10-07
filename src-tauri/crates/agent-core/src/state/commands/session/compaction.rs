@@ -313,6 +313,10 @@ async fn run_manual_compact_exclusive(
         ),
     );
 
+    let weighted_checkpoint =
+        tokio::task::block_in_place(|| crate::model_context::weighted_usage::snapshot(&session_id))
+            .ok();
+
     crate::specialization::hooks::dispatch::fire_pre_compaction(
         Some(&hook_executor),
         &session_id,
@@ -442,10 +446,11 @@ async fn run_manual_compact_exclusive(
             }
 
             // The boundary row is the compaction — its failure is fatal.
-            let mut boundary = persist::append_in_place_compact_boundary(
+            let mut boundary = persist::append_in_place_compact_boundary_with_checkpoint(
                 &sid,
                 &compacted,
                 Some((tokens_before, candidate_tokens_after)),
+                weighted_checkpoint.as_ref(),
             )?;
             let durable_messages = boundary
                 .durable_messages

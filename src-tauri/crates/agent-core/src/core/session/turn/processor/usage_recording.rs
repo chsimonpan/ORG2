@@ -78,6 +78,19 @@ impl UnifiedMessageProcessor {
             return;
         }
 
+        if let Err(err) = tokio::task::block_in_place(|| {
+            crate::model_context::weighted_usage::record_turn(
+                session_id,
+                turn_id,
+                &result.usage_telemetry.llm_spans,
+            )
+        }) {
+            warn!(
+                "[weighted_usage] owner {} usage receipt failed: {}",
+                session_id, err
+            );
+        }
+
         let related_tool_call_ids_json = result
             .usage_telemetry
             .llm_spans

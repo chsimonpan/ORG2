@@ -50,6 +50,26 @@ pub fn save_compact_boundary_msg(
     tokens_before: Option<i64>,
     tokens_after: Option<i64>,
 ) -> SqliteResult<(String, String)> {
+    save_compact_boundary_msg_with_checkpoint(
+        prefix,
+        session_id,
+        summary,
+        from_sequence,
+        tokens_before,
+        tokens_after,
+        None,
+    )
+}
+
+pub fn save_compact_boundary_msg_with_checkpoint(
+    prefix: &str,
+    session_id: &str,
+    summary: &str,
+    from_sequence: i64,
+    tokens_before: Option<i64>,
+    tokens_after: Option<i64>,
+    checkpoint: Option<&crate::model_context::weighted_usage::WeightedCheckpoint>,
+) -> SqliteResult<(String, String)> {
     let created_at = Utc::now().to_rfc3339();
     let msg = AgentMessageRow {
         id: Uuid::new_v4().to_string(),
@@ -69,7 +89,18 @@ pub fn save_compact_boundary_msg(
         compact_tokens_after: tokens_after,
         tool_is_error: false,
     };
-    let id = insert_message_retry(prefix, &msg)?;
+    let id = match checkpoint {
+        None => insert_message_retry(prefix, &msg)?,
+        Some(checkpoint) => {
+            super::super::insert_message_with_policy_and_checkpoint(
+                prefix,
+                &msg,
+                MessageConflictPolicy::Replace,
+                Some(checkpoint),
+            )?
+            .0
+        }
+    };
     Ok((id, created_at))
 }
 

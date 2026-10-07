@@ -142,6 +142,8 @@ export interface CompactionConfig {
   floorTokens?: number;
   reservedSummaryTokens?: number;
   bufferTokens?: number;
+  /** Equivalent-token spend, default 5M; 0 disables only this trigger. */
+  weightedTokenThreshold?: number;
 }
 
 /** Session model — controls how agent sessions are managed */

@@ -8,7 +8,6 @@
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
-use crate::model_context::compaction::CompactionState;
 use crate::model_context::microcompact::ReplacementState;
 use crate::model_context::session_memory::{SessionMemoryCompactConfig, SessionMemoryConfig};
 use crate::tools::policy::ResolvedToolPolicy;
@@ -77,7 +76,6 @@ impl UnifiedMessageProcessor {
             app_handle,
             screenshot_store,
             event_handler_config,
-            compaction_state: tokio::sync::Mutex::new(CompactionState::default()),
             sm_state,
             sm_config: SessionMemoryConfig::default(),
             sm_compact_config: SessionMemoryCompactConfig::default(),

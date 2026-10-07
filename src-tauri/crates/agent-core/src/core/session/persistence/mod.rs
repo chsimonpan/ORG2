@@ -44,9 +44,9 @@ pub use sidebar::{
 
 pub use messages::{
     anchor_at_or_after_created_at, append_compact_boundary,
-    append_session_with_materialized_history, clear_messages, clear_session_memory_state,
-    commit_session_memory_state, compact_cutoff_sequence,
-    load_agent_org_inbox_transcript_materializations, load_llm_history,
+    append_compact_boundary_with_checkpoint, append_session_with_materialized_history,
+    clear_messages, clear_session_memory_state, commit_session_memory_state,
+    compact_cutoff_sequence, load_agent_org_inbox_transcript_materializations, load_llm_history,
     load_llm_history_start_sequences, load_llm_history_text_only,
     load_llm_history_text_only_bounded, load_messages, load_native_history,
     load_session_memory_state, mark_turn_cancelled, materialize_agent_org_inbox_transcript,
