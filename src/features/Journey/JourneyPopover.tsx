@@ -9,7 +9,7 @@ import {validateAnchor} from "./canonicalScope";
 import type {DurableAnchor,JourneySnapshot} from "./types";
 export function JourneyPopover({ownerSessionId}:{ownerSessionId:string}){
  const [open,setOpen]=useState(false),[opening,setOpening]=useState(false),[openError,setOpenError]=useState<string|null>(null);
- const openRequest=useRef(0);useEffect(()=>()=>{openRequest.current++;},[ownerSessionId]);
+ const openRequest=useRef(0);useEffect(()=>{openRequest.current++;setOpening(false);setOpen(false);setOpenError(null);return ()=>{openRequest.current++;};},[ownerSessionId]);
  const toggle=async()=>{if(open){setOpen(false);return;}if(opening)return;const request=++openRequest.current;setOpening(true);setOpenError(null);try{await openDurableJourneyOwner(ownerSessionId);if(openRequest.current===request)setOpen(true);}catch(error){if(openRequest.current===request)setOpenError(String(error));}finally{if(openRequest.current===request)setOpening(false);}};
  return <><button type="button" aria-label="Session Journey" aria-expanded={open} disabled={opening} onClick={()=>void toggle()}>Journey</button>{openError&&<p role="alert">{openError}</p>}{open&&<JourneyOwnerPanel key={ownerSessionId} ownerSessionId={ownerSessionId} onClose={()=>setOpen(false)}/>}</>;
 }
