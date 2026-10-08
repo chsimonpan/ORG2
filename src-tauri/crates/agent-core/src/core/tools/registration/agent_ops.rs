@@ -33,6 +33,11 @@ fn should_register_question_tool(
 /// Note: The unified `agent` tool is registered separately in OS/SDE agent init
 /// because it requires an LLM provider which is created at agent initialization time.
 pub fn register(registry: &mut ToolRegistry, deps: &ToolDeps, disabled: &HashSet<String>) {
+    // Native import capability follows this runtime owner; never a global current session.
+    if !deps.session_id.is_empty() && !deps.session_id.starts_with("cli:") {
+        register_if_enabled(registry, Box::new(crate::tools::impls::orchestration::import_context::ImportContextTool::new(deps.session_id.clone())), disabled);
+    }
+
     // ── Session (SDE agent management / human proxy) ──
     if let Some(ref bridge) = deps.action_bridge {
         register_if_enabled(

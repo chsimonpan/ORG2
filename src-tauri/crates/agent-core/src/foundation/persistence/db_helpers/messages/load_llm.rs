@@ -181,7 +181,7 @@ pub fn load_llm_history(
     );
 
     let rows=visible_rows(&messages);
-    let result=if prefix=="agent"{let c=crate::foundation::db_bridge::get_connection()?;let(rows,capsules)=crate::core::session::journey_runtime_persistence::provider_visible_rows(&c,session_id,rows)?;let mut prompt=reconstruct(&rows);prompt.extend(capsules);prompt}else{reconstruct(&rows)};
+    let result=if prefix=="agent"{let c=crate::foundation::db_bridge::get_connection()?;let(rows,capsules)=crate::core::session::journey_runtime_persistence::provider_visible_rows(&c,session_id,rows)?;let mut prompt=reconstruct(&rows);prompt.extend(capsules);prompt.extend(crate::session::context_import::provider_sections_with_connection(&c,session_id)?);prompt}else{reconstruct(&rows)};
 
     // Debug: log reconstructed message summary
     tracing::debug!(

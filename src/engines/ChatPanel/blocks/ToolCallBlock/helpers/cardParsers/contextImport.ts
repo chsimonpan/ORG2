@@ -6,9 +6,11 @@ export function parseContextImportCardResult(
 ): ContextImportCardData | null {
   const sourceKind =
     (typeof result.source_kind === "string" ? result.source_kind : null) ??
+    (typeof result.sourceKind === "string" ? result.sourceKind : null) ??
     (typeof args.source_kind === "string" ? args.source_kind : null);
   const sourceId =
     (typeof result.source_id === "string" ? result.source_id : null) ??
+    (typeof result.sourceId === "string" ? result.sourceId : null) ??
     (typeof args.source_id === "string" ? args.source_id : null);
   if (!sourceKind || !sourceId) return null;
 
