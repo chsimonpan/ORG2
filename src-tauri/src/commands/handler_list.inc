@@ -605,6 +605,8 @@ project_management::projects::commands::linear_issue_update,
 project_management::projects::commands::linear_issue_archive,
 // File operations commands (binary detection, ignore filtering)
 editor_file_io::editor_stat_bounded,
+crate::context_import_commands::context_import_selected,
+crate::context_import_commands::context_import_list,
 crate::journey_commands::journey_snapshot,
 crate::journey_commands::journey_boundary_preview,
 crate::journey_commands::journey_domain_snapshot,

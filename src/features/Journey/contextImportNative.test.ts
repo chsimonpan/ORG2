@@ -1,0 +1,12 @@
+import {it,expect,vi,beforeEach} from "vitest";
+import {invoke} from "@tauri-apps/api/core";
+import {importSelectedJourneyContext} from "./contextImportNative";
+vi.mock("@tauri-apps/api/core",()=>({invoke:vi.fn()}));
+beforeEach(()=>vi.clearAllMocks());
+const anchor={ownerSessionId:"A",sourceSessionId:"A",branchId:"session:A",durableMessageId:"end",durableTurnId:null,boundaryVersion:7,boundaryHash:"hash"};
+const result={snapshotId:"snapshot",targetSessionId:"A",sourceKind:"session",sourceId:"A",namespace:"session:A",title:"Native",tokenEstimate:99,pinned:true,snippet:"source",anchor,prefixHash:"prefix"};
+it("invokes actual selected durable anchor with revision seven, not ordinal/schema version one",async()=>{vi.mocked(invoke).mockResolvedValue(result);expect(await importSelectedJourneyContext("A",anchor)).toEqual(result);expect(invoke).toHaveBeenCalledWith("context_import_selected",{ownerSessionId:"A",anchor,tokenBudget:4096,pinned:true});});
+it("cross owner cannot dispatch",async()=>{await expect(importSelectedJourneyContext("B",anchor)).rejects.toThrow("authority mismatch");expect(invoke).not.toHaveBeenCalled();});
+it("wrong returned owner fails closed",async()=>{vi.mocked(invoke).mockResolvedValue({...result,targetSessionId:"B"});await expect(importSelectedJourneyContext("A",anchor)).rejects.toThrow("response mismatch");});
+it("changed durable end cannot update imported card",async()=>{vi.mocked(invoke).mockResolvedValue({...result,anchor:{...anchor,durableMessageId:"future"}});await expect(importSelectedJourneyContext("A",anchor)).rejects.toThrow("response mismatch");});
+it("budget and labels cannot substitute source authority",async()=>{await expect(importSelectedJourneyContext("A",{...anchor,branchId:"topic"})).rejects.toThrow();await expect(importSelectedJourneyContext("A",anchor,0)).rejects.toThrow();expect(invoke).not.toHaveBeenCalled();});

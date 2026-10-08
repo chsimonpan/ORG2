@@ -1,4 +1,4 @@
-export interface DurableAnchor { ownerSessionId:string; sourceSessionId:string; branchId:string; durableMessageId:string; durableTurnId?:string; boundaryVersion:number; boundaryHash:string; }
+export interface DurableAnchor { ownerSessionId:string; sourceSessionId:string; branchId:string; durableMessageId:string; durableTurnId?:string|null; boundaryVersion:number; boundaryHash:string; }
 export type MarkerKind='decision'|'pivot'|'abandon'|'artifact'|'finding'|'question'|'verify'|'handoff'|'interrupt';
 export interface CanonicalNode { id:string; title:string; timestamp:number; laneId:string; kind:MarkerKind; anchor:DurableAnchor; }
 export interface CanonicalEdge { from:string; to:string; kind:'forked_from'|'resumed_from'|'compacted_to'; evidenceId:string; }

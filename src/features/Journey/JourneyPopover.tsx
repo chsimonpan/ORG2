@@ -1,3 +1,4 @@
+import {NativeContextImportControls} from "./NativeContextImportControls";
 // Licensed Journey canvas is a read-only canonical session surface. Never performs model work.
 import {useEffect,useRef,useState} from "react";
 import {JourneyCanvas} from "./JourneyCanvas";
@@ -31,6 +32,7 @@ export function JourneyOwnerPanel({ownerSessionId,onClose}:{ownerSessionId:strin
  return <section role="dialog" aria-label="Canonical Session Journey" className="absolute right-0 top-full z-50 max-h-[80vh] w-[min(900px,95vw)] overflow-auto rounded-lg border border-border-2 bg-chat-container p-3 text-text-1 shadow-lg" onKeyDown={e=>{if(e.key==="Escape")onClose();}}>
   <header><strong>Session Journey</strong><button type="button" onClick={()=>setReload(v=>v+1)}>Refresh Journey</button><button type="button" onClick={onClose}>Close Journey</button></header>
   <p>Canonical durable history. Read-only; preview, import, fork, facts and reviews require independently validated service permissions.</p>
+  <NativeContextImportControls key={ownerSessionId+":import"} ownerSessionId={ownerSessionId} anchor={active}/>
   {domain?.snapshot.session_id===ownerSessionId&&<aside aria-label="Journey branch tree"><strong>Branches / tasks</strong><p>Active branch: {domain.snapshot.active_branch_id}</p><ul>{Object.values(domain.snapshot.branches).map(f=><li key={f.id}>{f.name||f.id}: {f.state} / parent {f.parent_branch_id} / exact endpoint {f.parent_anchor_message_id||"unavailable"}</li>)}</ul><ul>{Object.values(domain.snapshot.tasks).map(task=><li key={task.id}>{task.name}: {task.state} / branch {task.branch_id}</li>)}</ul><p>{Object.keys(domain.snapshot.facts).length} facts / {Object.keys(domain.snapshot.reviews).length} review items</p></aside>}
   {domain?.snapshot.session_id===ownerSessionId&&<JourneyLifecycleControls key={ownerSessionId} ownerSessionId={ownerSessionId} domain={domain} anchor={active} onCommitted={()=>setReload(v=>v+1)}/>}
   <button type="button" disabled={!active} onClick={()=>void requestPreview()}>Preview exact historical prefix</button>{previewError&&<p role="alert">{previewError}</p>}{preview?.ownerSessionId===ownerSessionId&&preview.anchor.boundaryHash===active?.boundaryHash&&<article aria-label="Journey exact prefix preview"><p>Prefix hash: {preview.prefixHash}</p>{preview.records.map(row=><section key={row.durableMessageId}><strong>{row.role}: {row.durableMessageId}</strong><pre className="whitespace-pre-wrap">{row.content}</pre></section>)}</article>}
