@@ -21,6 +21,8 @@ pub use test_helpers::test_env::{lock_home, register_after_env_hook, sandbox, Sa
 /// the full multi-table schema prime under the sandbox `ORGII_HOME`.
 #[ctor::ctor]
 fn install_schema_primer() {
+    // Desktop tests bypass bootstrap and dependency cfg(test); wire the real bridge.
+    crate::setup::bridges::register_persistence_bridge();
     register_after_env_hook(prime_schema);
 }
 
