@@ -10,3 +10,11 @@ it("cross owner cannot dispatch",async()=>{await expect(importSelectedJourneyCon
 it("wrong returned owner fails closed",async()=>{vi.mocked(invoke).mockResolvedValue({...result,targetSessionId:"B"});await expect(importSelectedJourneyContext("A",anchor)).rejects.toThrow("response mismatch");});
 it("changed durable end cannot update imported card",async()=>{vi.mocked(invoke).mockResolvedValue({...result,anchor:{...anchor,durableMessageId:"future"}});await expect(importSelectedJourneyContext("A",anchor)).rejects.toThrow("response mismatch");});
 it("budget and labels cannot substitute source authority",async()=>{await expect(importSelectedJourneyContext("A",{...anchor,branchId:"topic"})).rejects.toThrow();await expect(importSelectedJourneyContext("A",anchor,0)).rejects.toThrow();expect(invoke).not.toHaveBeenCalled();});
+
+it("metadata hydration denies foreign owner snapshots and duplicate durable snapshot IDs",async()=>{
+ const {listImportedJourneySnapshots}=await import("./contextImportNative");
+ const native={snapshotId:"native",targetSessionId:"A",sourceKind:"session",sourceId:"A",namespace:"session:A",title:"native",tokenEstimate:1,pinned:true,snippet:"x",prefixHash:"prefix",anchor:{ownerSessionId:"A",sourceSessionId:"A",branchId:"session:A",durableMessageId:"end",boundaryVersion:1,boundaryHash:"hash"}};
+ vi.mocked(invoke).mockResolvedValue([{...native,targetSessionId:"B"}]);await expect(listImportedJourneySnapshots("A")).rejects.toThrow("list mismatch");
+ vi.mocked(invoke).mockResolvedValue([native,native]);await expect(listImportedJourneySnapshots("A")).rejects.toThrow("list mismatch");
+ vi.mocked(invoke).mockResolvedValue([native]);expect(await listImportedJourneySnapshots("A")).toEqual([native]);
+});
