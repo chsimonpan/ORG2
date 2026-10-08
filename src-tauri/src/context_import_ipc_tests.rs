@@ -19,6 +19,9 @@ fn native_context_import_registered_owner_selected_anchor_ipc_durable_and_fail_c
  let app=mock_builder().manage(state.clone()).invoke_handler(tauri::generate_handler![context_import_selected,context_import_list]).build(mock_context(noop_assets())).unwrap();
  let w=tauri::WebviewWindowBuilder::new(&app,"main",Default::default()).build().unwrap();
  let p=json!({"ownerSessionId":owner,"anchor":anchor,"tokenBudget":4096,"pinned":true});
+ let session=tauri::async_runtime::block_on(state.get_session(owner)).unwrap();
+ let lease=session.processing_lock.clone().try_lock_owned().unwrap();
+ assert!(invoke(&w,"context_import_selected",p.clone()).is_err(),"busy owner must deny user mutation");drop(lease);
  let result=invoke(&w,"context_import_selected",p.clone()).unwrap();
  assert_eq!(result["targetSessionId"],owner);assert_eq!(result["sourceId"],owner);assert_eq!(result["anchor"]["boundaryVersion"],7);assert_eq!(result["pinned"],true);
  let list=invoke(&w,"context_import_list",json!({"ownerSessionId":owner})).unwrap();assert_eq!(list.as_array().unwrap().len(),1);assert!(list[0]["content"].as_str().unwrap().contains("Native GUI selection durable text"));
