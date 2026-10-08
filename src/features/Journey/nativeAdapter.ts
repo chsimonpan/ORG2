@@ -18,3 +18,9 @@ export async function loadJourneyDomainSnapshot(ownerSessionId:string):Promise<J
  if(!record(result)||!record(result.snapshot)||!Number.isSafeInteger(result.revision)||result.revision<0||typeof result.snapshot.active_branch_id!=="string"||![result.snapshot.tasks,result.snapshot.branches,result.snapshot.checkpoints,result.snapshot.facts,result.snapshot.reviews].every(record))throw Error("Journey domain response invalid");
  if(result.snapshot.session_id!==ownerSessionId)throw Error("Journey domain owner mismatch");return result;
 }
+
+/** Explicit user gesture only; native validates durable existence before rehydrating. */
+export async function openDurableJourneyOwner(ownerSessionId:string):Promise<void>{
+ if(!ownerSessionId||ownerSessionId.startsWith("cli:"))throw Error("Journey owner invalid");
+ const snapshot=await invoke<JourneySnapshot>("journey_owner_open",{ownerSessionId});if(!snapshot||snapshot.schemaVersion!==1||!Number.isSafeInteger(snapshot.revision)||!Array.isArray(snapshot.nodes)||!Array.isArray(snapshot.edges))throw Error("Journey open snapshot invalid");if(snapshot.ownerSessionId!==ownerSessionId)throw Error("Journey owner mismatch");
+}
