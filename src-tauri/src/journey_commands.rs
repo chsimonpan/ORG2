@@ -156,3 +156,7 @@ pub async fn journey_review_list(owner_session_id:String,state:tauri::State<'_,a
  if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_not_registered".into());}let c=database::db::get_connection().map_err(|e|e.to_string())?;journey_service::SessionJourneyApplicationService::review_queue(&c,&owner_session_id).map_err(|e|e.to_string())
 }
 #[cfg(test)]mod lifecycle_owner_tests{use super::*;#[test]fn all_lifecycle_commands_require_exact_owner_not_ui_title_or_imported_cli(){assert!(check_journey_owner("A","A").is_ok());assert!(check_journey_owner("A","B").is_err());assert!(check_journey_owner("cli:A","cli:A").is_err());assert!(check_journey_owner("","").is_err());}}
+
+#[cfg(test)]
+#[path="journey_registered_owner_ipc_tests.rs"]
+mod registered_owner_ipc_tests;
