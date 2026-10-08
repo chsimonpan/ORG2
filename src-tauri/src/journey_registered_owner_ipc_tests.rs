@@ -44,3 +44,20 @@ fn journey_registered_selected_session_durable_task_checkpoint_fork_cas_roundtri
  assert!(invoke(&w,"journey_task_start",json!({"ownerSessionId":owner,"request":{"sessionId":owner,"expectedRevision":5,"taskId":"busy-task","name":"denied","position":"下一条用户消息"}})).is_err());drop(lease);
  tauri::async_runtime::block_on(state.remove_session(owner));assert!(invoke(&w,"journey_domain_snapshot",json!({"ownerSessionId":owner})).is_err());
 }
+
+#[test]
+fn journey_registered_canvas_refresh_invalidates_old_native_endpoint(){
+ let _sandbox=test_helpers::test_env::sandbox();let owner="native-canvas-refresh-owner";let state=agent_core::state::AgentAppState::new();
+ tauri::async_runtime::block_on(state.register_session(agent_core::state::AgentSession::new(owner.into(),agent_core::definitions::sde_agent())));
+ let c=database::db::get_connection().unwrap();agent_core::foundation::persistence::session_snapshots::ensure_tables_with(&c).unwrap();
+ c.execute("INSERT INTO agent_sessions(session_id,created_at,updated_at) VALUES(?1,'2026-10-08T00:00:00Z','2026-10-08T00:00:00Z')",[owner]).unwrap();
+ c.execute("INSERT INTO agent_messages(id,session_id,role,content,sequence,created_at) VALUES('canvas-refresh-end',?1,'user','Before durable edit',1,'2026-10-08T00:00:00Z')",[owner]).unwrap();drop(c);
+ let app=mock_builder().manage(state.clone()).invoke_handler(tauri::generate_handler![journey_snapshot,journey_boundary_preview]).build(mock_context(noop_assets())).unwrap();let w=tauri::WebviewWindowBuilder::new(&app,"main",Default::default()).build().unwrap();
+ let before=invoke(&w,"journey_snapshot",json!({"ownerSessionId":owner})).unwrap();let anchor=before["nodes"][0]["anchor"].clone();
+ assert!(invoke(&w,"journey_boundary_preview",json!({"ownerSessionId":owner,"anchor":anchor})).is_ok());
+ let c=database::db::get_connection().unwrap();c.execute("UPDATE agent_messages SET content='After durable edit' WHERE id='canvas-refresh-end'",[]).unwrap();drop(c);
+ assert!(invoke(&w,"journey_boundary_preview",json!({"ownerSessionId":owner,"anchor":anchor})).is_err(),"old selected endpoint must not authorize edited source");
+ let after=invoke(&w,"journey_snapshot",json!({"ownerSessionId":owner})).unwrap();assert_ne!(before["nodes"][0]["anchor"]["boundaryHash"],after["nodes"][0]["anchor"]["boundaryHash"]);
+ assert!(invoke(&w,"journey_boundary_preview",json!({"ownerSessionId":owner,"anchor":after["nodes"][0]["anchor"]})).is_ok());
+ tauri::async_runtime::block_on(state.remove_session(owner));assert!(invoke(&w,"journey_snapshot",json!({"ownerSessionId":owner})).is_err());
+}
