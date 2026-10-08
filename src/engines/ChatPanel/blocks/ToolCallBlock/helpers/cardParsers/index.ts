@@ -17,3 +17,5 @@ export { parseFileCardResult } from "./file";
 export { parseOrgtrackEnvelope } from "./orgtrackEnvelope";
 export { parseWebsiteCardResult } from "./website";
 export { parseProjectCardResult, parseWorkItemCardResult } from "./workItem";
+
+export { parseContextImportCardResult } from "./contextImport";

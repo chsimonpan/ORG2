@@ -260,6 +260,16 @@ export interface TaskListCardData {
   observation?: "results" | "no_new_work_facts" | "new_trigger_pending";
 }
 
+export interface ContextImportCardData {
+  snapshotId?: string;
+  sourceKind: string;
+  sourceId: string;
+  namespace: string;
+  title?: string;
+  tokenEstimate?: number;
+  pinned?: boolean;
+}
+
 type StyledOutput =
   | { type: "workspaces"; workspaces: WorkspaceEntry[] }
   | { type: "workspaceInfo"; rows: WorkspaceInfoRow[] }
@@ -272,6 +282,7 @@ type StyledOutput =
   | { type: "websiteCard"; card: WebsiteCardData }
   | { type: "workItemCard"; card: WorkItemCardData }
   | { type: "projectCard"; card: ProjectCardData }
+  | { type: "contextImportCard"; card: ContextImportCardData }
   | { type: "commandResult"; card: CommandResultData }
   | { type: "orgtrackEnvelope"; card: OrgtrackEnvelopeData }
   | { type: "agentMessageCard"; card: AgentMessageCardData };
