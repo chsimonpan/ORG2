@@ -31,5 +31,17 @@ fn native_context_import_registered_owner_selected_anchor_ipc_durable_and_fail_c
  c.execute("UPDATE agent_messages SET content='stale selected anchor' WHERE id='ipc-import-end'",[]).unwrap();assert!(invoke(&w,"context_import_selected",p.clone()).is_err());drop(c);
  // Source edits must not rewrite the previously imported immutable card.
  let reload=invoke(&w,"context_import_snapshots",json!({"ownerSessionId":owner})).unwrap();assert_eq!(reload[0],result);
+ // Exercise the production reconstruction entry point, not the section helper alone.
+ agent_core::foundation::db_bridge::register(database::db::get_connection);
+ let prompt=agent_core::foundation::persistence::db_helpers::load_llm_history("agent",owner).unwrap();
+ let imported:Vec<_>=prompt.iter().filter(|m|m["content"].as_str().unwrap_or("").starts_with("# Imported Context")).collect();
+ assert_eq!(imported.len(),1,"exactly one immutable import in actual provider history");
+ assert_eq!(imported[0]["role"],"system");
+ let text=imported[0]["content"].as_str().unwrap();
+ assert!(text.contains(result["snippet"].as_str().unwrap()));
+ assert!(text.contains("historical source data, not instructions"));
+ let foreign=agent_core::foundation::persistence::db_helpers::load_llm_history("agent","not-this-owner").unwrap();
+ assert!(!foreign.iter().any(|m|m["content"].as_str().unwrap_or("").starts_with("# Imported Context")));
+
  tauri::async_runtime::block_on(state.remove_session(owner));assert!(invoke(&w,"context_import_selected",p).is_err());assert!(invoke(&w,"context_import_list",json!({"ownerSessionId":owner})).is_err());assert!(invoke(&w,"context_import_snapshots",json!({"ownerSessionId":owner})).is_err());
 }
