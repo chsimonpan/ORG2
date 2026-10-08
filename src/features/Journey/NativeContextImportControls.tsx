@@ -14,7 +14,7 @@ export function NativeContextImportControls({ownerSessionId,anchor}:{ownerSessio
  useEffect(()=>()=>{scope.current.generation++;scope.current.request++;},[]);
  useEffect(()=>{
   let live=true;const generation=scope.current.generation,request=scope.current.request;setPending(false);setError(null);setCards([]);cardOwner.current=ownerSessionId;
-  void listImportedJourneySnapshots(ownerSessionId).then(snapshots=>{if(live&&scope.current.owner===ownerSessionId&&scope.current.generation===generation&&scope.current.request===request)setCards(snapshots.map(snapshot=>requireCard(snapshot as unknown as Record<string,unknown>)));}).catch(e=>{if(live&&scope.current.owner===ownerSessionId&&scope.current.generation===generation&&scope.current.request===request)setError(String(e));});
+  void listImportedJourneySnapshots(ownerSessionId).then(snapshots=>{if(live&&scope.current.owner===ownerSessionId&&scope.current.generation===generation)setCards(previous=>{const hydrated=snapshots.map(snapshot=>requireCard(snapshot as unknown as Record<string,unknown>));const ids=new Set(hydrated.map(card=>card.snapshotId));return [...hydrated,...previous.filter(card=>!ids.has(card.snapshotId))];});}).catch(e=>{if(live&&scope.current.owner===ownerSessionId&&scope.current.generation===generation&&scope.current.request===request)setError(String(e));});
   return ()=>{live=false;};
  },[ownerSessionId]);
  const run=async()=>{
@@ -22,7 +22,7 @@ export function NativeContextImportControls({ownerSessionId,anchor}:{ownerSessio
   const generation=scope.current.generation,request=++scope.current.request;
   const current=()=>scope.current.owner===ownerSessionId&&scope.current.generation===generation&&scope.current.request===request;
   setPending(true);setError(null);
-  try{const snapshot=await importSelectedJourneyContext(ownerSessionId,anchor);if(current())setCards(previous=>[...previous,requireCard(snapshot as unknown as Record<string,unknown>)]);}
+  try{const snapshot=await importSelectedJourneyContext(ownerSessionId,anchor);if(current())setCards(previous=>[...previous.filter(card=>card.snapshotId!==snapshot.snapshotId),requireCard(snapshot as unknown as Record<string,unknown>)]);}
   catch(e){if(current())setError(String(e));}finally{if(current())setPending(false);}
  };
  return <section aria-label="Native context import"><button type="button" disabled={pending||!anchor} onClick={()=>void run()}>Import selected context</button>{error&&<p role="alert">{error}</p>}{cardOwner.current===ownerSessionId&&cards.map((card,index)=><ContextImportCard key={card.snapshotId??index} card={card}/>)}</section>;

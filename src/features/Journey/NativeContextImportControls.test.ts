@@ -26,3 +26,12 @@ it("pending hydration cannot contaminate unkeyed owner A-B-A selection",async()=
  vi.mocked(invoke).mockReset();let resolve!:(value:unknown)=>void;let calls=0;vi.mocked(invoke).mockImplementation(()=>++calls===1?new Promise(r=>resolve=r):Promise.resolve([]));const root=createSmokeRoot();
  try{await root.render(createElement(NativeContextImportControls,{ownerSessionId:"A",anchor:null}));await root.render(createElement(NativeContextImportControls,{ownerSessionId:"B",anchor:null}));await root.render(createElement(NativeContextImportControls,{ownerSessionId:"A",anchor:null}));await dispatch(()=>resolve([result]));expect(root.container.textContent).not.toContain("session:A");}finally{await root.unmount();}
 });
+
+it("explicit import overtaking hydration preserves previously persisted cards",async()=>{
+ vi.mocked(invoke).mockReset();let hydrate!:(v:unknown)=>void;
+ const earlier={...result,snapshotId:"earlier",title:"Earlier persisted context"};
+ vi.mocked(invoke).mockImplementation(cmd=>cmd==="context_import_snapshots"?new Promise(r=>hydrate=r):Promise.resolve(result));
+ const root=createSmokeRoot();
+ try{await root.render(createElement(NativeContextImportControls,{ownerSessionId:"A",anchor}));await dispatch(()=>root.container.querySelector("button")!.click());await dispatch(()=>hydrate([earlier,result]));expect(root.container.textContent).toContain("Earlier persisted context");expect(root.container.querySelectorAll("[data-snapshot-id]").length).toBeLessThanOrEqual(2);expect(root.container.textContent).toContain("Imported Session Context");}
+ finally{await root.unmount();}
+});
