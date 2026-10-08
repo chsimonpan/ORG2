@@ -19,7 +19,7 @@ function Marker({kind,color}:{kind:MarkerKind;color:string}) {
  }
 }
 export function JourneyCanvas(props:{snapshot:JourneySnapshot;onSelect:(anchor:DurableAnchor)=>void}) {
- return <JourneyCanvasOwner key={JSON.stringify([props.snapshot.ownerSessionId,props.snapshot.revision])} {...props}/>;
+ return <JourneyCanvasOwner key={JSON.stringify([props.snapshot.ownerSessionId,props.snapshot.revision,props.snapshot.nodes.map(node=>[node.id,node.anchor.durableMessageId,node.anchor.boundaryVersion,node.anchor.boundaryHash])])} {...props}/>;
 }
 function JourneyCanvasOwner({snapshot,onSelect}:{snapshot:JourneySnapshot;onSelect:(anchor:DurableAnchor)=>void}) {
  const uid=useId(),[scale,setScale]=useState(1),[pan,setPan]=useState({x:0,y:0}),[selected,setSelected]=useState<string|null>(null),[collapsed,setCollapsed]=useState<Set<string>>(new Set());
