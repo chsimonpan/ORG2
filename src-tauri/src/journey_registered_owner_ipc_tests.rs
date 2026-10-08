@@ -61,3 +61,14 @@ fn journey_registered_canvas_refresh_invalidates_old_native_endpoint(){
  assert!(invoke(&w,"journey_boundary_preview",json!({"ownerSessionId":owner,"anchor":after["nodes"][0]["anchor"]})).is_ok());
  tauri::async_runtime::block_on(state.remove_session(owner));assert!(invoke(&w,"journey_snapshot",json!({"ownerSessionId":owner})).is_err());
 }
+
+#[test]
+fn journey_explicit_durable_owner_open_rehydrates_without_creating_or_model_work(){
+ let _sandbox=test_helpers::test_env::sandbox();let owner="sdeagent-journey-reopen-fixture";let state=agent_core::state::AgentAppState::new();
+ let app=mock_builder().manage(state.clone()).invoke_handler(tauri::generate_handler![journey_owner_open,journey_snapshot]).build(mock_context(noop_assets())).unwrap();let w=tauri::WebviewWindowBuilder::new(&app,"main",Default::default()).build().unwrap();
+ assert!(invoke(&w,"journey_owner_open",json!({"ownerSessionId":owner})).is_err());assert!(tauri::async_runtime::block_on(state.get_session(owner)).is_none());
+ let c=database::db::get_connection().unwrap();agent_core::foundation::persistence::session_snapshots::ensure_tables_with(&c).unwrap();c.execute("INSERT INTO agent_sessions(session_id,created_at,updated_at) VALUES(?1,'2026-10-08T00:00:00Z','2026-10-08T00:00:00Z')",[owner]).unwrap();drop(c);
+ assert!(invoke(&w,"journey_snapshot",json!({"ownerSessionId":owner})).is_err());
+ let result=invoke(&w,"journey_owner_open",json!({"ownerSessionId":owner})).unwrap();assert_eq!(result["ownerSessionId"],owner);assert!(tauri::async_runtime::block_on(state.get_session(owner)).is_some());assert!(invoke(&w,"journey_snapshot",json!({"ownerSessionId":owner})).is_ok());
+ assert!(invoke(&w,"journey_owner_open",json!({"ownerSessionId":"cli:foreign"})).is_err());
+}

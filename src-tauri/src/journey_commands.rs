@@ -19,6 +19,18 @@ pub async fn journey_snapshot(owner_session_id:String,state:tauri::State<'_,agen
  if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_not_registered".into());}
  read_canonical_snapshot(&owner_session_id)
 }
+/// Explicit selected-session open, unlike read-only render. Never creates a durable owner.
+#[tauri::command]
+pub async fn journey_owner_open(owner_session_id:String,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<JourneySnapshot,String>{
+ if owner_session_id.is_empty()||owner_session_id.starts_with("cli:"){return Err("journey_source_not_canonical".into());}
+ {
+ let conn=database::db::get_connection().map_err(|e|e.to_string())?;
+ let exists:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE session_id=?1)",[&owner_session_id],|row|row.get(0)).map_err(|e|e.to_string())?;
+ if !exists{return Err("journey_owner_not_durable".into());}
+ }
+ if state.get_session(&owner_session_id).await.is_none(){agent_core::init::register_session_with_rehydrate(&state,&owner_session_id).await?;}
+ read_canonical_snapshot(&owner_session_id)
+}
 fn read_canonical_snapshot(owner:&str)->Result<JourneySnapshot,String>{
  let conn=database::db::get_connection().map_err(|e|e.to_string())?;
  let rows=agent_core::session::persistence::load_messages(owner).map_err(|e|e.to_string())?;
