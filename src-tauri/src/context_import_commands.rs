@@ -23,6 +23,13 @@ pub async fn context_import_list(owner_session_id:String,state:tauri::State<'_,A
  let c=database::db::get_connection().map_err(|e|e.to_string())?;
  agent_core::session::context_import::provider_sections_with_connection(&c,&owner_session_id).map_err(|e|e.to_string())
 }
+/// Metadata-preserving read-only hydration; existing provider list remains compatible.
+#[tauri::command]
+pub async fn context_import_snapshots(owner_session_id:String,state:tauri::State<'_,AgentAppState>)->Result<Vec<ContextSnapshot>,String>{
+ registered_owner(&state,&owner_session_id).await?;
+ let c=database::db::get_connection().map_err(|e|e.to_string())?;
+ agent_core::session::context_import::snapshots_with_connection(&c,&owner_session_id).map_err(|e|e.to_string())
+}
 #[cfg(test)]
 #[path="context_import_ipc_tests.rs"]
 mod ipc_tests;

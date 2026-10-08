@@ -16,7 +16,7 @@ fn native_context_import_registered_owner_selected_anchor_ipc_durable_and_fail_c
  c.execute("INSERT OR REPLACE INTO agent_sessions(session_id,created_at,updated_at) VALUES(?1,'2026-10-08T00:00:00Z','2026-10-08T00:00:00Z')",[owner]).unwrap();
  c.execute("INSERT INTO agent_messages(id,session_id,role,content,sequence,created_at) VALUES('ipc-import-end',?1,'user','Native GUI selection durable text',7,'2026-10-08T00:00:00Z')",[owner]).unwrap();
  let anchor=agent_core::session::journey_canonical::resolve_with_connection(&c,owner,owner,&format!("session:{owner}"),"ipc-import-end",7).unwrap();drop(c);
- let app=mock_builder().manage(state.clone()).invoke_handler(tauri::generate_handler![context_import_selected,context_import_list]).build(mock_context(noop_assets())).unwrap();
+ let app=mock_builder().manage(state.clone()).invoke_handler(tauri::generate_handler![context_import_selected,context_import_list,context_import_snapshots]).build(mock_context(noop_assets())).unwrap();
  let w=tauri::WebviewWindowBuilder::new(&app,"main",Default::default()).build().unwrap();
  let p=json!({"ownerSessionId":owner,"anchor":anchor,"tokenBudget":4096,"pinned":true});
  let session=tauri::async_runtime::block_on(state.get_session(owner)).unwrap();
@@ -25,8 +25,11 @@ fn native_context_import_registered_owner_selected_anchor_ipc_durable_and_fail_c
  let result=invoke(&w,"context_import_selected",p.clone()).unwrap();
  assert_eq!(result["targetSessionId"],owner);assert_eq!(result["sourceId"],owner);assert_eq!(result["anchor"]["boundaryVersion"],7);assert_eq!(result["pinned"],true);
  let list=invoke(&w,"context_import_list",json!({"ownerSessionId":owner})).unwrap();assert_eq!(list.as_array().unwrap().len(),1);assert!(list[0]["content"].as_str().unwrap().contains("Native GUI selection durable text"));
+ let snapshots=invoke(&w,"context_import_snapshots",json!({"ownerSessionId":owner})).unwrap();assert_eq!(snapshots.as_array().unwrap().len(),1);assert_eq!(snapshots[0],result);
  let c=rusqlite::Connection::open(database::db::get_db_path()).unwrap();assert_eq!(c.query_row("SELECT COUNT(*) FROM session_context_imports_v1 WHERE target_session_id=?1",[owner],|r|r.get::<_,i64>(0)).unwrap(),1);
  let mut foreign=p.clone();foreign["anchor"]["sourceSessionId"]=Value::String("foreign".into());assert!(invoke(&w,"context_import_selected",foreign).is_err());
  c.execute("UPDATE agent_messages SET content='stale selected anchor' WHERE id='ipc-import-end'",[]).unwrap();assert!(invoke(&w,"context_import_selected",p.clone()).is_err());drop(c);
- tauri::async_runtime::block_on(state.remove_session(owner));assert!(invoke(&w,"context_import_selected",p).is_err());assert!(invoke(&w,"context_import_list",json!({"ownerSessionId":owner})).is_err());
+ // Source edits must not rewrite the previously imported immutable card.
+ let reload=invoke(&w,"context_import_snapshots",json!({"ownerSessionId":owner})).unwrap();assert_eq!(reload[0],result);
+ tauri::async_runtime::block_on(state.remove_session(owner));assert!(invoke(&w,"context_import_selected",p).is_err());assert!(invoke(&w,"context_import_list",json!({"ownerSessionId":owner})).is_err());assert!(invoke(&w,"context_import_snapshots",json!({"ownerSessionId":owner})).is_err());
 }
