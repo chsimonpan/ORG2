@@ -9,3 +9,8 @@ it("rejects invalid requesting owner before IPC",async()=>{await expect(loadJour
 it("rejects owner-changing preview request before native IPC",async()=>{await expect(loadJourneyBoundaryPreview("A",{...anchor,ownerSessionId:"B"})).rejects.toThrow("Journey boundary request mismatch");expect(invoke).not.toHaveBeenCalled();});
 for(const boundaryVersion of [-1,NaN,Infinity,1.5,Number.MAX_SAFE_INTEGER+1])it("rejects invalid durable boundary revision "+String(boundaryVersion),async()=>{await expect(loadJourneyBoundaryPreview("A",{...anchor,boundaryVersion})).rejects.toThrow("Journey boundary request mismatch");expect(invoke).not.toHaveBeenCalled();});
 for(const boundaryVersion of [0,2,7])it("accepts actual native durable boundary revision "+boundaryVersion,async()=>{const selected={...anchor,boundaryVersion};vi.mocked(invoke).mockResolvedValue({ownerSessionId:"A",anchor:selected,prefixHash:"prefix",records:[]});expect((await loadJourneyBoundaryPreview("A",selected)).anchor).toEqual(selected);});
+
+it("explicit durable open denies backend snapshot without readable owner capability",async()=>{
+ vi.mocked(invoke).mockResolvedValue({schemaVersion:1,ownerSessionId:"owner",revision:1,nodes:[],edges:[],capabilities:{read:false,fork:false,import:false,mutate:false}});
+ const {openDurableJourneyOwner}=await import("./nativeAdapter");await expect(openDurableJourneyOwner("owner")).rejects.toThrow();
+});
