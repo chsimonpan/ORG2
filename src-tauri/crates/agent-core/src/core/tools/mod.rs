@@ -64,3 +64,7 @@ mod search_tool_tests;
 // those would all be dead surface.
 pub use defaults::derive_disabled_tools;
 pub use interactive::is_interactive_tool;
+
+#[cfg(test)]
+#[path = "tests/global_path_matrix_tests.rs"]
+mod global_path_matrix_tests;
