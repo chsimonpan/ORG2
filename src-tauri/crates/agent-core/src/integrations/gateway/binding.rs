@@ -170,6 +170,10 @@ impl BindingStore {
 
     /// Atomic durable publication; update cache only after commit.
     pub async fn publish_fork(&self, key: SessionKey, old: String, child: String) -> SqliteResult<bool> {
+        self.publish_fork_with_checkpoint(key, old, child, None).await
+    }
+
+    pub async fn publish_fork_with_checkpoint(&self, key: SessionKey, old: String, child: String, checkpoint: Option<crate::model_context::weighted_usage::WeightedCheckpoint>) -> SqliteResult<bool> {
         let mut guard = self.inner.write().await;
         let k = key.0.clone();
         let c = child.clone();
@@ -183,6 +187,10 @@ impl BindingStore {
             let parent = tx.execute("UPDATE agent_sessions SET status='archived' WHERE session_id=?1 AND status != 'archived'", params![old])?;
             let child = tx.execute("UPDATE agent_sessions SET status='idle' WHERE session_id=?1 AND status='archived' AND parent_session_id=?2", params![c,old])?;
             if parent != 1 || child != 1 { return Err(rusqlite::Error::QueryReturnedNoRows); }
+            if let Some(ref checkpoint) = checkpoint {
+                if checkpoint.session_id != old { return Err(rusqlite::Error::InvalidQuery); }
+                crate::model_context::weighted_usage::commit_with_connection(&tx, checkpoint)?;
+            }
             tx.commit()?;
             Ok(true)
         }).await.map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))??;

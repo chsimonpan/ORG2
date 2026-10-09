@@ -250,6 +250,7 @@ pub async fn run_manual_compact(
         compacted_messages: &compacted,
         old_session_id: session_id,
         reset_policy,
+        weighted_checkpoint: None,
     })
     .await;
 

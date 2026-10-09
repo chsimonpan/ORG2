@@ -704,6 +704,7 @@ impl UnifiedMessageProcessor {
                     compacted_messages: &durable_compacted_messages,
                     old_session_id: session_id,
                     reset_policy: &reset_policy,
+                    weighted_checkpoint: weighted_checkpoint.as_ref(),
                 },
             )
             .await;

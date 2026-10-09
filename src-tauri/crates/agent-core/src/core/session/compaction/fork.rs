@@ -71,6 +71,7 @@ pub struct ForkInputs<'a> {
     /// Reset policy is consulted only for `notify` flag — we honour the
     /// same user-visibility setting as idle-reset.
     pub reset_policy: &'a ResetPolicy,
+    pub weighted_checkpoint: Option<&'a crate::model_context::weighted_usage::WeightedCheckpoint>,
 }
 
 /// Detect whether `session_id` is owned by a gateway binding and, if so,
@@ -86,6 +87,7 @@ pub async fn attempt_fork(inputs: ForkInputs<'_>) -> ForkOutcome {
         compacted_messages,
         old_session_id,
         reset_policy,
+        weighted_checkpoint,
     } = inputs;
 
     // 1. Detect channel attachment via reverse lookup.
@@ -271,7 +273,7 @@ pub async fn attempt_fork(inputs: ForkInputs<'_>) -> ForkOutcome {
         }
     }
 
-    match state.gateway_bindings.publish_fork(binding.session_key.clone(), old_session_id.to_string(), new_session_id.clone()).await {
+    match state.gateway_bindings.publish_fork_with_checkpoint(binding.session_key.clone(), old_session_id.to_string(), new_session_id.clone(), weighted_checkpoint.cloned()).await {
         Ok(true) => {}
         Ok(false) => return ForkOutcome::Failed("binding changed during fork; reserved child remains archived".into()),
         Err(err) => return ForkOutcome::Failed(format!("fork publication: {}", err)),
@@ -400,13 +402,19 @@ mod tests {
         state.gateway_bindings.set(key.clone(), old.into()).await.unwrap();
         let messages = vec![serde_json::json!({"role":"system","content":"compacted race summary"})];
         let policy = ResetPolicy::default();
+        crate::model_context::weighted_usage::record_with_connection(&conn, old, "threshold", 0, 5_000_000_000).unwrap();
+        let checkpoint = crate::model_context::weighted_usage::snapshot_with_connection(&conn, old).unwrap();
+        crate::model_context::weighted_usage::record_with_connection(&conn, old, "late", 0, 17_000).unwrap();
         let (a,b) = tokio::join!(
-            attempt_fork(ForkInputs {state: &state, compacted_messages: &messages, old_session_id: old, reset_policy: &policy}),
-            attempt_fork(ForkInputs {state: &state, compacted_messages: &messages, old_session_id: old, reset_policy: &policy})
+            attempt_fork(ForkInputs {state: &state, compacted_messages: &messages, old_session_id: old, reset_policy: &policy, weighted_checkpoint: Some(&checkpoint)}),
+            attempt_fork(ForkInputs {state: &state, compacted_messages: &messages, old_session_id: old, reset_policy: &policy, weighted_checkpoint: Some(&checkpoint)})
         );
         eprintln!("actual fork outcomes: {a:?} {b:?}");
         let successes = usize::from(matches!(a, ForkOutcome::Forked {..})) + usize::from(matches!(b, ForkOutcome::Forked {..}));
         let binding = state.gateway_bindings.get(&key).await.unwrap();
+        let remainder = crate::model_context::weighted_usage::snapshot_with_connection(&conn, old).unwrap();
+        assert_eq!(remainder.milli, 17_000, "fork publication must retire only captured spend");
+        assert_eq!(remainder.generation, checkpoint.generation + 1);
         let rows: i64 = conn.query_row("SELECT COUNT(*) FROM agent_messages WHERE session_id=?1", [&binding.target_session_id], |r| r.get(0)).unwrap();
         let active_children: i64 = conn.query_row("SELECT COUNT(*) FROM agent_sessions WHERE parent_session_id=?1 AND status != 'archived'", [old], |r| r.get(0)).unwrap();
         assert_eq!(active_children, 1, "active orphan after concurrent fork: {a:?} {b:?}");
@@ -450,7 +458,7 @@ mod tests {
         conn.execute_batch("CREATE TRIGGER reject_fork_seed BEFORE INSERT ON agent_messages BEGIN SELECT RAISE(ABORT,'seed failure'); END;").unwrap();
         let messages = vec![serde_json::json!({"role":"system","content":"summary"})];
         let policy = ResetPolicy::default();
-        assert!(matches!(attempt_fork(ForkInputs {state:&state, compacted_messages:&messages, old_session_id:old, reset_policy:&policy}).await, ForkOutcome::Failed(_)));
+        assert!(matches!(attempt_fork(ForkInputs {state:&state, compacted_messages:&messages, old_session_id:old, reset_policy:&policy, weighted_checkpoint: None}).await, ForkOutcome::Failed(_)));
         assert_eq!(unified_persistence::get_session(old).unwrap().unwrap().status, "idle");
         let child = unified_persistence::get_session("osagent-failed-seed-v2").unwrap().unwrap();
         assert_eq!(child.status, "archived");
