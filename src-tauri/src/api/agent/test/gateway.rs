@@ -412,6 +412,8 @@ pub async fn test_gateway_force_compact(
             compacted_messages: &synthetic_compacted,
             old_session_id: &request.session_id,
             reset_policy: &reset_policy,
+            // Synthetic compaction has no captured weighted-usage snapshot.
+            weighted_checkpoint: None,
         },
     )
     .await;
