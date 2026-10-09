@@ -425,6 +425,26 @@ mod tests {
         restarted.load_from_db().await.unwrap();
         assert_eq!(restarted.get(&key).await.unwrap().target_session_id, binding.target_session_id);
         assert_eq!(unified_persistence::get_session(old).unwrap().unwrap().status, "archived");
+        // This runtime path consumes an already-compacted transcript, not a
+        // selected Journey endpoint. Verify its real durable replay contract.
+        let child = unified_persistence::get_session(&binding.target_session_id).unwrap().unwrap();
+        assert_ne!(child.session_id, old);
+        assert_eq!(child.parent_session_id.as_deref(), Some(old));
+        let replay = unified_persistence::load_llm_history(&child.session_id).unwrap();
+        assert!(replay.iter().any(|row| row["content"] == "compacted race summary"));
+        assert_eq!(crate::model_context::weighted_usage::snapshot_with_connection(&conn, &child.session_id).unwrap().milli, 0);
+        drop(conn);
+        for _ in 0..2 {
+            let reopened = database::db::get_connection().unwrap();
+            assert_eq!(unified_persistence::load_llm_history(&child.session_id).unwrap(), replay);
+            assert_eq!(unified_persistence::get_session(&child.session_id).unwrap().unwrap().parent_session_id.as_deref(), Some(old));
+            let late = crate::model_context::weighted_usage::snapshot_with_connection(&reopened, old).unwrap();
+            assert_eq!(late.milli, 17_000);
+            assert_eq!(late.generation, checkpoint.generation + 1);
+            assert_eq!(crate::model_context::weighted_usage::snapshot_with_connection(&reopened, &child.session_id).unwrap().milli, 0);
+        }
+        let conn = database::db::get_connection().unwrap();
+
         assert!(!state.gateway_bindings.publish_fork(key.clone(), old.into(), "foreign-child".into()).await.unwrap());
         conn.execute_batch("CREATE TRIGGER fail_binding_update BEFORE UPDATE ON gateway_bindings BEGIN SELECT RAISE(ABORT, 'injected binding failure'); END;").unwrap();
         assert!(state.gateway_bindings.set(key.clone(), "must-not-publish".into()).await.is_err());
