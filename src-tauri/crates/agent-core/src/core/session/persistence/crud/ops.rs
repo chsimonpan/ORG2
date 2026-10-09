@@ -202,13 +202,15 @@ fn validate_upsert_owner(
 }
 
 /// Upsert a unified session.
-pub fn upsert_session(record: &UnifiedSessionRecord) -> SqliteResult<()> {
+pub fn upsert_session(record: &UnifiedSessionRecord) -> SqliteResult<()> { write_session(record, false) }
+pub fn insert_fresh_session(record: &UnifiedSessionRecord) -> SqliteResult<()> { write_session(record, true) }
+fn write_session(record: &UnifiedSessionRecord, fresh: bool) -> SqliteResult<()> {
     with_sessions_writer(|| -> SqliteResult<()> {
         let conn = get_connection()?;
         validate_upsert_owner(&conn, record)?;
         let key_source_str = record.key_source.as_ref();
         conn.execute(
-            UPSERT_SESSION_SQL,
+            if fresh { UPSERT_SESSION_SQL.split("ON CONFLICT").next().unwrap() } else { UPSERT_SESSION_SQL },
             params![
                 record.session_id,
                 record.name,

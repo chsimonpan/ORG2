@@ -24,7 +24,7 @@ mod sidebar;
 // `load_session_memory_state` but no caller names it directly, so it
 // doesn't need to be re-exported either.
 pub use crud::{
-    backfill_agent_definition_id, clear_worktree_metadata, delete_session,
+    insert_fresh_session, backfill_agent_definition_id, clear_worktree_metadata, delete_session,
     finalize_terminal_turn_status, get_child_sessions, get_parent_session, get_session,
     link_bootstrap_work_item, list_sessions, load_workspace, mark_stale_running_sessions_abandoned,
     reconcile_sessions_with_terminal_turn_markers, register_session_delete_mirror_hook,

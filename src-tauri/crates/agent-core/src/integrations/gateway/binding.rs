@@ -143,9 +143,8 @@ impl BindingStore {
     }
 
     /// Pin `session_key` to `target_session_id`. Writes both in memory and
-    /// to SQLite synchronously. Errors from the DB tier are logged but do
-    /// not fail the call — in-memory cache still serves follow-up reads
-    /// until process restart.
+    /// to SQLite synchronously. Failed durable writes are logged and leave
+    /// the cache unchanged, so restart does not undo a cache-only binding.
     pub async fn set(&self, key: SessionKey, target_session_id: String) {
         let now = chrono::Utc::now().to_rfc3339();
         let binding = SessionBinding {
@@ -154,31 +153,40 @@ impl BindingStore {
             updated_at: now.clone(),
             last_activity_at: now.clone(),
         };
-        {
-            let mut guard = self.inner.write().await;
-            guard.insert(key.0.clone(), binding);
-        }
+        let mut guard = self.inner.write().await;
         let key_str = key.0.clone();
-        let ts = now;
-        if let Err(err) = tokio::task::spawn_blocking(move || -> SqliteResult<()> {
+        let result = tokio::task::spawn_blocking(move || -> SqliteResult<()> {
             let conn = database::db::get_connection()?;
             ensure_table(&conn)?;
-            conn.execute(
-                "INSERT INTO gateway_bindings
-                    (session_key, target_session_id, updated_at, last_activity_at)
-                 VALUES (?1, ?2, ?3, ?3)
-                 ON CONFLICT(session_key) DO UPDATE SET
-                     target_session_id = excluded.target_session_id,
-                     updated_at        = excluded.updated_at,
-                     last_activity_at  = excluded.last_activity_at",
-                params![key_str, target_session_id, ts],
-            )?;
+            conn.execute("INSERT INTO gateway_bindings (session_key,target_session_id,updated_at,last_activity_at) VALUES (?1,?2,?3,?3) ON CONFLICT(session_key) DO UPDATE SET target_session_id=excluded.target_session_id,updated_at=excluded.updated_at,last_activity_at=excluded.last_activity_at", params![key_str,target_session_id,now])?;
             Ok(())
-        })
-        .await
-        {
-            warn!("[gateway] Binding DB write task join failed: {}", err);
+        }).await;
+        match result {
+            Ok(Ok(())) => { guard.insert(key.0, binding); }
+            other => warn!("[gateway] Binding DB write failed: {:?}", other),
         }
+    }
+
+    /// Atomic durable publication; update cache only after commit.
+    pub async fn publish_fork(&self, key: SessionKey, old: String, child: String) -> SqliteResult<bool> {
+        let mut guard = self.inner.write().await;
+        let k = key.0.clone();
+        let c = child.clone();
+        let now = chrono::Utc::now().to_rfc3339();
+        let ts = now.clone();
+        let won = tokio::task::spawn_blocking(move || -> SqliteResult<bool> {
+            let mut conn = database::db::get_connection()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let changed = tx.execute("UPDATE gateway_bindings SET target_session_id=?1,updated_at=?2,last_activity_at=?2 WHERE session_key=?3 AND target_session_id=?4", params![c,ts,k,old])?;
+            if changed == 0 { return Ok(false); }
+            let parent = tx.execute("UPDATE agent_sessions SET status='archived' WHERE session_id=?1 AND status != 'archived'", params![old])?;
+            let child = tx.execute("UPDATE agent_sessions SET status='idle' WHERE session_id=?1 AND status='archived' AND parent_session_id=?2", params![c,old])?;
+            if parent != 1 || child != 1 { return Err(rusqlite::Error::QueryReturnedNoRows); }
+            tx.commit()?;
+            Ok(true)
+        }).await.map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))??;
+        if won { guard.insert(key.0.clone(), SessionBinding { session_key:key,target_session_id:child,updated_at:now.clone(),last_activity_at:now }); }
+        Ok(won)
     }
 
     /// Debug-only: backdate `last_activity_at` for `session_key_str` to
@@ -428,5 +436,43 @@ mod tests {
         // appended sender just makes it redundantly explicit but still
         // deterministic.
         assert_eq!(k2.as_str(), "telegram:123456:123456");
+    }
+}
+
+#[cfg(test)]
+mod fork_publication_tests {
+    use super::*;
+    #[tokio::test]
+    async fn missing_child_rolls_back_publication_and_survives_restart() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let conn = database::db::get_connection().unwrap();
+        crate::persistence::test_schema::ensure_agent_sessions_schema(&conn);
+        ensure_table(&conn).unwrap();
+        conn.execute("INSERT INTO agent_sessions(session_id,name,session_type,status,created_at,updated_at) VALUES ('publication-parent','fixture','agent','idle','now','now')", []).unwrap();
+        let store = BindingStore::new();
+        let key = SessionKey("publication:missing".into());
+        store.set(key.clone(), "publication-parent".into()).await;
+        assert!(store.publish_fork(key.clone(), "publication-parent".into(), "missing-child".into()).await.is_err());
+        assert_eq!(store.get(&key).await.unwrap().target_session_id, "publication-parent");
+        assert_eq!(conn.query_row("SELECT status FROM agent_sessions WHERE session_id='publication-parent'", [], |r| r.get::<_,String>(0)).unwrap(), "idle");
+        let restart = BindingStore::new();
+        restart.load_from_db().await.unwrap();
+        assert_eq!(restart.get(&key).await.unwrap().target_session_id, "publication-parent");
+    }
+    #[tokio::test]
+    async fn database_failure_preserves_cache_and_restart_binding() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let conn = database::db::get_connection().unwrap();
+        ensure_table(&conn).unwrap();
+        let store = BindingStore::new();
+        let key = SessionKey("publication:dbfailure".into());
+        store.set(key.clone(), "parent".into()).await;
+        conn.execute_batch("CREATE TRIGGER publication_abort BEFORE UPDATE ON gateway_bindings BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
+        store.set(key.clone(), "uncommitted".into()).await;
+        assert!(store.publish_fork(key.clone(), "parent".into(), "uncommitted".into()).await.is_err());
+        assert_eq!(store.get(&key).await.unwrap().target_session_id, "parent");
+        let restart = BindingStore::new();
+        restart.load_from_db().await.unwrap();
+        assert_eq!(restart.get(&key).await.unwrap().target_session_id, "parent");
     }
 }

@@ -141,6 +141,12 @@ pub async fn attempt_fork(inputs: ForkInputs<'_>) -> ForkOutcome {
     };
     let next_v = scanned_next_v.max(old_v + 1);
     let new_session_id = with_version(base, next_v);
+    #[cfg(test)]
+    if old_session_id == "osagent-race-old" {
+        static RACE: std::sync::OnceLock<tokio::sync::Barrier> = std::sync::OnceLock::new();
+        RACE.get_or_init(|| tokio::sync::Barrier::new(2)).wait().await;
+    }
+
     if new_session_id == old_session_id {
         let reason = format!(
             "computed new_session_id equals old ({}): base={:?}, scanned_next_v={}, old_v={}, next_v={}",
@@ -212,9 +218,10 @@ pub async fn attempt_fork(inputs: ForkInputs<'_>) -> ForkOutcome {
     // identity quartet from the parent — see `build_forked_record` for
     // the contract.
     let now = chrono::Utc::now().to_rfc3339();
-    let rec = build_forked_record(&old_record, &new_session_id, old_session_id, &now);
+    let mut rec = build_forked_record(&old_record, &new_session_id, old_session_id, &now);
+    rec.status = SessionStatus::Archived.as_str().to_string();
     let upsert_result =
-        tokio::task::spawn_blocking(move || unified_persistence::upsert_session(&rec)).await;
+        tokio::task::spawn_blocking(move || unified_persistence::insert_fresh_session(&rec)).await;
     match upsert_result {
         Ok(Ok(())) => {}
         Ok(Err(err)) => {
@@ -241,18 +248,20 @@ pub async fn attempt_fork(inputs: ForkInputs<'_>) -> ForkOutcome {
     })
     .await;
     match persist_result {
-        Ok(Ok(())) => {}
+        Ok(Ok(())) => {
+            #[cfg(test)]
+            if old_session_id == "osagent-race-old" {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }
         Ok(Err(err)) => {
             let reason = format!("seed_session_with_messages({}): {}", new_session_id, err);
             warn!(
                 "[compact_fork] {} — old session still active; falling back to in-place",
                 reason
             );
-            let _ = tokio::task::spawn_blocking({
-                let sid = new_session_id.clone();
-                move || unified_persistence::delete_session(&sid)
-            })
-            .await;
+            // This reservation is already archived. Preserve it rather than
+            // deleting usage/history that a late writer may have attached.
             return ForkOutcome::Failed(reason);
         }
         Err(err) => {
@@ -262,37 +271,12 @@ pub async fn attempt_fork(inputs: ForkInputs<'_>) -> ForkOutcome {
         }
     }
 
-    // 6. Archive old session so it disappears from `list_sessions` (Phase
-    // 59 filter `status != 'archived'`). Lineage is preserved via
-    // `parent_session_id` on the new row.
-    let archive_result = tokio::task::spawn_blocking({
-        let sid = old_session_id.to_string();
-        move || unified_persistence::update_status(&sid, SessionStatus::Archived)
-    })
-    .await;
-    if let Ok(Err(err)) = archive_result {
-        warn!(
-            "[compact_fork] failed to archive old session {}: {} — fork will continue but
-             old row remains visible in list_sessions",
-            old_session_id, err
-        );
-        // Non-fatal: the binding is already updated below; UI will just
-        // show two rows for one chat until a manual cleanup. Don't roll back.
+    match state.gateway_bindings.publish_fork(binding.session_key.clone(), old_session_id.to_string(), new_session_id.clone()).await {
+        Ok(true) => {}
+        Ok(false) => return ForkOutcome::Failed("binding changed during fork; reserved child remains archived".into()),
+        Err(err) => return ForkOutcome::Failed(format!("fork publication: {}", err)),
     }
-
-    // 7. Invalidate the old session's in-memory runtime so any cached
-    // UnifiedMessageProcessor with the old session_id is torn down. The
-    // re-dispatched message rebuilds a fresh runtime under the new id.
-    // idle-reset takes the same step — see `perform_idle_reset`
-    // in `state/commands/gateway.rs:524-527`.
     state.invalidate_session(old_session_id).await;
-
-    // 8. Rebind chat → new session id. Both in-memory and DB are updated
-    // by `BindingStore::set` (see binding.rs:152-185).
-    state
-        .gateway_bindings
-        .set(binding.session_key.clone(), new_session_id.clone())
-        .await;
 
     // 9. Queue user-facing notice (delivered as prefix on the next
     //    outbound message — same machinery as idle-reset).
@@ -395,6 +379,87 @@ fn strip_version_suffix(sid: &str) -> &str {
 mod tests {
     use super::*;
     use core_types::key_source::KeySource;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_compact_forks_have_one_durable_winner() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let conn = database::db::get_connection().unwrap();
+        crate::persistence::test_schema::ensure_agent_sessions_schema(&conn);
+        unified_persistence::init(&conn).unwrap();
+        crate::persistence::test_schema::ensure_session_events_schema(&conn);
+        // Use the connection-scoped startup DDL, not one-column placeholder
+        // tables: sandbox databases do not rerun the process-global init Once.
+        crate::persistence::session_snapshots::ensure_tables_with(&conn).unwrap();
+        database::db::init_shell_replay_tables(&conn).unwrap();
+        let state = AgentAppState::new();
+        state.gateway_bindings.load_from_db().await.unwrap();
+        let old = "osagent-race-old";
+        unified_persistence::upsert_session(&unified_persistence::UnifiedSessionRecord {
+            session_id: old.into(), status: "idle".into(), ..Default::default()
+        }).unwrap();
+        let key = crate::integrations::gateway::SessionKey("telegram:race".into());
+        state.gateway_bindings.set(key.clone(), old.into()).await;
+        let messages = vec![serde_json::json!({"role":"system","content":"compacted race summary"})];
+        let policy = ResetPolicy::default();
+        let (a,b) = tokio::join!(
+            attempt_fork(ForkInputs {state: &state, compacted_messages: &messages, old_session_id: old, reset_policy: &policy}),
+            attempt_fork(ForkInputs {state: &state, compacted_messages: &messages, old_session_id: old, reset_policy: &policy})
+        );
+        eprintln!("actual fork outcomes: {a:?} {b:?}");
+        let successes = usize::from(matches!(a, ForkOutcome::Forked {..})) + usize::from(matches!(b, ForkOutcome::Forked {..}));
+        let binding = state.gateway_bindings.get(&key).await.unwrap();
+        let rows: i64 = conn.query_row("SELECT COUNT(*) FROM agent_messages WHERE session_id=?1", [&binding.target_session_id], |r| r.get(0)).unwrap();
+        let active_children: i64 = conn.query_row("SELECT COUNT(*) FROM agent_sessions WHERE parent_session_id=?1 AND status != 'archived'", [old], |r| r.get(0)).unwrap();
+        assert_eq!(active_children, 1, "active orphan after concurrent fork: {a:?} {b:?}");
+        assert_eq!(successes, 1, "two redirects: {a:?} {b:?}");
+        assert!(rows > 0, "binding points at missing seeded child: {binding:?}");
+        assert!(unified_persistence::get_session(&binding.target_session_id).unwrap().is_some(), "winner child deleted by loser");
+        let restarted = crate::integrations::gateway::binding::BindingStore::new();
+        restarted.load_from_db().await.unwrap();
+        assert_eq!(restarted.get(&key).await.unwrap().target_session_id, binding.target_session_id);
+        assert_eq!(unified_persistence::get_session(old).unwrap().unwrap().status, "archived");
+        assert!(!state.gateway_bindings.publish_fork(key.clone(), old.into(), "foreign-child".into()).await.unwrap());
+        conn.execute_batch("CREATE TRIGGER fail_binding_update BEFORE UPDATE ON gateway_bindings BEGIN SELECT RAISE(ABORT, 'injected binding failure'); END;").unwrap();
+        state.gateway_bindings.set(key.clone(), "must-not-publish".into()).await;
+        assert_eq!(state.gateway_bindings.get(&key).await.unwrap().target_session_id, binding.target_session_id);
+        assert!(state.gateway_bindings.publish_fork(key.clone(), binding.target_session_id.clone(), "must-not-publish".into()).await.is_err());
+        assert_eq!(unified_persistence::get_session(&binding.target_session_id).unwrap().unwrap().status, "idle");
+        restarted.load_from_db().await.unwrap();
+        assert_eq!(restarted.get(&key).await.unwrap().target_session_id, binding.target_session_id);
+        conn.execute_batch("DROP TRIGGER fail_binding_update;").unwrap();
+
+
+    }
+
+
+    #[tokio::test]
+    async fn failed_seed_keeps_archived_reservation_and_parent_binding() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let conn = database::db::get_connection().unwrap();
+        crate::persistence::test_schema::ensure_agent_sessions_schema(&conn);
+        unified_persistence::init(&conn).unwrap();
+        crate::persistence::test_schema::ensure_session_events_schema(&conn);
+        crate::persistence::session_snapshots::ensure_tables_with(&conn).unwrap();
+        let state = AgentAppState::new();
+        state.gateway_bindings.load_from_db().await.unwrap();
+        let old = "osagent-failed-seed";
+        unified_persistence::upsert_session(&unified_persistence::UnifiedSessionRecord {
+            session_id: old.into(), status: "idle".into(), ..Default::default()
+        }).unwrap();
+        let key = crate::integrations::gateway::SessionKey("telegram:failedseed".into());
+        state.gateway_bindings.set(key.clone(), old.into()).await;
+        conn.execute_batch("CREATE TRIGGER reject_fork_seed BEFORE INSERT ON agent_messages BEGIN SELECT RAISE(ABORT,'seed failure'); END;").unwrap();
+        let messages = vec![serde_json::json!({"role":"system","content":"summary"})];
+        let policy = ResetPolicy::default();
+        assert!(matches!(attempt_fork(ForkInputs {state:&state, compacted_messages:&messages, old_session_id:old, reset_policy:&policy}).await, ForkOutcome::Failed(_)));
+        assert_eq!(unified_persistence::get_session(old).unwrap().unwrap().status, "idle");
+        let child = unified_persistence::get_session("osagent-failed-seed-v2").unwrap().unwrap();
+        assert_eq!(child.status, "archived");
+        let count:i64 = conn.query_row("SELECT COUNT(*) FROM agent_messages WHERE session_id=?1", [&child.session_id], |r|r.get(0)).unwrap();
+        assert_eq!(count,0);
+        let restart = crate::integrations::gateway::binding::BindingStore::new();
+        restart.load_from_db().await.unwrap();
+        assert_eq!(restart.get(&key).await.unwrap().target_session_id, old);
+    }
 
     /// Pin the identity-quartet inheritance contract from the docstring on
     /// `build_forked_record`. The four fields below are the same matrix
