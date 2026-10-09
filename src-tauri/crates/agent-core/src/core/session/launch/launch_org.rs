@@ -414,3 +414,75 @@ pub(super) async fn cleanup_session_after_org_run_create_failure(session_id: Str
         ),
     }
 }
+
+#[cfg(test)]
+mod path_materialization_tests {
+    use super::*;
+    use crate::coordination::agent_org_runs::{CreateStartingAgentOrgRunParams, CreateAgentOrgMaterializationIntent, AgentOrgRunEntryMode};
+    use crate::definitions::orgs::{OrgDefinition, PlanApprovalPolicy};
+    use crate::tools::{registration::{coding, ToolDeps}, registry::ToolRegistry, call_context::CallContext};
+    use crate::security::SecurityPolicy;
+    use crate::session::workspace::SessionWorkspace;
+    use crate::foundation::security::global_paths::{global_path_exemptions_add as add, global_path_exemptions_remove as remove};
+    use std::{sync::Arc, collections::HashSet};
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn persisted_launch_workspace_does_not_exempt_escape_and_grants_revoke_across_sessions() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("workspace");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let file = outside.join("fixture.rs");
+        std::fs::write(&file, "fn launch_marker() {}\n").unwrap();
+        let conn = database::db::get_connection().unwrap();
+        crate::foundation::persistence::test_schema::ensure_agent_sessions_schema(&conn);
+        crate::foundation::persistence::session_snapshots::ensure_tables_with(&conn).unwrap();
+        session_persistence::init(&conn).unwrap();
+        crate::coordination::init_agent_org_schemas(&conn).unwrap();
+        let org = OrgDefinition { id: "launch-path-org".into(), name: "Path Org".into(), role: "lead".into(), agent_id: "coordinator".into(), description: None, plan_approval_policy: PlanApprovalPolicy::Coordinator,
+            members: vec![FlatOrgMember { member_id: "worker".into(), name: "Worker".into(), role: "ic".into(), agent_id: "worker-agent".into(), runtime_config: None }], additional_task_graph_writer_member_ids: vec![], member_communication_links: vec![] };
+        let snapshot: AgentOrgLaunchSnapshot = (&org).into();
+        session_persistence::upsert_session(&UnifiedSessionRecord { session_id: "launch-root".into(), name: "Root".into(), status: "idle".into(), session_type: "ai".into(), agent_definition_id: Some(org.agent_id.clone()), org_member_id: Some(COORDINATOR_MEMBER_ID.into()), ..Default::default() }).unwrap();
+        let run = AgentOrgRunStore::create_starting(CreateStartingAgentOrgRunParams {
+            org_id: org.id.clone(), coordinator_agent_id: org.agent_id.clone(), root_session_id: "launch-root".into(), org_snapshot: snapshot.clone(), entry_mode: AgentOrgRunEntryMode::StandaloneSession,
+            work_item_id: None, project_slug: None, routine_fire_id: None, initial_input: None,
+            materialization_intents: vec![CreateAgentOrgMaterializationIntent { member_id: COORDINATOR_MEMBER_ID.into(), agent_id: org.agent_id.clone(), session_id: "launch-root".into(), succeeded: true }, CreateAgentOrgMaterializationIntent { member_id: "worker".into(), agent_id: "worker-agent".into(), session_id: "launch-worker".into(), succeeded: false }],
+        }).unwrap();
+        let ids = materialize_org_member_sessions(&run.id, &snapshot, "launch-root", "Root", root.to_str().unwrap(), None, None, None, None, None, None, None, None).await.unwrap();
+        assert_eq!(ids, vec!["launch-worker"]);
+        let persisted = session_persistence::get_session(&ids[0]).unwrap().unwrap();
+        assert_eq!(persisted.workspace_path.as_deref(), root.to_str());
+        assert_eq!(persisted.parent_session_id.as_deref(), Some("launch-root"));
+        let mut policy = SecurityPolicy::permissive();
+        policy.workspace_only = true;
+        let policy = Arc::new(policy);
+        let mut registries = Vec::new();
+        for _ in 0..2 {
+            let deps = ToolDeps { workspace: Arc::new(parking_lot::RwLock::new(SessionWorkspace::new(std::path::PathBuf::from(persisted.workspace_path.as_ref().unwrap())))), scratchpad_dir: None, readonly_extra_dirs: vec![], exec_timeout: 10, restrict_to_workspace: true, pty_sessions: None, app_handle: None, security_policy: Some(policy.clone()), action_bridge: None,
+        execution_mode: crate::integrations::config::ExecutionMode::Direct,
+        agent_browser_config: None, screenshot_store: None, web_search_api_key: None,
+        desktop_enabled: false, agent_model: String::new(), session_id: "matrix".into(),
+        bus: None, session_account_id: None, node_registry: None, question_manager: None,
+        secret_broker: None, plan_approval_manager: None, plan_slot_cache: None,
+        agent_org_context: None, agent_org_current_member_id: None, channel_context: None, } ;
+            let mut registry = ToolRegistry::new();
+            coding::register(&mut registry, &deps, &HashSet::new());
+            registries.push(registry);
+        }
+        let context = CallContext::trusted_sde();
+        let args = json!({"path": file});
+        for registry in &registries { assert!(registry.get("read_file").unwrap().execute(args.clone(), &context).await.is_err()); }
+        add(outside.to_string_lossy().into(), "read".into(), true).await.unwrap();
+        for registry in &registries { assert!(registry.get("read_file").unwrap().execute(args.clone(), &context).await.is_ok()); }
+        #[cfg(unix)] {
+            std::os::unix::fs::symlink(&outside, root.join("escape")).unwrap();
+            remove(outside.to_string_lossy().into()).await.unwrap();
+            for registry in &registries { assert!(registry.get("read_file").unwrap().execute(json!({"path": root.join("escape/fixture.rs")}), &context).await.is_err()); }
+        }
+        #[cfg(not(unix))] remove(outside.to_string_lossy().into()).await.unwrap();
+        for registry in &registries { assert!(registry.get("read_file").unwrap().execute(args.clone(), &context).await.is_err()); }
+    }
+}
