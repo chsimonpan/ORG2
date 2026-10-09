@@ -22,9 +22,14 @@ fn journey_registered_selected_session_durable_task_checkpoint_fork_cas_roundtri
  assert!(invoke(&w,"journey_task_start",start).is_err(),"stale CAS cannot overwrite active task");
  // The endpoint row goes through the actual transcript membership assignment, not a UI label.
  let c=database::db::get_connection().unwrap();let tx=c.unchecked_transaction().unwrap();
+ agent_core::session::journey_runtime_persistence::assign_inserted_message(&tx,owner,"journey-owner-first",1,"user").unwrap();
  tx.execute("INSERT INTO agent_messages(id,session_id,role,content,sequence,created_at) VALUES('journey-owner-selected-end',?1,'user','Exact end of active real task',2,'2026-10-08T00:00:00Z')",[owner]).unwrap();
  agent_core::session::journey_runtime_persistence::assign_inserted_message(&tx,owner,"journey-owner-selected-end",2,"user").unwrap();tx.commit().unwrap();drop(c);
- let snapshot=invoke(&w,"journey_snapshot",json!({"ownerSessionId":owner})).unwrap();let node=snapshot["nodes"].as_array().unwrap().iter().find(|n|n["anchor"]["durableMessageId"]=="journey-owner-selected-end").unwrap();let anchor=node["anchor"].clone();assert_eq!(anchor["boundaryVersion"],2);
+ // A later parent row must remain browsable but never enter selected-end replay.
+ let c=database::db::get_connection().unwrap();let tx=c.unchecked_transaction().unwrap();
+ tx.execute("INSERT INTO agent_messages(id,session_id,role,content,sequence,created_at) VALUES('journey-parent-after-end',?1,'assistant','EXCLUDED parent suffix',3,'2026-10-08T00:00:00Z')",[owner]).unwrap();
+ agent_core::session::journey_runtime_persistence::assign_inserted_message(&tx,owner,"journey-parent-after-end",3,"assistant").unwrap();tx.commit().unwrap();drop(c);
+ let snapshot=invoke(&w,"journey_snapshot",json!({"ownerSessionId":owner})).unwrap();let node=snapshot["nodes"].as_array().unwrap().iter().find(|n|n["anchor"]["durableMessageId"]=="journey-owner-selected-end").unwrap();let anchor=node["anchor"].clone();assert_eq!(anchor["boundaryVersion"],3);
  let preview=invoke(&w,"journey_boundary_preview",json!({"ownerSessionId":owner,"anchor":anchor})).unwrap();assert_eq!(preview["records"].as_array().unwrap().len(),2);
  let checkpoint=json!({"ownerSessionId":owner,"request":{"sessionId":owner,"expectedRevision":1,"checkpointId":"checkpoint-native","name":"Exact checkpoint","messageId":"journey-owner-selected-end"}});
  let result=invoke(&w,"journey_checkpoint",checkpoint.clone()).unwrap();assert_eq!(result["revision"],2);assert!(invoke(&w,"journey_checkpoint",checkpoint).is_err());
@@ -38,6 +43,17 @@ fn journey_registered_selected_session_durable_task_checkpoint_fork_cas_roundtri
  let result=invoke(&w,"journey_fork_start",fork.clone()).unwrap();assert_eq!(result["revision"],4);assert!(invoke(&w,"journey_fork_start",fork).is_err());
  // Fresh physical connection proves durable branch identity and parent endpoint survived.
  let c=rusqlite::Connection::open(database::db::get_db_path()).unwrap();let journey=agent_core::session::journey_lifecycle::SqliteJourneyRepository::load(&c,owner).unwrap().unwrap();assert_eq!(journey.revision,4);assert_eq!(journey.active_branch_id,"branch-native");assert_eq!(journey.branches["branch-native"].parent_anchor_message_id.as_deref(),Some("journey-owner-selected-end"));drop(c);
+ // Persist the child through the same writer membership hook used by real messages.
+ let c=database::db::get_connection().unwrap();let tx=c.unchecked_transaction().unwrap();
+ tx.execute("INSERT INTO agent_messages(id,session_id,role,content,sequence,created_at) VALUES('journey-child-replay',?1,'assistant','New child transcript',4,'2026-10-08T00:00:00Z')",[owner]).unwrap();
+ agent_core::session::journey_runtime_persistence::assign_inserted_message(&tx,owner,"journey-child-replay",4,"assistant").unwrap();tx.commit().unwrap();drop(c);
+ for _ in 0..2 {
+  let c=rusqlite::Connection::open(database::db::get_db_path()).unwrap();
+  let rows=agent_core::foundation::persistence::db_helpers::load_messages("agent",owner).unwrap();assert_eq!(rows.len(),4);
+  let (visible,capsules)=agent_core::session::journey_runtime_persistence::provider_visible_rows(&c,owner,rows).unwrap();
+  assert_eq!(visible.iter().map(|r|r.id.as_str()).collect::<Vec<_>>(),vec!["journey-owner-first","journey-owner-selected-end","journey-child-replay"]);assert!(capsules.is_empty());
+  assert_eq!(c.query_row("SELECT branch_id FROM session_journey_memberships WHERE session_id=?1 AND message_id='journey-child-replay'",[owner],|r|r.get::<_,String>(0)).unwrap(),"branch-native");
+ }
  let activate=json!({"ownerSessionId":owner,"request":{"sessionId":owner,"expectedRevision":4,"taskId":"root-task","branchId":"main"}});
  let result=invoke(&w,"journey_entry_activate",activate).unwrap();assert_eq!(result["revision"],5);
  let session=tauri::async_runtime::block_on(state.get_session(owner)).unwrap();let lease=session.processing_lock.clone().try_lock_owned().unwrap();
