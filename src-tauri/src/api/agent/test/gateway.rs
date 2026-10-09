@@ -59,10 +59,13 @@ pub async fn test_gateway_binding_set(
     };
     let state = handle.state::<agent_core::state::AgentAppState>();
     let key = agent_core::integrations::gateway::SessionKey(request.session_key.clone());
-    state
+    if let Err(err) = state
         .gateway_bindings
         .set(key, request.target_session_id.clone())
-        .await;
+        .await
+    {
+        return Json(serde_json::json!({"ok": false, "error": format!("gateway binding persistence failed: {err}")}));
+    }
     Json(serde_json::json!({
         "ok": true,
         "session_key": request.session_key,

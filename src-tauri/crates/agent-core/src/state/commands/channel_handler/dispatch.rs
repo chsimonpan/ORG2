@@ -173,10 +173,7 @@ impl InboundMessageHandler for GatewayInboundHandler {
             // `dispatch_to_session` via `init_channel_session`.
             let sid = derive_os_session_id(&msg.channel, &msg.chat_id);
             ensure_os_session_registered(&state, &sid).await;
-            state
-                .gateway_bindings
-                .set(session_key.clone(), sid.clone())
-                .await;
+            persist_route_binding(&state.gateway_bindings, session_key.clone(), sid.clone()).await?;
             info!(
                 "[gateway] New chat routed to OS session: {} → {}",
                 session_key.as_str(),
@@ -482,4 +479,61 @@ pub(super) fn build_inbound_deps(state: &AgentAppState) -> Result<InboundProcess
     Ok(InboundProcessorDeps {
         handler: Arc::new(handler),
     })
+}
+
+// Keep the durable gate before reinjection and runtime/external dispatch.
+async fn persist_route_binding(
+    store: &crate::integrations::gateway::BindingStore,
+    key: crate::integrations::gateway::SessionKey,
+    sid: String,
+) -> Result<(), String> {
+    store.set(key, sid).await.map_err(|err| format!("gateway binding persistence failed: {err}"))
+}
+
+#[cfg(test)]
+mod binding_caller_tests {
+    use super::persist_route_binding;
+    use crate::integrations::gateway::{BindingStore, SessionKey};
+
+    #[tokio::test]
+    async fn failed_insert_stops_route_and_restart_has_no_binding_then_retry_succeeds() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let store = BindingStore::new();
+        store.load_from_db().await.unwrap();
+        let conn = database::db::get_connection().unwrap();
+        conn.execute_batch("CREATE TRIGGER binding_insert_abort BEFORE INSERT ON gateway_bindings BEGIN SELECT RAISE(ABORT,'binding injected'); END;").unwrap();
+        let key = SessionKey("caller:fail-clear".into());
+        let mut dispatched = false;
+        let outcome: Result<(), String> = async {
+            persist_route_binding(&store, key.clone(), "target".into()).await?;
+            dispatched = true;
+            Ok(())
+        }.await;
+        assert!(outcome.unwrap_err().contains("gateway binding persistence failed"));
+        assert!(!dispatched);
+        assert!(store.get(&key).await.is_none());
+        let restarted = BindingStore::new();
+        restarted.load_from_db().await.unwrap();
+        assert!(restarted.get(&key).await.is_none());
+        conn.execute_batch("DROP TRIGGER binding_insert_abort").unwrap();
+        persist_route_binding(&store, key.clone(), "target".into()).await.unwrap();
+        assert_eq!(store.get(&key).await.unwrap().target_session_id, "target");
+        restarted.load_from_db().await.unwrap();
+        assert_eq!(restarted.get(&key).await.unwrap().target_session_id, "target");
+    }
+
+    #[tokio::test]
+    async fn failed_rebind_keeps_durable_cache_and_stops_caller() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let store = BindingStore::new();
+        let key = SessionKey("caller:rebind".into());
+        persist_route_binding(&store, key.clone(), "old".into()).await.unwrap();
+        let conn = database::db::get_connection().unwrap();
+        conn.execute_batch("CREATE TRIGGER binding_update_abort BEFORE UPDATE ON gateway_bindings BEGIN SELECT RAISE(ABORT,'binding injected'); END;").unwrap();
+        assert!(persist_route_binding(&store, key.clone(), "new".into()).await.is_err());
+        assert_eq!(store.get(&key).await.unwrap().target_session_id, "old");
+        let restarted = BindingStore::new();
+        restarted.load_from_db().await.unwrap();
+        assert_eq!(restarted.get(&key).await.unwrap().target_session_id, "old");
+    }
 }

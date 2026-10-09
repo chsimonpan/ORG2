@@ -397,7 +397,7 @@ mod tests {
             session_id: old.into(), status: "idle".into(), ..Default::default()
         }).unwrap();
         let key = crate::integrations::gateway::SessionKey("telegram:race".into());
-        state.gateway_bindings.set(key.clone(), old.into()).await;
+        state.gateway_bindings.set(key.clone(), old.into()).await.unwrap();
         let messages = vec![serde_json::json!({"role":"system","content":"compacted race summary"})];
         let policy = ResetPolicy::default();
         let (a,b) = tokio::join!(
@@ -419,7 +419,7 @@ mod tests {
         assert_eq!(unified_persistence::get_session(old).unwrap().unwrap().status, "archived");
         assert!(!state.gateway_bindings.publish_fork(key.clone(), old.into(), "foreign-child".into()).await.unwrap());
         conn.execute_batch("CREATE TRIGGER fail_binding_update BEFORE UPDATE ON gateway_bindings BEGIN SELECT RAISE(ABORT, 'injected binding failure'); END;").unwrap();
-        state.gateway_bindings.set(key.clone(), "must-not-publish".into()).await;
+        assert!(state.gateway_bindings.set(key.clone(), "must-not-publish".into()).await.is_err());
         assert_eq!(state.gateway_bindings.get(&key).await.unwrap().target_session_id, binding.target_session_id);
         assert!(state.gateway_bindings.publish_fork(key.clone(), binding.target_session_id.clone(), "must-not-publish".into()).await.is_err());
         assert_eq!(unified_persistence::get_session(&binding.target_session_id).unwrap().unwrap().status, "idle");
@@ -446,7 +446,7 @@ mod tests {
             session_id: old.into(), status: "idle".into(), ..Default::default()
         }).unwrap();
         let key = crate::integrations::gateway::SessionKey("telegram:failedseed".into());
-        state.gateway_bindings.set(key.clone(), old.into()).await;
+        state.gateway_bindings.set(key.clone(), old.into()).await.unwrap();
         conn.execute_batch("CREATE TRIGGER reject_fork_seed BEFORE INSERT ON agent_messages BEGIN SELECT RAISE(ABORT,'seed failure'); END;").unwrap();
         let messages = vec![serde_json::json!({"role":"system","content":"summary"})];
         let policy = ResetPolicy::default();

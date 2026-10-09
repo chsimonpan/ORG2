@@ -145,7 +145,7 @@ impl BindingStore {
     /// Pin `session_key` to `target_session_id`. Writes both in memory and
     /// to SQLite synchronously. Failed durable writes are logged and leave
     /// the cache unchanged, so restart does not undo a cache-only binding.
-    pub async fn set(&self, key: SessionKey, target_session_id: String) {
+    pub async fn set(&self, key: SessionKey, target_session_id: String) -> SqliteResult<()> {
         let now = chrono::Utc::now().to_rfc3339();
         let binding = SessionBinding {
             session_key: key.clone(),
@@ -161,10 +161,11 @@ impl BindingStore {
             conn.execute("INSERT INTO gateway_bindings (session_key,target_session_id,updated_at,last_activity_at) VALUES (?1,?2,?3,?3) ON CONFLICT(session_key) DO UPDATE SET target_session_id=excluded.target_session_id,updated_at=excluded.updated_at,last_activity_at=excluded.last_activity_at", params![key_str,target_session_id,now])?;
             Ok(())
         }).await;
-        match result {
-            Ok(Ok(())) => { guard.insert(key.0, binding); }
-            other => warn!("[gateway] Binding DB write failed: {:?}", other),
-        }
+        result.map_err(|err| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(err.to_string())))
+        })??;
+        guard.insert(key.0, binding);
+        Ok(())
     }
 
     /// Atomic durable publication; update cache only after commit.
@@ -451,7 +452,7 @@ mod fork_publication_tests {
         conn.execute("INSERT INTO agent_sessions(session_id,name,session_type,status,created_at,updated_at) VALUES ('publication-parent','fixture','agent','idle','now','now')", []).unwrap();
         let store = BindingStore::new();
         let key = SessionKey("publication:missing".into());
-        store.set(key.clone(), "publication-parent".into()).await;
+        store.set(key.clone(), "publication-parent".into()).await.unwrap();
         assert!(store.publish_fork(key.clone(), "publication-parent".into(), "missing-child".into()).await.is_err());
         assert_eq!(store.get(&key).await.unwrap().target_session_id, "publication-parent");
         assert_eq!(conn.query_row("SELECT status FROM agent_sessions WHERE session_id='publication-parent'", [], |r| r.get::<_,String>(0)).unwrap(), "idle");
@@ -466,9 +467,9 @@ mod fork_publication_tests {
         ensure_table(&conn).unwrap();
         let store = BindingStore::new();
         let key = SessionKey("publication:dbfailure".into());
-        store.set(key.clone(), "parent".into()).await;
+        store.set(key.clone(), "parent".into()).await.unwrap();
         conn.execute_batch("CREATE TRIGGER publication_abort BEFORE UPDATE ON gateway_bindings BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
-        store.set(key.clone(), "uncommitted".into()).await;
+        assert!(store.set(key.clone(), "uncommitted".into()).await.is_err());
         assert!(store.publish_fork(key.clone(), "parent".into(), "uncommitted".into()).await.is_err());
         assert_eq!(store.get(&key).await.unwrap().target_session_id, "parent");
         let restart = BindingStore::new();
