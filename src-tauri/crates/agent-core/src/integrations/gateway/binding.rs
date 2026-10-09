@@ -30,7 +30,7 @@ use std::sync::Arc;
 use rusqlite::{params, Connection, Result as SqliteResult};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::bus::InboundMessage;
 use crate::channels::config::ChannelsConfig;
@@ -258,25 +258,32 @@ impl BindingStore {
 
     /// Remove the binding for `key` (both memory and DB). Used by `/new`
     /// and `/reset` commands so the next message re-routes via the LLM.
-    pub async fn clear(&self, key: &SessionKey) {
-        {
-            let mut guard = self.inner.write().await;
-            guard.remove(&key.0);
+    pub async fn clear(&self, key: &SessionKey) -> SqliteResult<()> {
+        self.clear_if_target(key, None).await.map(|_| ())
+    }
+
+    /// Conditional reset keeps a concurrently published replacement binding.
+    pub async fn clear_if_target(&self, key: &SessionKey, expected: Option<&str>) -> SqliteResult<bool> {
+        let mut guard = self.inner.write().await;
+        if let Some(expected) = expected {
+            if guard.get(&key.0).map(|b| b.target_session_id.as_str()) != Some(expected) {
+                return Ok(false);
+            }
         }
         let key_str = key.0.clone();
-        if let Err(err) = tokio::task::spawn_blocking(move || -> SqliteResult<()> {
+        let expected = expected.map(str::to_owned);
+        let changed = tokio::task::spawn_blocking(move || -> SqliteResult<bool> {
             let conn = database::db::get_connection()?;
             ensure_table(&conn)?;
-            conn.execute(
-                "DELETE FROM gateway_bindings WHERE session_key = ?1",
-                params![key_str],
-            )?;
-            Ok(())
-        })
-        .await
-        {
-            warn!("[gateway] Binding DB delete task join failed: {}", err);
-        }
+            let count = if let Some(expected) = expected {
+                conn.execute("DELETE FROM gateway_bindings WHERE session_key=?1 AND target_session_id=?2", params![key_str, expected])?
+            } else {
+                conn.execute("DELETE FROM gateway_bindings WHERE session_key=?1", params![key_str])?
+            };
+            Ok(count > 0)
+        }).await.map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))??;
+        if changed { guard.remove(&key.0); }
+        Ok(changed)
     }
 
     /// Snapshot of all active bindings (for debug endpoints + observability).
@@ -476,4 +483,42 @@ mod fork_publication_tests {
         restart.load_from_db().await.unwrap();
         assert_eq!(restart.get(&key).await.unwrap().target_session_id, "parent");
     }
+    #[tokio::test]
+    async fn clear_delete_abort_preserves_cache_and_restart_then_retry() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let conn = database::db::get_connection().unwrap();
+        ensure_table(&conn).unwrap();
+        let store = BindingStore::new();
+        let key = SessionKey("clear:dbfailure".into());
+        store.set(key.clone(), "parent".into()).await.unwrap();
+        conn.execute_batch("CREATE TRIGGER clear_abort BEFORE DELETE ON gateway_bindings BEGIN SELECT RAISE(ABORT,'injected clear'); END;").unwrap();
+        assert!(store.clear(&key).await.is_err());
+        assert_eq!(store.get(&key).await.unwrap().target_session_id, "parent");
+        let restart = BindingStore::new();
+        restart.load_from_db().await.unwrap();
+        assert_eq!(restart.get(&key).await.unwrap().target_session_id, "parent");
+        conn.execute_batch("DROP TRIGGER clear_abort").unwrap();
+        store.clear(&key).await.unwrap();
+        assert!(store.get(&key).await.is_none());
+        restart.load_from_db().await.unwrap();
+        assert!(restart.get(&key).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn stale_idle_reset_does_not_clear_replacement() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let store = BindingStore::new();
+        let key = SessionKey("clear:cas".into());
+        store.set(key.clone(), "old".into()).await.unwrap();
+        store.set(key.clone(), "new".into()).await.unwrap();
+        assert!(!store.clear_if_target(&key, Some("old")).await.unwrap());
+        assert_eq!(store.get(&key).await.unwrap().target_session_id, "new");
+        let restart = BindingStore::new();
+        restart.load_from_db().await.unwrap();
+        assert_eq!(restart.get(&key).await.unwrap().target_session_id, "new");
+        assert!(store.clear_if_target(&key, Some("new")).await.unwrap());
+        restart.load_from_db().await.unwrap();
+        assert!(restart.get(&key).await.is_none());
+    }
+
 }

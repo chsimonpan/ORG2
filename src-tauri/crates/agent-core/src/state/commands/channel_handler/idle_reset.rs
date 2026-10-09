@@ -68,7 +68,10 @@ pub(super) async fn perform_idle_reset(
     old_session_id: &str,
     msg: &InboundMessage,
     policy: &crate::gateway::ResetPolicy,
-) {
+) -> Result<(), String> {
+    if !state.gateway_bindings.clear_if_target(session_key, Some(old_session_id)).await.map_err(|err| format!("Idle reset binding delete failed: {err}"))? {
+        return Ok(());
+    }
     info!(
         "[gateway] Idle reset: session_key={} target={} idle_minutes={}",
         session_key.as_str(),
@@ -115,7 +118,7 @@ pub(super) async fn perform_idle_reset(
     state.invalidate_session(old_session_id).await;
 
     // 3. Clear the binding so the next inbound mints a new session.
-    state.gateway_bindings.clear(session_key).await;
+
 
     // 4. Queue a notice for the next outbound (only when notify is on
     //    and the channel isn't on the excluded list — currently
@@ -131,4 +134,5 @@ pub(super) async fn perform_idle_reset(
         let mut pending = state.pending_reset_notifies.lock().await;
         pending.insert(key, notice);
     }
+    Ok(())
 }

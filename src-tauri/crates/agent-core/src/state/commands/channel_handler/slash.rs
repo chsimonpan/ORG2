@@ -20,7 +20,7 @@ pub(super) async fn handle_command(
 ) -> Result<Option<OutboundMessage>, String> {
     let reply_text = match cmd {
         GatewayCommand::NewSession => {
-            state.gateway_bindings.clear(session_key).await;
+            state.gateway_bindings.clear(session_key).await.map_err(|err| format!("Failed to reset conversation: {err}"))?;
             info!("[gateway] Cleared binding for {}", session_key.as_str());
             "Conversation reset. The next message starts a fresh session.".to_string()
         }

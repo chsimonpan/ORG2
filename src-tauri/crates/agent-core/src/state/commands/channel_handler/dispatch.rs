@@ -151,7 +151,7 @@ impl InboundMessageHandler for GatewayInboundHandler {
                         &msg,
                         &reset_policy,
                     )
-                    .await;
+                    .await?;
                 } else if expired {
                     state.gateway_bindings.touch(&session_key).await;
                     info!(
