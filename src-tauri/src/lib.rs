@@ -49,6 +49,7 @@
 // Workstation (IDE functionality and development tools)
 pub mod editor_file_io;
 pub mod journey_commands;
+pub mod memory_search_commands;
 pub mod context_import_commands;
 pub mod agent_sessions; // Agent session management (CLI, event pipeline, persistence, aggregation)
 pub mod api;

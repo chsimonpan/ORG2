@@ -1,0 +1,16 @@
+// @vitest-environment jsdom
+import {it,expect,vi} from "vitest";
+import {createElement} from "react";
+import {invoke} from "@tauri-apps/api/core";
+import {createSmokeRoot,dispatch} from "@src/test/reactSmokeHarness";
+import {JourneyOwnerPanel,JourneyPopover} from "./JourneyPopover";
+vi.mock("@tauri-apps/api/core",()=>({invoke:vi.fn(()=>new Promise(()=>{}))}));
+it("production mounted semantic entry fences A-B-A, superseded queries, errors and unmount via invoke only",async()=>{
+ const root=createSmokeRoot();const pending:{resolve:(v:unknown)=>void;reject:(e:Error)=>void}[]=[];
+ vi.mocked(invoke).mockImplementation((command)=>command==="memory_search"?new Promise((resolve,reject)=>pending.push({resolve,reject})):new Promise(()=>{}));
+ const render=(ownerSessionId:string)=>root.render(createElement(JourneyOwnerPanel,{ownerSessionId,onClose:vi.fn()}));
+ const search=async(q:string)=>{const input=root.container.querySelector<HTMLInputElement>('[aria-label="语义记忆查询"]')!;expect(input).not.toBeNull();await dispatch(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(input,q);input.dispatchEvent(new Event("input",{bubbles:true}));});await dispatch(()=>root.container.querySelector('form[aria-label="语义记忆"]')!.dispatchEvent(new Event("submit",{bubbles:true,cancelable:true})));};
+ const hit=(content:string)=>[{content,sourceId:"fixture-source",score:0.75}];
+ try{await render("A");expect(root.container.textContent).toContain("语义记忆");await search("first");expect(invoke).toHaveBeenCalledWith("memory_search",{ownerSessionId:"A",query:"first",topN:10});expect(root.container.textContent).toContain("搜索中");await render("B");await search("second");await render("A");await search("third");await dispatch(()=>pending[0].resolve(hit("STALE-A")));await dispatch(()=>pending[1].reject(new Error("STALE-B")));expect(root.container.textContent).not.toContain("STALE");await dispatch(()=>pending[2].resolve(hit("CURRENT")));expect(root.container.textContent).toContain("CURRENT");expect(root.container.textContent).toContain("fixture-source");expect(root.container.textContent).toContain("0.75");await search("old");await search("new");await dispatch(()=>pending[3].resolve(hit("OBSOLETE")));expect(root.container.textContent).not.toContain("OBSOLETE");await dispatch(()=>pending[4].resolve([]));expect(root.container.textContent).toContain("没有匹配的语义记忆");await search("failure");await dispatch(()=>pending[5].reject(new Error("provider 503")));expect(root.container.textContent).toContain("provider 503");await search("unmount");await root.unmount();await dispatch(()=>pending[6].resolve(hit("UNMOUNTED")));}finally{await root.unmount();}
+});
+it("production JourneyPopover opens the semantic region with its owner",async()=>{vi.mocked(invoke).mockImplementation((command)=>command==="journey_owner_open"?Promise.resolve({schemaVersion:1,revision:1,ownerSessionId:"header-owner",nodes:[],edges:[],capabilities:{read:true}}):new Promise(()=>{}));const root=createSmokeRoot();try{await root.render(createElement(JourneyPopover,{ownerSessionId:"header-owner"}));await dispatch(()=>root.container.querySelector<HTMLButtonElement>('button[aria-label="Session Journey"]')!.click());expect(root.container.textContent).toContain("语义记忆");}finally{await root.unmount();}});

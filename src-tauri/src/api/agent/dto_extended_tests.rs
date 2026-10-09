@@ -45,7 +45,8 @@ mod dto_extended_tests {
         EmbeddingConfig {
             provider: provider.to_string(),
             model: Some(model.to_string()),
-        }
+
+ dimensions: None,}
     }
 
     // -----------------------------------------------------------------------
@@ -911,7 +912,8 @@ mod dto_extended_tests {
         let cfg = EmbeddingConfig {
             provider: "auto".to_string(),
             model: None,
-        };
+
+ dimensions: None,};
         let view = EmbeddingView::from(&cfg);
         assert_eq!(view.provider, "auto");
         assert!(
@@ -925,7 +927,8 @@ mod dto_extended_tests {
         let cfg = EmbeddingConfig {
             provider: "auto".to_string(),
             model: None,
-        };
+
+ dimensions: None,};
         let view = EmbeddingView::from(&cfg);
         let json = serde_json::to_value(&view).expect("serialize");
         // Either the field is absent (skip_serializing) or null — not a non-null string
@@ -2576,7 +2579,8 @@ mod dto_extended_tests {
         let cfg = EmbeddingConfig {
             provider: "custom-provider-v2".to_string(),
             model: None,
-        };
+
+ dimensions: None,};
         let view = EmbeddingView::from(&cfg);
         assert_eq!(view.provider, "custom-provider-v2");
     }

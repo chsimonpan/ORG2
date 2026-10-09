@@ -97,3 +97,5 @@ mod tests {
         assert!((cosine_similarity(&vec_a, &vec_b) + 1.0).abs() < 1e-6);
     }
 }
+
+pub mod rerank;

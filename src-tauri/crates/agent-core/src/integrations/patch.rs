@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::channels::config::ChannelsConfig;
 use super::config::{
-    EmbeddingConfig, IntegrationsConfig, NodesConfig, SmitheryConfig, WebSearchConfig,
+    EmbeddingConfig, RerankConfig, IntegrationsConfig, NodesConfig, SmitheryConfig, WebSearchConfig,
 };
 use crate::core::config::DatabasesConfig;
 
@@ -31,6 +31,7 @@ pub struct IntegrationsConfigPatch {
     /// chunk sizes). Wholesale replace — frontend must send the full
     /// `EmbeddingConfig` to avoid resetting siblings.
     pub embedding: Option<EmbeddingConfig>,
+    pub rerank: Option<RerankConfig>,
     /// Globally excluded skills. Wholesale replace of the full list.
     /// Wire shape stays `disabledSkills` for FE compatibility.
     #[serde(rename = "disabledSkills")]
@@ -56,6 +57,7 @@ impl IntegrationsConfigPatch {
         if let Some(v) = self.mcp {
             target.mcp = v;
         }
+        if let Some(v) = self.rerank { target.rerank = v; }
         if let Some(v) = self.embedding {
             target.embedding = v;
         }
@@ -98,6 +100,7 @@ mod tests {
         let new_embedding = EmbeddingConfig {
             provider: "openai".into(),
             model: Some("text-embedding-3-large".into()),
+            dimensions: Some(3072),
         };
 
         let patch = IntegrationsConfigPatch {

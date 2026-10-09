@@ -1190,3 +1190,5 @@ crate::market_connection::market_connection_activate_service,
 crate::market_connection::market_connection_prepare_session,
 crate::market_connection::market_connection_configure_profile,
 crate::market_connection::market_connection_configure_catalog,
+
+crate::memory_search_commands::memory_search,

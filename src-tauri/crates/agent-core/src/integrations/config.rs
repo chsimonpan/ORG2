@@ -98,6 +98,8 @@ pub struct IntegrationsConfig {
     /// which embedding model the index uses.
     #[serde(default)]
     pub embedding: EmbeddingConfig,
+    #[serde(default)]
+    pub rerank: RerankConfig,
 
     /// Globally excluded skills (by name). App-level: a skill excluded in
     /// the Extensions hub is off for EVERY agent. Per-agent deltas live on
@@ -232,6 +234,9 @@ pub struct EmbeddingConfig {
     /// default model.
     #[serde(default)]
     pub model: Option<String>,
+    /// Explicit vector-space dimension; never infer from a transport default.
+    #[serde(default)]
+    pub dimensions: Option<usize>,
 }
 
 fn default_embedding_provider() -> String {
@@ -243,6 +248,7 @@ impl Default for EmbeddingConfig {
         Self {
             provider: default_embedding_provider(),
             model: None,
+            dimensions: None,
         }
     }
 }
@@ -289,5 +295,48 @@ mod tests {
 
         let err = IntegrationsConfig::load_from(&path).unwrap_err();
         assert!(matches!(err, IntegrationsError::Parse(_)));
+    }
+}
+
+#[cfg(test)] mod rerank_migration_contract_tests {
+ #[test] fn rerank_config_wire_contract_is_not_silently_discarded() {
+ let c:super::IntegrationsConfig=serde_json::from_value(serde_json::json!({"rerank":{"provider":"local","model":null,"baseUrl":"http://127.0.0.1:9877","requestTimeoutSecs":19}})).unwrap();
+ let v=serde_json::to_value(c).unwrap();
+ assert_eq!(v["rerank"]["provider"],"local","historical runtime configuration must survive load/save");
+ assert_eq!(v["rerank"]["requestTimeoutSecs"],19);
+ }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RerankConfig {
+    #[serde(default = "default_rerank_provider")]
+    pub provider: String,
+    #[serde(default = "default_rerank_model")]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default = "default_rerank_timeout_secs")]
+    pub request_timeout_secs: u64,
+}
+
+fn default_rerank_provider() -> String {
+    "zenmux_api".to_string()
+}
+fn default_rerank_model() -> Option<String> {
+    Some("qwen/qwen3-vl-rerank".to_string())
+}
+fn default_rerank_timeout_secs() -> u64 {
+    20
+}
+
+impl Default for RerankConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_rerank_provider(),
+            model: default_rerank_model(),
+            base_url: None,
+            request_timeout_secs: default_rerank_timeout_secs(),
+        }
     }
 }
