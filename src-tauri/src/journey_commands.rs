@@ -185,14 +185,24 @@ static HISTORICAL_FORK_TEST_GATE: std::sync::Mutex<Option<(std::sync::mpsc::Send
 #[tauri::command]
 pub async fn historical_runtime_fork(owner_session_id:String,request:HistoricalRuntimeForkRequest,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<HistoricalRuntimeForkResponse,String>{
  check_journey_owner(&owner_session_id,&request.anchor.owner_session_id)?;
- let _lease=journey_mutation_lease(&owner_session_id,&state).await?;
+ let admitted=state.get_session(&owner_session_id).await.ok_or("journey_owner_not_registered")?;
+ let _lease=admitted.processing_lock.clone().try_lock_owned().map_err(|_|"journey_session_busy")?;
  if request.anchor.source_session_id!=owner_session_id{return Err("historical_fork_foreign_source_not_authorized".into());}
  if request.intent_id.trim().is_empty()||request.intent_id.len()>256{return Err("historical_fork_invalid_intent".into());}
  if agent_core::definitions::prefix_lookup::definition_for_session_id(&owner_session_id).is_none(){return Err("historical_fork_unsupported_runtime_identity".into());}
  #[cfg(test)]
  { let gate=HISTORICAL_FORK_TEST_GATE.lock().unwrap().take(); if let Some((entered,resume))=gate{entered.send(()).unwrap();resume.await.unwrap();} }
  let owner=owner_session_id.clone();
- let response=tokio::task::spawn_blocking(move||database::db::with_sessions_writer(||historical_fork_commit(&owner,&request))).await.map_err(|e|e.to_string())??;
+ let registry=state.sessions.clone();
+ // Writer -> nonblocking registry admission: never wait on registry while owning writer.
+ // Hold registry only over synchronous SQLite commit, never across await/rehydration.
+ // Removal before this linearization rejects even intent replay; after commit the child
+ // remains durable and replayable. Replacement runtimes cannot inherit old admission.
+ let response=tokio::task::spawn_blocking(move||database::db::with_sessions_writer(||{
+  let sessions=registry.try_lock().map_err(|_|"journey_registry_busy".to_string())?;
+  if !sessions.get(&owner).is_some_and(|current|std::sync::Arc::ptr_eq(current,&admitted)){return Err("journey_owner_revoked".into());}
+  historical_fork_commit(&owner,&request)
+ })).await.map_err(|e|e.to_string())??;
  // Durable commit is the replay boundary. If rehydrate fails, retry the same intent;
  // never delete a committed child or redirect/archive its parent.
  if state.get_session(&response.child_session_id).await.is_none(){agent_core::init::register_session_with_rehydrate(&state,&response.child_session_id).await?;}
