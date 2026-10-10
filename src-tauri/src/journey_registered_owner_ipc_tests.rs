@@ -232,3 +232,39 @@ fn historical_runtime_revocation_at_writer_boundary(){
  assert!(worker.join().unwrap().is_err(),"revoked runtime must not commit a child");
  let c=database::db::get_connection().unwrap();let children:i64=c.query_row("SELECT COUNT(*) FROM agent_sessions WHERE parent_session_id=?1",[owner],|r|r.get(0)).unwrap();assert_eq!(children,0);
 }
+
+
+// Dedicated historical runtime fixtures: not Journey/compaction fork coverage.
+#[test]
+fn historical_runtime_concurrent_transaction_reopen_usage_isolation(){
+ let _sandbox=test_helpers::test_env::sandbox();let owner="osagent-history-transaction";let state=agent_core::state::AgentAppState::new();
+ tauri::async_runtime::block_on(state.register_session(agent_core::state::AgentSession::new(owner.into(),agent_core::definitions::sde_agent())));
+ let c=database::db::get_connection().unwrap();agent_core::foundation::persistence::session_snapshots::ensure_tables_with(&c).unwrap();
+ c.execute("INSERT INTO agent_sessions(session_id,created_at,updated_at) VALUES(?1,'fixture','fixture')",[owner]).unwrap();
+ for (id,seq,role) in [("tx-user",1,"user"),("tx-answer",2,"assistant"),("tx-late",3,"user")]{c.execute("INSERT INTO agent_messages(id,session_id,role,content,sequence,created_at) VALUES(?1,?2,?3,?1,?4,'fixture')",rusqlite::params![id,owner,role,seq]).unwrap();}
+ let anchor=agent_core::core::session::journey_canonical::resolve_with_connection(&c,owner,owner,&format!("session:{owner}"),"tx-answer",3).unwrap();drop(c);
+ let app=mock_builder().manage(state.clone()).invoke_handler(tauri::generate_handler![historical_runtime_fork]).build(mock_context(noop_assets())).unwrap();
+ let w=tauri::WebviewWindowBuilder::new(&app,"main",Default::default()).build().unwrap();
+ let request=json!({"ownerSessionId":owner,"request":{"anchor":anchor,"intentId":"concurrent"}});
+ // Registry and processing try-lock busy are retryable contracts, not failures.
+ let retry=|window:&tauri::WebviewWindow<MockRuntime>,body:Value| {for _ in 0..500 {match invoke(window,"historical_runtime_fork",body.clone()){Ok(v)=>return v,Err(e)=>{let e=e.to_string();assert!(e.contains("journey_session_busy")||e.contains("journey_registry_busy"),"{e}");std::thread::sleep(std::time::Duration::from_millis(2));}}}panic!("historical fork busy did not settle")};
+ let barrier=std::sync::Arc::new(std::sync::Barrier::new(4));
+ let workers=(0..4).map(|_|{let w=w.clone();let r=request.clone();let b=barrier.clone();std::thread::spawn(move||{b.wait();retry(&w,r)})}).collect::<Vec<_>>();
+ let results=workers.into_iter().map(|w|w.join().unwrap()).collect::<Vec<_>>();for r in &results{assert_eq!(r,&results[0]);}let child=results[0]["childSessionId"].as_str().unwrap().to_string();
+ let independent=(0..2).map(|i|{let w=w.clone();let mut r=request.clone();r["request"]["intentId"]=json!(format!("independent-{i}"));std::thread::spawn(move||retry(&w,r))}).collect::<Vec<_>>().into_iter().map(|t|t.join().unwrap()).collect::<Vec<_>>();assert_ne!(independent[0]["childSessionId"],independent[1]["childSessionId"]);assert_ne!(independent[0]["childSessionId"],json!(child));
+ // Abort each durable write phase independently; SQLite must leave no half-child.
+ for (phase,table) in [("seed","agent_sessions"),("messages","agent_messages"),("intent","historical_runtime_fork_intents")]{
+  let c=database::db::get_connection().unwrap();let before:i64=c.query_row("SELECT COUNT(*) FROM agent_sessions",[],|r|r.get(0)).unwrap();
+  c.execute_batch(&format!("CREATE TRIGGER historical_fail BEFORE INSERT ON {table} BEGIN SELECT RAISE(ABORT,'historical injected {phase}'); END;")).unwrap();drop(c);
+  let mut r=request.clone();r["request"]["intentId"]=json!(format!("rollback-{phase}"));let error=invoke(&w,"historical_runtime_fork",r.clone()).unwrap_err().to_string();assert!(error.contains("historical injected"),"{error}");
+  let c=database::db::get_connection().unwrap();assert_eq!(c.query_row("SELECT COUNT(*) FROM agent_sessions",[],|r|r.get::<_,i64>(0)).unwrap(),before);assert_eq!(c.query_row("SELECT COUNT(*) FROM historical_runtime_fork_intents WHERE intent_id=?1",[format!("rollback-{phase}")],|r|r.get::<_,i64>(0)).unwrap(),0);assert_eq!(c.query_row("SELECT COUNT(*) FROM agent_messages WHERE session_id NOT IN (SELECT session_id FROM agent_sessions)",[],|r|r.get::<_,i64>(0)).unwrap(),0);c.execute_batch("DROP TRIGGER historical_fail").unwrap();drop(c);retry(&w,r);
+ }
+ // Open a fresh physical SQLite handle (not the pool), then rehydrate/replay.
+ tauri::async_runtime::block_on(state.remove_session(&child));
+ let c=rusqlite::Connection::open(database::db::get_db_path()).unwrap();
+ assert_eq!(c.query_row("SELECT COUNT(*) FROM agent_messages WHERE session_id=?1",[&child],|r|r.get::<_,i64>(0)).unwrap(),2);
+ c.execute("INSERT INTO session_token_usage(session_id,session_type,total_tokens,created_at) VALUES(?1,'sde',101,'fixture')",[owner]).unwrap();c.execute("INSERT INTO session_token_usage(session_id,session_type,total_tokens,created_at) VALUES(?1,'sde',7,'fixture')",[&child]).unwrap();
+ assert_eq!(c.query_row("SELECT SUM(total_tokens) FROM session_token_usage WHERE session_id=?1",[owner],|r|r.get::<_,i64>(0)).unwrap(),101);assert_eq!(c.query_row("SELECT SUM(total_tokens) FROM session_token_usage WHERE session_id=?1",[&child],|r|r.get::<_,i64>(0)).unwrap(),7);drop(c);
+ assert_eq!(retry(&w,request),results[0]);assert!(tauri::async_runtime::block_on(state.get_session(&child)).is_some());
+ assert_eq!(agent_core::session::persistence::load_messages(&child).unwrap().iter().map(|m|m.content.as_str()).collect::<Vec<_>>(),vec!["tx-user","tx-answer"]);
+}
