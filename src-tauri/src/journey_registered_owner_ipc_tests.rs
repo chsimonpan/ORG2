@@ -209,3 +209,26 @@ fn historical_runtime_registered_exact_prefix_intent_replay(){
  let mut foreign=request;foreign["request"]["anchor"]["sourceSessionId"]=json!("foreign");foreign["request"]["intentId"]=json!("foreign-intent");assert!(invoke(&w,"historical_runtime_fork",foreign).is_err());
  assert_eq!(agent_core::session::persistence::load_messages(owner).unwrap().len(),3);
 }
+
+#[test]
+fn historical_runtime_revocation_at_writer_boundary(){
+ let _sandbox=test_helpers::test_env::sandbox();let owner="osagent-history-revoke";let state=agent_core::state::AgentAppState::new();
+ tauri::async_runtime::block_on(state.register_session(agent_core::state::AgentSession::new(owner.into(),agent_core::definitions::sde_agent())));
+ let c=database::db::get_connection().unwrap();agent_core::foundation::persistence::session_snapshots::ensure_tables_with(&c).unwrap();
+ c.execute("INSERT INTO agent_sessions(session_id,created_at,updated_at) VALUES(?1,'2026-10-10','2026-10-10')",[owner]).unwrap();
+ c.execute("INSERT INTO agent_messages(id,session_id,role,content,sequence,created_at) VALUES('revoke-root',?1,'user','root',1,'2026-10-10T00:00:00Z')",[owner]).unwrap();
+ let anchor=agent_core::core::session::journey_canonical::resolve_with_connection(&c,owner,owner,&format!("session:{owner}"),"revoke-root",1).unwrap();drop(c);
+ let app=mock_builder().manage(state.clone()).invoke_handler(tauri::generate_handler![historical_runtime_fork]).build(mock_context(noop_assets())).unwrap();
+ let w=tauri::WebviewWindowBuilder::new(&app,"main",Default::default()).build().unwrap();
+ let (entered_tx,entered_rx)=std::sync::mpsc::channel();
+ let (resume_tx,resume_rx)=tokio::sync::oneshot::channel();
+ *HISTORICAL_FORK_TEST_GATE.lock().unwrap()=Some((entered_tx,resume_rx));
+ let worker=database::db::with_sessions_writer(||{
+  let worker=std::thread::spawn(move||invoke(&w,"historical_runtime_fork",json!({"ownerSessionId":owner,"request":{"anchor":anchor,"intentId":"revoked"}})));
+  entered_rx.recv().unwrap();
+  tauri::async_runtime::block_on(state.remove_session(owner));
+  resume_tx.send(()).unwrap();worker
+ });
+ assert!(worker.join().unwrap().is_err(),"revoked runtime must not commit a child");
+ let c=database::db::get_connection().unwrap();let children:i64=c.query_row("SELECT COUNT(*) FROM agent_sessions WHERE parent_session_id=?1",[owner],|r|r.get(0)).unwrap();assert_eq!(children,0);
+}

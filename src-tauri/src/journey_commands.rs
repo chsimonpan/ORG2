@@ -180,6 +180,8 @@ pub struct HistoricalRuntimeForkRequest{pub anchor:DurableAnchor,pub intent_id:S
 #[derive(Debug,serde::Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct HistoricalRuntimeForkResponse{pub child_session_id:String,pub parent_session_id:String}
+#[cfg(test)]
+static HISTORICAL_FORK_TEST_GATE: std::sync::Mutex<Option<(std::sync::mpsc::Sender<()>,tokio::sync::oneshot::Receiver<()>)>> = std::sync::Mutex::new(None);
 #[tauri::command]
 pub async fn historical_runtime_fork(owner_session_id:String,request:HistoricalRuntimeForkRequest,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<HistoricalRuntimeForkResponse,String>{
  check_journey_owner(&owner_session_id,&request.anchor.owner_session_id)?;
@@ -187,6 +189,8 @@ pub async fn historical_runtime_fork(owner_session_id:String,request:HistoricalR
  if request.anchor.source_session_id!=owner_session_id{return Err("historical_fork_foreign_source_not_authorized".into());}
  if request.intent_id.trim().is_empty()||request.intent_id.len()>256{return Err("historical_fork_invalid_intent".into());}
  if agent_core::definitions::prefix_lookup::definition_for_session_id(&owner_session_id).is_none(){return Err("historical_fork_unsupported_runtime_identity".into());}
+ #[cfg(test)]
+ { let gate=HISTORICAL_FORK_TEST_GATE.lock().unwrap().take(); if let Some((entered,resume))=gate{entered.send(()).unwrap();resume.await.unwrap();} }
  let owner=owner_session_id.clone();
  let response=tokio::task::spawn_blocking(move||database::db::with_sessions_writer(||historical_fork_commit(&owner,&request))).await.map_err(|e|e.to_string())??;
  // Durable commit is the replay boundary. If rehydrate fails, retry the same intent;
