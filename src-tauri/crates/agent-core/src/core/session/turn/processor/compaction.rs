@@ -123,30 +123,35 @@ impl UnifiedMessageProcessor {
             "compaction",
             self.runtime.account_id.as_deref(),
         );
+        let request = crate::core::model_context::phase_observation::next_request();
         let lock_started = std::time::Instant::now();
+        let lock_phase = crate::core::model_context::phase_observation::Phase::new(request, "state_lock_wait");
         let mut state = self.session.compaction.lock().await;
+        lock_phase.finish("ok");
         info!(
             session_id,
             wait_ms = lock_started.elapsed().as_millis(),
-            stage = "state_lock",
+            request,
+            stage = "state_lock_wait",
             "[compaction_stage] reactive lock acquired"
         );
         let provider_started = std::time::Instant::now();
-        let (compacted, outcome) = ContextCompactor::compact(
+        let (compacted, outcome) = crate::core::model_context::phase_observation::correlated(request, ContextCompactor::compact(
             tail,
             budget_tokens,
             &self.runtime.resolved.compaction,
             &mut state,
             &attributed,
             &self.runtime.model,
-        )
+        ))
         .await;
 
         info!(
             session_id,
             elapsed_ms = provider_started.elapsed().as_millis(),
-            stage = "provider_summary",
-            "[compaction_stage] reactive provider completed"
+            request,
+            stage = "compactor_total",
+            "[compaction_stage] reactive compactor completed"
         );
         let CompactionOutcome::Failed { reason } = outcome else {
             return (compacted, outcome);
@@ -156,7 +161,7 @@ impl UnifiedMessageProcessor {
             "[unified_processor] Reactive compaction failed for session {} ({}) — attempting manual-force rescue",
             session_id, reason
         );
-        match ContextCompactor::compact_manual_force(
+        match crate::core::model_context::phase_observation::correlated(request, ContextCompactor::compact_manual_force(
             tail,
             budget_tokens,
             &self.runtime.resolved.compaction,
@@ -164,7 +169,7 @@ impl UnifiedMessageProcessor {
             &attributed,
             &self.runtime.model,
             None,
-        )
+        ))
         .await
         {
             Ok((rescued, rescue_outcome @ CompactionOutcome::Compacted { .. })) => {
@@ -571,17 +576,19 @@ impl UnifiedMessageProcessor {
                 "compaction",
                 self.runtime.account_id.as_deref(),
             );
-            let lock_started = std::time::Instant::now();
+            let request = crate::core::model_context::phase_observation::next_request();
+        let lock_started = std::time::Instant::now();
             let mut state = self.session.compaction.lock().await;
             info!(
                 session_id,
                 wait_ms = lock_started.elapsed().as_millis(),
-                stage = "state_lock",
+                request,
+            stage = "state_lock_wait",
                 "[compaction_stage] pre-turn lock acquired"
             );
             let provider_started = std::time::Instant::now();
             let (compacted, outcome) = if cost_triggered && !size_triggered {
-                ContextCompactor::compact_for_weighted_spend(
+                crate::core::model_context::phase_observation::correlated(request, ContextCompactor::compact_for_weighted_spend(
                     &compactable_tail,
                     budget_tokens,
                     &self.runtime.resolved.compaction,
@@ -589,10 +596,10 @@ impl UnifiedMessageProcessor {
                     &attributed,
                     &self.runtime.model,
                     Some(&fork_inputs),
-                )
+                ))
                 .await
             } else {
-                ContextCompactor::compact_with_fork(
+                crate::core::model_context::phase_observation::correlated(request, ContextCompactor::compact_with_fork(
                     &compactable_tail,
                     budget_tokens,
                     &self.runtime.resolved.compaction,
@@ -600,15 +607,16 @@ impl UnifiedMessageProcessor {
                     &attributed,
                     &self.runtime.model,
                     Some(&fork_inputs),
-                )
+                ))
                 .await
             };
 
             info!(
                 session_id,
                 elapsed_ms = provider_started.elapsed().as_millis(),
-                stage = "provider_summary",
-                "[compaction_stage] pre-turn provider completed"
+                request,
+            stage = "compactor_total",
+                "[compaction_stage] pre-turn compactor completed"
             );
 
             // CC semantics: a failed compaction leaves the history UNCHANGED

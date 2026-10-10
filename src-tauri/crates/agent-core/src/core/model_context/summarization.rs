@@ -287,6 +287,8 @@ pub(crate) async fn summarize_messages_forked(
 ) -> Result<String, String> {
     use crate::session::prompt::cache::{RenderedSystemBlockScope, ORGII_SYSTEM_CACHE_SCOPE_KEY};
 
+    let request = super::phase_observation::next_request();
+    let prepare = super::phase_observation::Phase::new(request, "fork_input_prepare");
     let prompt = build_summary_prompt(state, custom_instructions, false);
     let mut messages: Vec<Value> = inputs.messages.to_vec();
     messages.push(serde_json::json!({
@@ -305,6 +307,8 @@ pub(crate) async fn summarize_messages_forked(
         inputs.model,
     );
 
+    prepare.finish("ok");
+    let call = super::phase_observation::Phase::new(request, "fork_adapter_call");
     let response = provider
         .chat_with_options(
             &messages,
@@ -314,8 +318,10 @@ pub(crate) async fn summarize_messages_forked(
             inputs.temperature,
             crate::providers::traits::ChatOptions::default(),
         )
-        .await
-        .map_err(|err| err.to_string())?;
+        .await;
+    call.finish(if response.is_ok() { "ok" } else { "failed" });
+    let response = response.map_err(|err| err.to_string())?;
+    let parse = super::phase_observation::Phase::new(request, "fork_summary_parse");
 
     // Tools are present with tool_choice auto — a model that answers with
     // a tool call instead of prose yields no primary text; treat as failure
@@ -324,7 +330,9 @@ pub(crate) async fn summarize_messages_forked(
         .primary_text()
         .map(str::to_string)
         .unwrap_or_default();
-    validate_summary(summary, &response.finish_reason, inputs.max_tokens)
+    let result = validate_summary(summary, &response.finish_reason, inputs.max_tokens);
+    parse.finish(if result.is_ok() { "ok" } else { "failed" });
+    result
 }
 
 /// Generate a summary of messages using the LLM.

@@ -25,6 +25,7 @@ pub mod microcompact;
 pub mod plan_preservation;
 pub mod session_memory;
 pub(crate) mod summarization;
+pub(crate) mod phase_observation;
 pub mod tokenizer;
 
 // No flat re-exports — every consumer imports through the explicit

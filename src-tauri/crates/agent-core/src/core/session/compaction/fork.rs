@@ -243,12 +243,15 @@ pub async fn attempt_fork(inputs: ForkInputs<'_>) -> ForkOutcome {
     // skips system prompts and would lose the durable compact boundary.
     // `seed_session_with_messages` refuses non-empty targets, so a fork can
     // never clobber an existing transcript.
+    let request = crate::core::model_context::phase_observation::next_request();
+    let seed_phase = crate::core::model_context::phase_observation::Phase::new(request, "fork_seed");
     let persist_messages = compacted_messages.to_vec();
     let persist_result = tokio::task::spawn_blocking({
         let sid = new_session_id.clone();
         move || unified_persistence::seed_session_with_messages(&sid, &persist_messages)
     })
     .await;
+    seed_phase.finish(if matches!(&persist_result, Ok(Ok(()))) { "ok" } else { "error" });
     match persist_result {
         Ok(Ok(())) => {
             #[cfg(test)]
@@ -273,7 +276,10 @@ pub async fn attempt_fork(inputs: ForkInputs<'_>) -> ForkOutcome {
         }
     }
 
-    match state.gateway_bindings.publish_fork_with_checkpoint(binding.session_key.clone(), old_session_id.to_string(), new_session_id.clone(), weighted_checkpoint.cloned()).await {
+    let publication_phase = crate::core::model_context::phase_observation::Phase::new(request, "fork_publication");
+    let publication_result = state.gateway_bindings.publish_fork_with_checkpoint(binding.session_key.clone(), old_session_id.to_string(), new_session_id.clone(), weighted_checkpoint.cloned()).await;
+    publication_phase.finish(if matches!(&publication_result, Ok(true)) { "ok" } else { "error" });
+    match publication_result {
         Ok(true) => {}
         Ok(false) => return ForkOutcome::Failed("binding changed during fork; reserved child remains archived".into()),
         Err(err) => return ForkOutcome::Failed(format!("fork publication: {}", err)),

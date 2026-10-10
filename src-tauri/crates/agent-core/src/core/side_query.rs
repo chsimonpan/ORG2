@@ -273,6 +273,9 @@ pub async fn side_query_typed_with_options(
         )));
     }
 
+    let phase_request = super::model_context::phase_observation::next_request();
+    // Adapter call includes local adapter processing, not pure network latency.
+    let call = super::model_context::phase_observation::Phase::new(phase_request, "side_query_adapter_call");
     // First attempt
     let response = provider
         .chat_with_options(
@@ -285,6 +288,8 @@ pub async fn side_query_typed_with_options(
         )
         .await;
 
+    call.finish(if response.is_ok() { "ok" } else { "failed" });
+    let parse = super::model_context::phase_observation::Phase::new(phase_request, "side_query_parse");
     let result = match response {
         Ok(resp) if is_output_truncated(&resp) => {
             warn!(
@@ -303,9 +308,10 @@ pub async fn side_query_typed_with_options(
             warn!("[side-query] thinking:disabled rejected (400), retrying with padded max_tokens");
             None
         }
-        Err(err) => return Err(SideQueryError::Provider(err)),
+        Err(err) => { parse.finish("provider_failed"); return Err(SideQueryError::Provider(err)); },
     };
 
+    parse.finish(if result.as_ref().is_some_and(|r| r.is_ok()) { "ok" } else { "failed_or_retry" });
     if let Some(ok) = result {
         return ok;
     }
@@ -331,6 +337,7 @@ pub async fn side_query_typed_with_options(
     });
     let retry_tools_ref: Option<&[Value]> = retry_tools.as_deref();
 
+    let retry_call = super::model_context::phase_observation::Phase::new(phase_request, "side_query_retry_adapter_call");
     let retry_response = provider
         .chat_with_options(
             &messages,
@@ -340,10 +347,13 @@ pub async fn side_query_typed_with_options(
             config.temperature,
             chat_options,
         )
-        .await
-        .map_err(SideQueryError::Provider)?;
+        .await;
+    retry_call.finish(if retry_response.is_ok() { "ok" } else { "failed" });
+    let retry_response = retry_response.map_err(SideQueryError::Provider)?;
+    let retry_parse = super::model_context::phase_observation::Phase::new(phase_request, "side_query_retry_parse");
 
     if is_output_truncated(&retry_response) {
+        retry_parse.finish("truncated");
         return Err(SideQueryError::IncompleteOutput {
             finish_reason: retry_response.finish_reason.clone(),
         });
@@ -352,6 +362,7 @@ pub async fn side_query_typed_with_options(
     // On retry, try structured first, then fall back to primary_text
     if expecting_structured {
         if let Some(structured_val) = extract_structured_from_response(&retry_response, config) {
+            retry_parse.finish("ok");
             return Ok(build_structured_result(&retry_response, structured_val));
         }
     }
@@ -360,10 +371,12 @@ pub async fn side_query_typed_with_options(
     match retry_response.primary_text() {
         Some(text) => {
             let content = text.to_string();
+            retry_parse.finish("ok");
             Ok(build_text_result(&retry_response, content))
         }
         None => {
             observe_thinking_model(config, model, &retry_response);
+            retry_parse.finish("empty");
             Err(SideQueryError::EmptyContent)
         }
     }
