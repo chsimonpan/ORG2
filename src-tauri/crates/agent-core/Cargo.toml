@@ -16,6 +16,8 @@ path = "src/lib.rs"
 # OSS app builds do not forward the Swift/AppKit feature.
 # ---------------------------------------------------------------------------
 [features]
+# Explicit opt-in: real Wry tests need a private in-container display.
+real-wry-tests = ["tauri/test"]
 default = []
 wingman-bar-native = []
 # Explicit test artifact capability forwarded by the desktop `webdriver`

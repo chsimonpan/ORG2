@@ -399,3 +399,73 @@ async fn compaction_processor_queued_lock_failure_recovery_cancel_capture() {
         }.with_subscriber(cancel.clone()).await;
     }
 }
+
+// Uses the default Wry runtime; the context supplies only empty test assets.
+#[cfg(feature = "real-wry-tests")]
+#[test]
+fn compaction_real_wry_display_entry_probe() {
+    use tauri::Manager;
+    let _sandbox = test_helpers::test_env::sandbox();
+    let app = tauri::Builder::default()
+        .any_thread()
+        .manage(crate::state::AgentAppState::new())
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .expect("real default Wry Builder");
+    let _managed = app.state::<crate::state::AgentAppState>();
+    eprintln!("REAL_WRY_MANAGED_ENTRY_OK");
+}
+
+#[cfg(feature = "real-wry-tests")]
+#[test]
+fn compaction_real_wry_preturn_fork_publication() {
+    use tauri::Manager;
+    use tracing::instrument::WithSubscriber;
+    use crate::core::model_context::phase_observation::capture::Capture;
+    let _sandbox = test_helpers::test_env::sandbox();
+    let app = tauri::Builder::default().any_thread()
+        .manage(crate::state::AgentAppState::new())
+        .build(tauri::test::mock_context(tauri::test::noop_assets())).unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let sid = "osagent-real-wry-preturn";
+        let (mut processor, provider) = fixture(sid, false);
+        let conn = database::db::get_connection().unwrap();
+        crate::persistence::test_schema::ensure_session_events_schema(&conn);
+        database::db::init_shell_replay_tables(&conn).unwrap();
+        let state = app.state::<crate::state::AgentAppState>();
+        state.gateway_bindings.load_from_db().await.unwrap();
+        let key = crate::integrations::gateway::SessionKey("telegram:wry-preturn".into());
+        state.gateway_bindings.set(key.clone(), sid.into()).await.unwrap();
+        processor.app_handle = Some(app.handle().clone());
+        processor.sm_config.enabled = false;
+        Arc::get_mut(&mut processor.runtime).unwrap().resolved.context_window = 1000;
+        let config = &mut Arc::get_mut(&mut processor.runtime).unwrap().resolved.compaction;
+        config.enabled = true;
+        config.weighted_token_threshold = 1;
+                config.min_messages = 2;
+        config.trigger_ratio = 0.0;
+        config.keep_ratio = 0.2;
+        config.floor_tokens = 100;
+        crate::model_context::weighted_usage::record_with_connection(&conn, sid, "threshold", 0, 5_000_000_000).unwrap();
+        let checkpoint = crate::model_context::weighted_usage::snapshot_with_connection(&conn, sid).unwrap();
+        let mut messages = unified_persistence::load_llm_history(sid).unwrap();
+        let capture = Capture::default();
+        let outcome = processor.run_pre_turn_compaction(sid, &mut messages).with_subscriber(capture.clone()).await;
+        let CompactionPhaseOutcome::ForkRedirect(result) = outcome else { panic!("real preturn did not redirect") };
+        let new_sid = result.fork_redirect.unwrap();
+        assert!(provider.calls.load(Ordering::SeqCst) > 0);
+        let request = capture.assert_phase("state_lock_wait", "ok");
+        assert_eq!(capture.assert_phase("fork_seed", "ok"), request);
+        assert_eq!(capture.assert_phase("fork_publication", "ok"), request);
+        let restarted = crate::integrations::gateway::binding::BindingStore::new();
+        restarted.load_from_db().await.unwrap();
+        assert_eq!(restarted.get(&key).await.unwrap().target_session_id, new_sid);
+        assert_eq!(unified_persistence::get_session(sid).unwrap().unwrap().status, "archived");
+        assert!(!unified_persistence::load_llm_history(&new_sid).unwrap().is_empty());
+        let after = crate::model_context::weighted_usage::snapshot_with_connection(&conn, sid).unwrap();
+        assert_eq!(after.milli, 0);
+        assert_eq!(after.generation, checkpoint.generation + 1);
+        assert_eq!(crate::model_context::weighted_usage::snapshot_with_connection(&conn, &new_sid).unwrap().milli, 0);
+        eprintln!("REAL_WRY_PRETURN_FORK_OK request={request} new={new_sid}");
+    });
+}
