@@ -469,3 +469,71 @@ fn compaction_real_wry_preturn_fork_publication() {
         eprintln!("REAL_WRY_PRETURN_FORK_OK request={request} new={new_sid}");
     });
 }
+
+#[cfg(feature = "real-wry-tests")]
+#[test]
+fn compaction_real_wry_reactive_then_checkpoint_fork() {
+    use tauri::Manager;
+    use tracing::instrument::WithSubscriber;
+    use crate::core::model_context::phase_observation::capture::Capture;
+    let _sandbox = test_helpers::test_env::sandbox();
+    let app = tauri::Builder::default().any_thread()
+        .manage(crate::state::AgentAppState::new())
+        .build(tauri::test::mock_context(tauri::test::noop_assets())).unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let sid = "osagent-real-wry-reactive-checkpoint";
+        let (mut processor, provider) = fixture(sid, false);
+        let conn = database::db::get_connection().unwrap();
+        crate::persistence::test_schema::ensure_session_events_schema(&conn);
+        database::db::init_shell_replay_tables(&conn).unwrap();
+        let state = app.state::<crate::state::AgentAppState>();
+        state.gateway_bindings.load_from_db().await.unwrap();
+        let key = crate::integrations::gateway::SessionKey("telegram:wry-reactive-checkpoint".into());
+        state.gateway_bindings.set(key.clone(), sid.into()).await.unwrap();
+        processor.app_handle = Some(app.handle().clone());
+        processor.sm_config.enabled = false;
+        Arc::get_mut(&mut processor.runtime).unwrap().resolved.context_window = 1000;
+        let config = &mut Arc::get_mut(&mut processor.runtime).unwrap().resolved.compaction;
+        config.enabled = true;
+        config.weighted_token_threshold = 1;
+                config.min_messages = 2;
+        config.trigger_ratio = 0.0;
+        config.keep_ratio = 0.2;
+        config.floor_tokens = 100;
+        crate::model_context::weighted_usage::record_with_connection(&conn, sid, "threshold", 0, 5_000_000_000).unwrap();
+        let checkpoint = crate::model_context::weighted_usage::snapshot_with_connection(&conn, sid).unwrap();
+        let mut messages = unified_persistence::load_llm_history(sid).unwrap();
+        // Reactive rejection cannot fork: the rejected prefix must first shrink.
+        let reactive = processor.run_reactive_compaction(sid, &mut messages, Some("context length exceeded")).await;
+        assert!(matches!(reactive, CompactionOutcome::Compacted { .. }));
+        assert_eq!(state.gateway_bindings.get(&key).await.unwrap().target_session_id, sid);
+        assert_eq!(unified_persistence::get_session(sid).unwrap().unwrap().status, "running");
+        let pending = crate::model_context::weighted_usage::snapshot_with_connection(&conn, sid).unwrap();
+        assert_eq!(pending.milli, checkpoint.milli);
+        assert_eq!(pending.generation, checkpoint.generation);
+        // Make the next turn eligible; only its durable fork may consume spend.
+        for _ in 0..4 {
+            messages.push(serde_json::json!({"role":"user", "content":"next turn ".repeat(100)}));
+            messages.push(serde_json::json!({"role":"assistant", "content":"done"}));
+        }
+        let capture = Capture::default();
+        let outcome = processor.run_pre_turn_compaction(sid, &mut messages).with_subscriber(capture.clone()).await;
+        let CompactionPhaseOutcome::ForkRedirect(result) = outcome else { panic!("real preturn did not redirect") };
+        let new_sid = result.fork_redirect.unwrap();
+        assert!(provider.calls.load(Ordering::SeqCst) > 0);
+        let request = capture.assert_phase("state_lock_wait", "ok");
+        assert_eq!(capture.assert_phase("fork_seed", "ok"), request);
+        assert_eq!(capture.assert_phase("fork_publication", "ok"), request);
+        let restarted = crate::integrations::gateway::binding::BindingStore::new();
+        restarted.load_from_db().await.unwrap();
+        assert_eq!(restarted.get(&key).await.unwrap().target_session_id, new_sid);
+        assert_eq!(unified_persistence::get_session(sid).unwrap().unwrap().status, "archived");
+        assert!(!unified_persistence::load_llm_history(&new_sid).unwrap().is_empty());
+        let after = crate::model_context::weighted_usage::snapshot_with_connection(&conn, sid).unwrap();
+        assert_eq!(after.milli, 0);
+        assert_eq!(after.generation, checkpoint.generation + 1);
+        assert_eq!(crate::model_context::weighted_usage::snapshot_with_connection(&conn, &new_sid).unwrap().milli, 0);
+        eprintln!("REAL_WRY_REACTIVE_CHECKPOINT_FORK_OK request={request} new={new_sid}");
+    });
+}
