@@ -334,3 +334,68 @@ async fn session_memory_pre_turn_skipped_compaction_preserves_baseline() {
     );
     assert_eq!(unified_persistence::load_llm_history(sid).unwrap().len(), 8);
 }
+
+// Real processor entry and session mutex; in-process provider fixture, no network/model.
+#[tokio::test]
+async fn compaction_processor_queued_lock_failure_recovery_cancel_capture() {
+    use crate::core::model_context::phase_observation::capture::Capture;
+    use tracing::instrument::WithSubscriber;
+    let _sandbox = test_helpers::test_env::sandbox();
+    for fail in [false, true] {
+        let sid = if fail { "processor-capture-failed" } else { "processor-capture-ok" };
+        let (mut processor, provider) = fixture(sid, fail);
+        let config = &mut Arc::get_mut(&mut processor.runtime).unwrap().resolved.compaction;
+        config.min_messages = 2;
+        config.trigger_ratio = 0.0;
+        config.keep_ratio = 0.2;
+        config.floor_tokens = 100;
+        let messages = unified_persistence::load_llm_history(sid).unwrap();
+        let capture = Capture::default();
+        async {
+            let held = processor.session.compaction.lock().await;
+            let mut call = Box::pin(processor.reactive_llm_compact_with_rescue(sid, &messages, 1000));
+            // Poll the real processor to Pending before starting the dwell timer.
+            // select! can poll an already-ready timer first after executor stalls,
+            // so its sleep arm alone does not prove the mutex waiter was queued.
+            std::future::poll_fn(|cx| {
+                assert!(std::future::Future::poll(call.as_mut(), cx).is_pending(),
+                    "processor bypassed held mutex");
+                std::task::Poll::Ready(())
+            }).await;
+            tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+            drop(held);
+            let (_, outcome) = call.await;
+            assert_eq!(matches!(outcome, CompactionOutcome::Failed { .. }), fail);
+            let request = capture.assert_phase("state_lock_wait", "ok");
+            assert_eq!(capture.assert_phase("side_query_adapter_call", if fail { "failed" } else { "ok" }), request);
+            let rows = capture.0.lock().unwrap();
+            let lock_row = rows.iter().find(|r| r.get("request") == Some(&request.to_string()) && r.get("phase") == Some(&"\"state_lock_wait\"".into()) && r.get("status") == Some(&"\"ok\"".into())).unwrap();
+            assert!(lock_row["elapsed_us"].parse::<u64>().unwrap() >= 10000, "lock capture: {lock_row:?}");
+            eprintln!("verified real processor lock capture: {lock_row:?}");
+            drop(rows);
+            assert!(provider.calls.load(Ordering::SeqCst) > 0);
+            assert!(processor.session.compaction.try_lock().is_ok());
+        }.with_subscriber(capture.clone()).await;
+        capture.assert_secret_absent();
+        let cancel = Capture::default();
+        async {
+            let held = processor.session.compaction.lock().await;
+            let before = provider.calls.load(Ordering::SeqCst);
+            let mut call = Box::pin(processor.reactive_llm_compact_with_rescue(sid, &messages, 1000));
+            // Poll the real processor to Pending before starting the dwell timer.
+            // select! can poll an already-ready timer first after executor stalls,
+            // so its sleep arm alone does not prove the mutex waiter was queued.
+            std::future::poll_fn(|cx| {
+                assert!(std::future::Future::poll(call.as_mut(), cx).is_pending(),
+                    "processor bypassed held mutex");
+                std::task::Poll::Ready(())
+            }).await;
+            tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+            drop(call);
+            cancel.assert_phase("state_lock_wait", "interrupted");
+            assert_eq!(provider.calls.load(Ordering::SeqCst), before);
+            drop(held);
+            assert!(processor.session.compaction.try_lock().is_ok());
+        }.with_subscriber(cancel.clone()).await;
+    }
+}

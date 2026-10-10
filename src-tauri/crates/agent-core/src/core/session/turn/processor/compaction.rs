@@ -362,6 +362,7 @@ impl UnifiedMessageProcessor {
         session_id: &str,
         messages: &mut Vec<Value>,
     ) -> CompactionPhaseOutcome {
+        let request = crate::core::model_context::phase_observation::next_request();
         // 5. Pre-compaction microcompact — time-based clear of old large tool
         // results once the prompt cache has expired. Often drops enough tokens
         // to skip the expensive LLM compaction below entirely.
@@ -576,9 +577,10 @@ impl UnifiedMessageProcessor {
                 "compaction",
                 self.runtime.account_id.as_deref(),
             );
-            let request = crate::core::model_context::phase_observation::next_request();
-        let lock_started = std::time::Instant::now();
+            let lock_started = std::time::Instant::now();
+            let lock_phase = crate::core::model_context::phase_observation::Phase::new(request, "state_lock_wait");
             let mut state = self.session.compaction.lock().await;
+            lock_phase.finish("ok");
             info!(
                 session_id,
                 wait_ms = lock_started.elapsed().as_millis(),
@@ -706,7 +708,7 @@ impl UnifiedMessageProcessor {
                 .gateway
                 .reset_policy
                 .clone();
-            let outcome = super::super::super::compaction::fork::attempt_fork(
+            let outcome = crate::core::model_context::phase_observation::correlated(request, super::super::super::compaction::fork::attempt_fork(
                 super::super::super::compaction::fork::ForkInputs {
                     state: state.inner(),
                     compacted_messages: &durable_compacted_messages,
@@ -714,7 +716,7 @@ impl UnifiedMessageProcessor {
                     reset_policy: &reset_policy,
                     weighted_checkpoint: weighted_checkpoint.as_ref(),
                 },
-            )
+            ))
             .await;
             match outcome {
                 super::super::super::compaction::fork::ForkOutcome::Forked { new_session_id } => {
