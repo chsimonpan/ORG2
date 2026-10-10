@@ -103,6 +103,7 @@ pub fn ensure_tables_with(conn: &Connection) -> SqliteResult<()> {
             compact_tokens_after INTEGER,
             tool_is_error INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS historical_runtime_fork_intents (owner_session_id TEXT NOT NULL,intent_id TEXT NOT NULL,anchor_json TEXT NOT NULL,child_session_id TEXT NOT NULL UNIQUE,parent_session_id TEXT NOT NULL,PRIMARY KEY(owner_session_id,intent_id));
         CREATE INDEX IF NOT EXISTS idx_am_session
             ON agent_messages(session_id, sequence);
         -- agent_snapshots: legacy column name `hash` now holds a per-session

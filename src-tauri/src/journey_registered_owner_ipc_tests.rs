@@ -186,3 +186,26 @@ fn memory_full_embedding_rerank_registered_contract(){
  server.verify().await;
  });
 }
+
+#[test]
+fn historical_runtime_registered_exact_prefix_intent_replay(){
+ let _sandbox=test_helpers::test_env::sandbox();let owner="osagent-history-source";let state=agent_core::state::AgentAppState::new();
+ tauri::async_runtime::block_on(state.register_session(agent_core::state::AgentSession::new(owner.into(),agent_core::definitions::sde_agent())));
+ let c=database::db::get_connection().unwrap();agent_core::foundation::persistence::session_snapshots::ensure_tables_with(&c).unwrap();
+ c.execute("INSERT INTO agent_sessions(session_id,created_at,updated_at) VALUES(?1,'2026-10-10T00:00:00Z','2026-10-10T00:00:00Z')",[owner]).unwrap();
+ for (id,seq,role) in [("h-user",1,"user"),("h-answer",2,"assistant"),("h-suffix",3,"user")]{c.execute("INSERT INTO agent_messages(id,session_id,role,content,sequence,created_at) VALUES(?1,?2,?3,?1,?4,'2026-10-10T00:00:00Z')",rusqlite::params![id,owner,role,seq]).unwrap();}
+ let anchor=agent_core::core::session::journey_canonical::resolve_with_connection(&c,owner,owner,&format!("session:{owner}"),"h-answer",3).unwrap();drop(c);
+ let app=mock_builder().manage(state.clone()).invoke_handler(tauri::generate_handler![historical_runtime_fork]).build(mock_context(noop_assets())).unwrap();
+ let w=tauri::WebviewWindowBuilder::new(&app,"main",Default::default()).build().unwrap();
+ let request=json!({"ownerSessionId":owner,"request":{"anchor":anchor,"intentId":"intent-one"}});
+ let result=invoke(&w,"historical_runtime_fork",request.clone()).unwrap();let child=result["childSessionId"].as_str().unwrap();assert_ne!(child,owner);
+ assert!(tauri::async_runtime::block_on(state.get_session(child)).is_some());
+ assert_eq!(invoke(&w,"historical_runtime_fork",request.clone()).unwrap(),result);
+ let c=database::db::get_connection().unwrap();let rows=agent_core::session::persistence::load_messages(child).unwrap();assert_eq!(rows.iter().map(|r|r.content.as_str()).collect::<Vec<_>>(),vec!["h-user","h-answer"]);
+ assert_eq!(c.query_row("SELECT parent_session_id FROM agent_sessions WHERE session_id=?1",[child],|r|r.get::<_,String>(0)).unwrap(),owner);drop(c);
+ tauri::async_runtime::block_on(state.remove_session(child));assert_eq!(invoke(&w,"historical_runtime_fork",request.clone()).unwrap(),result);
+ let mut independent=request.clone();independent["request"]["intentId"]=json!("intent-two");assert_ne!(invoke(&w,"historical_runtime_fork",independent).unwrap()["childSessionId"],result["childSessionId"]);
+ let mut mismatch=request.clone();mismatch["request"]["anchor"]["boundaryHash"]=json!("changed");assert!(invoke(&w,"historical_runtime_fork",mismatch).is_err());
+ let mut foreign=request;foreign["request"]["anchor"]["sourceSessionId"]=json!("foreign");foreign["request"]["intentId"]=json!("foreign-intent");assert!(invoke(&w,"historical_runtime_fork",foreign).is_err());
+ assert_eq!(agent_core::session::persistence::load_messages(owner).unwrap().len(),3);
+}

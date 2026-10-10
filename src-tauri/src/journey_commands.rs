@@ -172,3 +172,54 @@ pub async fn journey_review_list(owner_session_id:String,state:tauri::State<'_,a
 #[cfg(test)]
 #[path="journey_registered_owner_ipc_tests.rs"]
 mod registered_owner_ipc_tests;
+
+/// Explicit physical historical-prefix fork; never a compaction or Journey branch.
+#[derive(Debug,serde::Deserialize)]
+#[serde(rename_all="camelCase",deny_unknown_fields)]
+pub struct HistoricalRuntimeForkRequest{pub anchor:DurableAnchor,pub intent_id:String}
+#[derive(Debug,serde::Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct HistoricalRuntimeForkResponse{pub child_session_id:String,pub parent_session_id:String}
+#[tauri::command]
+pub async fn historical_runtime_fork(owner_session_id:String,request:HistoricalRuntimeForkRequest,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<HistoricalRuntimeForkResponse,String>{
+ check_journey_owner(&owner_session_id,&request.anchor.owner_session_id)?;
+ let _lease=journey_mutation_lease(&owner_session_id,&state).await?;
+ if request.anchor.source_session_id!=owner_session_id{return Err("historical_fork_foreign_source_not_authorized".into());}
+ if request.intent_id.trim().is_empty()||request.intent_id.len()>256{return Err("historical_fork_invalid_intent".into());}
+ if agent_core::definitions::prefix_lookup::definition_for_session_id(&owner_session_id).is_none(){return Err("historical_fork_unsupported_runtime_identity".into());}
+ let owner=owner_session_id.clone();
+ let response=tokio::task::spawn_blocking(move||database::db::with_sessions_writer(||historical_fork_commit(&owner,&request))).await.map_err(|e|e.to_string())??;
+ // Durable commit is the replay boundary. If rehydrate fails, retry the same intent;
+ // never delete a committed child or redirect/archive its parent.
+ if state.get_session(&response.child_session_id).await.is_none(){agent_core::init::register_session_with_rehydrate(&state,&response.child_session_id).await?;}
+ Ok(response)
+}
+fn historical_fork_commit(owner:&str,request:&HistoricalRuntimeForkRequest)->Result<HistoricalRuntimeForkResponse,String>{
+ use rusqlite::{params,OptionalExtension};
+ let mut c=database::db::get_connection().map_err(|e|e.to_string())?;
+ let tx=c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
+ let result=(||->Result<HistoricalRuntimeForkResponse,String>{
+ tx.execute_batch("CREATE TABLE IF NOT EXISTS historical_runtime_fork_intents(owner_session_id TEXT NOT NULL,intent_id TEXT NOT NULL,anchor_json TEXT NOT NULL,child_session_id TEXT NOT NULL UNIQUE,parent_session_id TEXT NOT NULL,PRIMARY KEY(owner_session_id,intent_id));").map_err(|e|e.to_string())?;
+ let anchor_json=serde_json::to_string(&request.anchor).map_err(|e|e.to_string())?;
+ let prior=tx.query_row("SELECT anchor_json,child_session_id,parent_session_id FROM historical_runtime_fork_intents WHERE owner_session_id=?1 AND intent_id=?2",params![owner,request.intent_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?))).optional().map_err(|e|e.to_string())?;
+ if let Some((stored,child,parent))=prior{if stored!=anchor_json{return Err("historical_fork_intent_conflict".into());}return Ok(HistoricalRuntimeForkResponse{child_session_id:child,parent_session_id:parent});}
+ let exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE session_id=?1)",[owner],|r|r.get(0)).map_err(|e|e.to_string())?;
+ if !exists{return Err("historical_fork_owner_missing".into());}
+ let revision:i64=tx.query_row("SELECT COALESCE(MAX(sequence),0) FROM agent_messages WHERE session_id=?1",[owner],|r|r.get(0)).map_err(|e|e.to_string())?;
+ agent_core::core::session::journey_canonical::validate_commit_with_connection(&tx,owner,&request.anchor,revision as u64,true)?;
+ let endpoint:i64=tx.query_row("SELECT sequence FROM agent_messages WHERE session_id=?1 AND id=?2",params![owner,request.anchor.durable_message_id],|r|r.get(0)).map_err(|e|e.to_string())?;
+ // Reject ambiguous physical coordinates rather than silently include same-sequence suffix.
+ let unique:i64=tx.query_row("SELECT COUNT(*) FROM agent_messages WHERE session_id=?1 AND sequence=?2",params![owner,endpoint],|r|r.get(0)).map_err(|e|e.to_string())?;if unique!=1{return Err("historical_fork_ambiguous_endpoint".into());}
+ let child=format!("{}-history-{}",owner,uuid::Uuid::new_v4());
+ tx.execute("INSERT INTO agent_sessions(session_id,name,status,model,account_id,workspace_path,created_at,updated_at,parent_session_id) SELECT ?1,name,'idle',model,account_id,workspace_path,?3,?3,session_id FROM agent_sessions WHERE session_id=?2",params![child,owner,chrono::Utc::now().to_rfc3339()]).map_err(|e|e.to_string())?;
+ // Copy every physical transcript column, including tool and compact metadata,
+ // but mint child-local message identity. Usage/snapshots/gateway bindings stay parent-owned.
+ let columns={let mut s=tx.prepare("PRAGMA table_info(agent_messages)").map_err(|e|e.to_string())?;let v=s.query_map([],|r|r.get::<_,String>(1)).map_err(|e|e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e|e.to_string())?;v};
+ let quoted=columns.iter().map(|n|format!("\"{}\"",n.replace('"',"\"\""))).collect::<Vec<_>>();
+ let expressions=columns.iter().zip(&quoted).map(|(n,q)|match n.as_str(){"id"=>"?1 || ':' || id".to_string(),"session_id"=>"?1".to_string(),_=>q.clone()}).collect::<Vec<_>>();
+ tx.execute(&format!("INSERT INTO agent_messages({}) SELECT {} FROM agent_messages WHERE session_id=?2 AND sequence<=?3 ORDER BY sequence,id",quoted.join(","),expressions.join(",")),params![child,owner,endpoint]).map_err(|e|e.to_string())?;
+ tx.execute("INSERT INTO historical_runtime_fork_intents VALUES(?1,?2,?3,?4,?1)",params![owner,request.intent_id,anchor_json,child]).map_err(|e|e.to_string())?;
+ Ok(HistoricalRuntimeForkResponse{child_session_id:child,parent_session_id:owner.into()})
+ })()?;
+ tx.commit().map_err(|e|e.to_string())?;Ok(result)
+}
