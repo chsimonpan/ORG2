@@ -268,3 +268,17 @@ fn historical_runtime_concurrent_transaction_reopen_usage_isolation(){
  assert_eq!(retry(&w,request),results[0]);assert!(tauri::async_runtime::block_on(state.get_session(&child)).is_some());
  assert_eq!(agent_core::session::persistence::load_messages(&child).unwrap().iter().map(|m|m.content.as_str()).collect::<Vec<_>>(),vec!["tx-user","tx-answer"]);
 }
+
+#[test]
+fn historical_runtime_registered_rejects_unpaired_inclusive_endpoint(){
+ let _sandbox=test_helpers::test_env::sandbox();let owner="osagent-history-pair";let state=agent_core::state::AgentAppState::new();
+ tauri::async_runtime::block_on(state.register_session(agent_core::state::AgentSession::new(owner.into(),agent_core::definitions::sde_agent())));
+ let c=database::db::get_connection().unwrap();agent_core::foundation::persistence::session_snapshots::ensure_tables_with(&c).unwrap();
+ c.execute("INSERT INTO agent_sessions(session_id,created_at,updated_at) VALUES(?1,'fixture','fixture')",[owner]).unwrap();
+ for(id,seq,role)in[("u",1,"user"),("call",2,"tool_call"),("result",3,"tool_result")]{c.execute("INSERT INTO agent_messages(id,session_id,role,content,sequence,created_at,tool_call_id) VALUES(?1,?2,?3,?1,?4,'fixture','tool-one')",rusqlite::params![id,owner,role,seq]).unwrap();}
+ let anchor=agent_core::core::session::journey_canonical::resolve_with_connection(&c,owner,owner,&format!("session:{owner}"),"call",3).unwrap();
+ let legal=agent_core::core::session::journey_canonical::resolve_with_connection(&c,owner,owner,&format!("session:{owner}"),"result",3).unwrap();drop(c);
+ let app=mock_builder().manage(state.clone()).invoke_handler(tauri::generate_handler![historical_runtime_fork]).build(mock_context(noop_assets())).unwrap();let w=tauri::WebviewWindowBuilder::new(&app,"main",Default::default()).build().unwrap();
+ assert!(invoke(&w,"historical_runtime_fork",json!({"ownerSessionId":owner,"request":{"anchor":anchor,"intentId":"incomplete"}})).unwrap_err().to_string().contains("historical_fork_unpaired_tool_prefix"));
+ let result=invoke(&w,"historical_runtime_fork",json!({"ownerSessionId":owner,"request":{"anchor":legal,"intentId":"complete"}})).unwrap();assert!(tauri::async_runtime::block_on(state.get_session(result["childSessionId"].as_str().unwrap())).is_some());
+}

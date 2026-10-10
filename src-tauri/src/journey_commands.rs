@@ -224,6 +224,18 @@ fn historical_fork_commit(owner:&str,request:&HistoricalRuntimeForkRequest)->Res
  let endpoint:i64=tx.query_row("SELECT sequence FROM agent_messages WHERE session_id=?1 AND id=?2",params![owner,request.anchor.durable_message_id],|r|r.get(0)).map_err(|e|e.to_string())?;
  // Reject ambiguous physical coordinates rather than silently include same-sequence suffix.
  let unique:i64=tx.query_row("SELECT COUNT(*) FROM agent_messages WHERE session_id=?1 AND sequence=?2",params![owner,endpoint],|r|r.get(0)).map_err(|e|e.to_string())?;if unique!=1{return Err("historical_fork_ambiguous_endpoint".into());}
+ // Validate the loader-visible inclusive prefix, never round the endpoint to a turn.
+ // Compaction summaries are user projections; only their visible tail needs pairing.
+ let compact_floor:Option<i64>=tx.query_row("SELECT compact_from_sequence FROM agent_messages WHERE session_id=?1 AND sequence<=?2 AND compact_from_sequence IS NOT NULL ORDER BY sequence DESC LIMIT 1",params![owner,endpoint],|r|r.get(0)).optional().map_err(|e|e.to_string())?;
+ let mut pending=std::collections::HashSet::<String>::new();
+ {let mut stmt=tx.prepare("SELECT role,tool_call_id FROM agent_messages WHERE session_id=?1 AND sequence<=?2 AND sequence>=?3 AND compact_from_sequence IS NULL ORDER BY sequence,id").map_err(|e|e.to_string())?;
+ let rows=stmt.query_map(params![owner,endpoint,compact_floor.unwrap_or(i64::MIN)],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?))).map_err(|e|e.to_string())?;
+ for row in rows{let(role,id)=row.map_err(|e|e.to_string())?;match role.as_str(){
+ "tool_call"=>{let id=id.filter(|v|!v.is_empty()).ok_or("historical_fork_unpaired_tool_prefix")?;if !pending.insert(id){return Err("historical_fork_unpaired_tool_prefix".into());}},
+ "tool_result"=>{if !id.as_ref().is_some_and(|v|pending.remove(v)){return Err("historical_fork_unpaired_tool_prefix".into());}},
+ "user"|"assistant"|"system"=>{if !pending.is_empty(){return Err("historical_fork_unpaired_tool_prefix".into());}},_=>{}
+ }} }
+ if !pending.is_empty(){return Err("historical_fork_unpaired_tool_prefix".into());}
  let child=format!("{}-history-{}",owner,uuid::Uuid::new_v4());
  tx.execute("INSERT INTO agent_sessions(session_id,name,status,model,account_id,workspace_path,created_at,updated_at,parent_session_id) SELECT ?1,name,'idle',model,account_id,workspace_path,?3,?3,session_id FROM agent_sessions WHERE session_id=?2",params![child,owner,chrono::Utc::now().to_rfc3339()]).map_err(|e|e.to_string())?;
  // Copy every physical transcript column, including tool and compact metadata,
