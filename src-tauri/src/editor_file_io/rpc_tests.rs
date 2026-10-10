@@ -102,3 +102,40 @@ fn real_ipc_scope_bounded_io_and_management_revocation() {
     assert!(resolve_path_with_access(file.to_str().unwrap(),Some(&workspace),&[],Access::Read).is_err());
     assert_eq!(invoke(&window,"global_path_exemptions_list",json!({})).unwrap(),json!([]));
 }
+
+/// Real registered IPC with a mock webview, not native GUI acceptance.
+#[test]
+fn registered_large_file_metadata_read_save_and_revoke_preserve_sentinel() {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    let sandbox = test_helpers::test_env::sandbox();
+    let root = sandbox.path().join("r7-registered-large");
+    std::fs::create_dir(&root).unwrap();
+    let path = root.join("synthetic-564m.txt");
+    let size = 564_u64 * 1024 * 1024;
+    let mut file = std::fs::File::create(&path).unwrap();
+    file.set_len(size).unwrap();
+    file.write_all(b"R7-HEAD").unwrap();
+    file.seek(SeekFrom::End(-7)).unwrap();
+    file.write_all(b"R7-TAIL").unwrap();
+    drop(file);
+    let app = mock_builder().plugin(tauri_plugin_fs::init())
+        .invoke_handler(tauri::generate_handler![editor_stat_bounded, editor_read_bounded,
+            editor_write_bounded, global_paths::global_path_exemptions_add,
+            global_paths::global_path_exemptions_remove])
+        .build(mock_context(noop_assets())).unwrap();
+    let window = tauri::WebviewWindowBuilder::new(&app,"r7-large",tauri::WebviewUrl::default()).build().unwrap();
+    invoke(&window,"global_path_exemptions_add",json!({"path":root,"mode":"read_write","recursive":true})).unwrap();
+    assert_eq!(invoke(&window,"editor_stat_bounded",json!({"path":path})).unwrap()["size"],json!(size));
+    assert!(invoke(&window,"editor_read_bounded",json!({"path":path})).unwrap_err().to_string().contains("too_large"));
+    for content in ["", "replacement"] {
+        assert!(invoke(&window,"editor_write_bounded",json!({"path":path,"content":content,"create":false})).unwrap_err().to_string().contains("too_large"));
+    }
+    invoke(&window,"global_path_exemptions_remove",json!({"path":root})).unwrap();
+    assert!(invoke(&window,"editor_stat_bounded",json!({"path":path})).is_err());
+    assert!(invoke(&window,"editor_read_bounded",json!({"path":path})).is_err());
+    assert!(invoke(&window,"editor_write_bounded",json!({"path":path,"content":"","create":false})).is_err());
+    assert_eq!(std::fs::metadata(&path).unwrap().len(),size);
+    let mut file=std::fs::File::open(&path).unwrap();
+    let mut marker=[0;7]; file.read_exact(&mut marker).unwrap(); assert_eq!(&marker,b"R7-HEAD");
+    file.seek(SeekFrom::End(-7)).unwrap(); file.read_exact(&mut marker).unwrap(); assert_eq!(&marker,b"R7-TAIL");
+}
