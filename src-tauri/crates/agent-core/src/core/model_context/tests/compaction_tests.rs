@@ -1406,6 +1406,8 @@ async fn compact_rejects_empty_summary() {
 
 #[tokio::test]
 async fn compact_with_fork_uses_main_turn_prefix_and_plain_text_reply() {
+    use tracing::instrument::WithSubscriber;
+    let capture = crate::core::model_context::phase_observation::capture::Capture::default();
     use std::sync::Mutex;
 
     use crate::model_context::compaction::{CompactionOutcome, CompactionState, ForkSummaryInputs};
@@ -1495,7 +1497,7 @@ async fn compact_with_fork_uses_main_turn_prefix_and_plain_text_reply() {
         "main-model",
         Some(&fork_inputs),
     )
-    .await;
+    .with_subscriber(capture.clone()).await;
 
     assert!(matches!(outcome, CompactionOutcome::Compacted { .. }));
     assert!(compacted[0]["content"]
@@ -1514,7 +1516,12 @@ async fn compact_with_fork_uses_main_turn_prefix_and_plain_text_reply() {
         "fork must use the main turn's max_tokens"
     );
     assert_eq!(state.consecutive_failures, 0);
+    let request = capture.assert_phase("fork_input_prepare", "ok");
+    assert_eq!(capture.assert_phase("fork_adapter_call", "ok"), request);
+    assert_eq!(capture.assert_phase("fork_summary_parse", "ok"), request);
+    capture.assert_secret_absent();
 }
+
 
 #[tokio::test]
 async fn compact_with_fork_falls_back_to_side_query_on_fork_failure() {

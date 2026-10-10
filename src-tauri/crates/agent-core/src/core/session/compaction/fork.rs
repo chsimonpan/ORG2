@@ -387,6 +387,8 @@ fn strip_version_suffix(sid: &str) -> &str {
 mod tests {
     use super::*;
     use core_types::key_source::KeySource;
+    use tracing::instrument::WithSubscriber;
+    use crate::core::model_context::phase_observation::capture::Capture;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_compact_forks_have_one_durable_winner() {
         let _sandbox = test_helpers::test_env::sandbox();
@@ -411,11 +413,15 @@ mod tests {
         crate::model_context::weighted_usage::record_with_connection(&conn, old, "threshold", 0, 5_000_000_000).unwrap();
         let checkpoint = crate::model_context::weighted_usage::snapshot_with_connection(&conn, old).unwrap();
         crate::model_context::weighted_usage::record_with_connection(&conn, old, "late", 0, 17_000).unwrap();
+        let capture = Capture::default();
         let (a,b) = tokio::join!(
-            attempt_fork(ForkInputs {state: &state, compacted_messages: &messages, old_session_id: old, reset_policy: &policy, weighted_checkpoint: Some(&checkpoint)}),
-            attempt_fork(ForkInputs {state: &state, compacted_messages: &messages, old_session_id: old, reset_policy: &policy, weighted_checkpoint: Some(&checkpoint)})
+            attempt_fork(ForkInputs {state: &state, compacted_messages: &messages, old_session_id: old, reset_policy: &policy, weighted_checkpoint: Some(&checkpoint)}).with_subscriber(capture.clone()),
+            attempt_fork(ForkInputs {state: &state, compacted_messages: &messages, old_session_id: old, reset_policy: &policy, weighted_checkpoint: Some(&checkpoint)}).with_subscriber(capture.clone())
         );
         eprintln!("actual fork outcomes: {a:?} {b:?}");
+        let seed_request = capture.assert_phase("fork_seed", "ok");
+        assert_eq!(capture.assert_phase("fork_publication", "ok"), seed_request);
+        capture.assert_secret_absent();
         let successes = usize::from(matches!(a, ForkOutcome::Forked {..})) + usize::from(matches!(b, ForkOutcome::Forked {..}));
         let binding = state.gateway_bindings.get(&key).await.unwrap();
         let remainder = crate::model_context::weighted_usage::snapshot_with_connection(&conn, old).unwrap();
