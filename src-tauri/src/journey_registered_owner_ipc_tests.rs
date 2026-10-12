@@ -142,7 +142,7 @@ fn memory_query_transport_registered_contract(){
  tauri::async_runtime::block_on(async {
  use wiremock::{Mock,MockServer,ResponseTemplate};use wiremock::matchers::{method,path,body_json};
  let server=MockServer::start().await;let mut vector=vec![0.0f32;1024];vector[0]=1.;
- Mock::given(method("POST")).and(path("/api/v1/embeddings")).and(body_json(json!({"model":"qwen/qwen3-vl-embedding","input":["transport query"],"dimensions":1024}))).respond_with(ResponseTemplate::new(200).set_body_json(json!({"data":[{"embedding":vector}]}))).expect(1).mount(&server).await;
+ Mock::given(method("POST")).and(path("/api/v1/embeddings")).and(body_json(json!({"model":"qwen/qwen3-vl-embedding","input":"transport query","encoding_format":"float","dimensions":1024}))).respond_with(ResponseTemplate::new(200).set_body_json(json!({"object":"list","data":[{"object":"embedding","index":0,"embedding":vector}],"model":"qwen/qwen3-vl-embedding","usage":{"prompt_tokens":30,"total_tokens":30,"cost":"0.000003","cost_details":{"prompt":"0.000003","completion":"0"}}}))).expect(1).mount(&server).await;
  let mut key=key_vault::key_store::ModelKey::new(key_vault::key_store::ModelType::OpenaiApi);key.api_key=Some("synthetic-no-production-key".into());key.base_url=Some(format!("{}/api/v1",server.uri()));key.enabled_models=vec!["qwen/qwen3-vl-embedding".into()];key.health_status=key_vault::key_store::HealthStatus::Valid;key.last_validated_at=Some(chrono::Utc::now());key_vault::key_store::KEY_SERVICE.save_key(key).unwrap();
  let state=agent_core::state::AgentAppState::new();let owner="query-fixture-owner";state.register_session(agent_core::state::AgentSession::new(owner.into(),agent_core::definitions::sde_agent())).await;
  let c=database::db::get_connection().unwrap();agent_core::core::session::journey_embedding::ensure_schema(&c).unwrap();let blob:Vec<u8>=vector.iter().flat_map(|v|v.to_le_bytes()).collect();
@@ -162,7 +162,7 @@ fn memory_full_embedding_rerank_registered_contract(){
  tauri::async_runtime::block_on(async {
  use wiremock::{Mock,MockServer,ResponseTemplate};use wiremock::matchers::{method,path,body_json};
  let server=MockServer::start().await;let mut vector=vec![0.0f32;1024];vector[0]=1.;
- Mock::given(method("POST")).and(path("/api/v1/embeddings")).and(body_json(json!({"model":"qwen/qwen3-vl-embedding","input":["transport query"],"dimensions":1024}))).respond_with(ResponseTemplate::new(200).set_body_json(json!({"data":[{"embedding":vector}]}))).expect(4).mount(&server).await;
+ Mock::given(method("POST")).and(path("/api/v1/embeddings")).and(body_json(json!({"model":"qwen/qwen3-vl-embedding","input":"transport query","encoding_format":"float","dimensions":1024}))).respond_with(ResponseTemplate::new(200).set_body_json(json!({"object":"list","data":[{"object":"embedding","index":0,"embedding":vector}],"model":"qwen/qwen3-vl-embedding","usage":{"prompt_tokens":30,"total_tokens":30,"cost":"0.000003","cost_details":{"prompt":"0.000003","completion":"0"}}}))).expect(4).mount(&server).await;
  let mut key=key_vault::key_store::ModelKey::new(key_vault::key_store::ModelType::OpenaiApi);key.api_key=Some("synthetic-no-production-key".into());key.base_url=Some(format!("{}/api/v1",server.uri()));key.enabled_models=vec!["qwen/qwen3-vl-embedding".into(),"qwen/qwen3-vl-rerank".into()];key.health_status=key_vault::key_store::HealthStatus::Valid;key.last_validated_at=Some(chrono::Utc::now());key_vault::key_store::KEY_SERVICE.save_key(key).unwrap();
  let state=agent_core::state::AgentAppState::new();let owner="query-fixture-owner";state.register_session(agent_core::state::AgentSession::new(owner.into(),agent_core::definitions::sde_agent())).await;
  let c=database::db::get_connection().unwrap();agent_core::core::session::journey_embedding::ensure_schema(&c).unwrap();let blob:Vec<u8>=vector.iter().flat_map(|v|v.to_le_bytes()).collect();
@@ -183,6 +183,161 @@ fn memory_full_embedding_rerank_registered_contract(){
  assert_eq!(invoke(&w,"memory_search",json!({"ownerSessionId":owner,"query":"transport query","topN":10})).unwrap()[0]["score"],1.0);
  let c=database::db::get_connection().unwrap();let mut invalid=vec![0.0f32;1024];invalid[0]=f32::NAN;let blob:Vec<u8>=invalid.iter().flat_map(|x|x.to_le_bytes()).collect();c.execute("UPDATE session_journey_embedding_index SET embedding=?1 WHERE session_id=?2",rusqlite::params![blob,owner]).unwrap();drop(c);
  let mut valid=vec![0.0f32;1024];valid[0]=1.;assert!(invoke(&w,"memory_search",json!({"ownerSessionId":owner,"query":"transport query","queryVector":valid,"embeddingSource":"openai:https://zenmux.ai/api/v1:qwen/qwen3-vl-embedding:1024","topN":10})).is_err());
+ server.verify().await;
+ });
+}
+
+#[test]
+fn memory_search_candidate_hard_caps_registered_contract(){
+ // Hard limits: the index scan is bounded (explicit error above it) and only the cosine top-K reach the rerank provider.
+ let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+ let _sandbox=test_helpers::test_env::sandbox();
+ tauri::async_runtime::block_on(async {
+ use wiremock::{Mock,MockServer,ResponseTemplate};use wiremock::matchers::{method,path};use std::sync::{Arc,Mutex};
+ use crate::memory_search_commands::{MAX_CANDIDATES,MAX_RERANK_CANDIDATES,SOURCE};
+ let server=MockServer::start().await;let seen:Arc<Mutex<Vec<Value>>>=Arc::new(Mutex::new(Vec::new()));let log=seen.clone();
+ Mock::given(method("POST")).and(path("/api/v1/rerank")).respond_with(move|req:&wiremock::Request|{let b:Value=serde_json::from_slice(&req.body).unwrap();log.lock().unwrap().push(b);ResponseTemplate::new(200).set_body_json(json!({"results":[{"index":MAX_RERANK_CANDIDATES-1,"relevance_score":0.9},{"index":0,"relevance_score":0.1}]}))}).mount(&server).await;
+ let mut rk=key_vault::key_store::ModelKey::new(key_vault::key_store::ModelType::ZenmuxApi);rk.api_key=Some("synthetic-zenmux-no-production-key".into());rk.base_url=Some(format!("{}/api/v1",server.uri()));rk.enabled=true;rk.enabled_models=vec!["qwen/qwen3-vl-rerank".into()];rk.health_status=key_vault::key_store::HealthStatus::Valid;rk.last_validated_at=Some(chrono::Utc::now());key_vault::key_store::KEY_SERVICE.save_key(rk).unwrap();
+ let state=agent_core::state::AgentAppState::new();let owner="cap-owner";
+ state.register_session(agent_core::state::AgentSession::new(owner.into(),agent_core::definitions::sde_agent())).await;
+ let c=database::db::get_connection().unwrap();agent_core::core::session::journey_embedding::ensure_schema(&c).unwrap();
+ // Row i has cosine to the query strictly decreasing in i.
+ let blob=|i:usize|{let mut v=vec![0f32;1024];v[0]=1.;v[1]=i as f32/1000.;v.iter().flat_map(|x|x.to_le_bytes()).collect::<Vec<u8>>()};
+ let insert=|c:&rusqlite::Connection,sid:&str,range:std::ops::Range<usize>|{let tx=c.unchecked_transaction().unwrap();for i in range{tx.execute("INSERT INTO session_journey_embedding_index(source_id,source_kind,session_id,fork_id,review_id,content,embedding,embedding_model,embedding_source,embedding_dimensions) VALUES(?1,'confirmed_fact',?2,'f','r',?3,?4,'qwen/qwen3-vl-embedding',?5,1024)",rusqlite::params![format!("s{i:04}"),sid,format!("doc-{i:04}"),blob(i),SOURCE]).unwrap();}tx.commit().unwrap();};
+ insert(&c,owner,0..MAX_RERANK_CANDIDATES+20);insert(&c,"foreign-owner",0..3);drop(c);
+ let app=mock_builder().manage(state).invoke_handler(tauri::generate_handler![crate::memory_search_commands::memory_search,agent_core::definitions::commands::integrations_update_patch]).build(mock_context(noop_assets())).unwrap();let w=tauri::WebviewWindowBuilder::new(&app,"main",Default::default()).build().unwrap();
+ let mut q=vec![0f32;1024];q[0]=1.;let body=json!({"ownerSessionId":owner,"query":"capq","queryVector":q,"embeddingSource":SOURCE,"topN":2});
+ invoke(&w,"integrations_update_patch",json!({"patch":{"rerank":{"provider":"zenmux_api","model":"qwen/qwen3-vl-rerank","baseUrl":format!("{}/api/v1",server.uri())}}})).unwrap();
+ let hits=invoke(&w,"memory_search",body.clone()).unwrap();let hits=hits.as_array().unwrap();
+ { let seen=seen.lock().unwrap();assert_eq!(seen.len(),1);let docs=seen[0]["input"]["documents"].as_array().unwrap();
+   assert_eq!(docs.len(),MAX_RERANK_CANDIDATES,"rerank provider gets at most the cap, not every candidate");
+   assert_eq!((docs[0].as_str(),docs[MAX_RERANK_CANDIDATES-1].as_str()),(Some("doc-0000"),Some(format!("doc-{:04}",MAX_RERANK_CANDIDATES-1).as_str())),"cosine top-K in cosine order");
+   assert!(docs.iter().all(|d|d.as_str().unwrap().starts_with("doc-")));assert_eq!(seen[0]["parameters"]["top_n"],2);}
+ assert_eq!(hits.len(),2);assert_eq!(hits[0]["sourceId"],format!("s{:04}",MAX_RERANK_CANDIDATES-1));assert_eq!(hits[1]["sourceId"],"s0000");
+ // Rerank disabled: cosine order, and the provider is not called.
+ invoke(&w,"integrations_update_patch",json!({"patch":{"rerank":{"provider":"disabled"}}})).unwrap();
+ let hits=invoke(&w,"memory_search",body.clone()).unwrap();assert_eq!((hits[0]["sourceId"].as_str(),hits[1]["sourceId"].as_str()),(Some("s0000"),Some("s0001")));assert_eq!(seen.lock().unwrap().len(),1);
+ // Exactly the scan ceiling is searchable (foreign rows are not counted); one more row is an explicit error before any provider call.
+ let c=database::db::get_connection().unwrap();insert(&c,owner,MAX_RERANK_CANDIDATES+20..MAX_CANDIDATES);drop(c);
+ assert_eq!(invoke(&w,"memory_search",body.clone()).unwrap().as_array().unwrap().len(),2);
+ let c=database::db::get_connection().unwrap();insert(&c,owner,MAX_CANDIDATES..MAX_CANDIDATES+1);drop(c);
+ let err=invoke(&w,"memory_search",body.clone()).unwrap_err();assert!(err.to_string().contains("memory_search_candidate_limit"),"{err}");
+ invoke(&w,"integrations_update_patch",json!({"patch":{"rerank":{"provider":"zenmux_api","model":"qwen/qwen3-vl-rerank","baseUrl":format!("{}/api/v1",server.uri())}}})).unwrap();
+ assert!(invoke(&w,"memory_search",body).unwrap_err().to_string().contains("memory_search_candidate_limit"));assert_eq!(seen.lock().unwrap().len(),1,"the cap fails before the rerank provider is contacted");
+ });
+}
+
+#[test]
+fn memory_index_status_registered_retry_exhaustion_is_visible_and_owner_scoped(){
+ // Real production worker functions: a job that cannot be embedded is retried, then ends terminal with its reason visible through the registered status command.
+ let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+ let _sandbox=test_helpers::test_env::sandbox();
+ agent_core::foundation::db_bridge::register(database::db::get_connection);
+ tauri::async_runtime::block_on(async {
+ use agent_core::core::session::journey_embedding as emb;
+ let state=agent_core::state::AgentAppState::new();let (owner,other)=("status-owner","status-other");
+ for o in [owner,other]{state.register_session(agent_core::state::AgentSession::new(o.into(),agent_core::definitions::sde_agent())).await;}
+ let app=mock_builder().manage(state.clone()).invoke_handler(tauri::generate_handler![crate::memory_search_commands::memory_index_status,agent_core::definitions::commands::integrations_update_patch]).build(mock_context(noop_assets())).unwrap();
+ let w=tauri::WebviewWindowBuilder::new(&app,"main",Default::default()).build().unwrap();
+ // A config that does not match the pinned space fails the job explicitly (no fallback provider), independent of any credential.
+ invoke(&w,"integrations_update_patch",json!({"patch":{"embedding":{"provider":"embedding_api","model":"qwen/qwen3-vl-embedding","dimensions":1536}}})).unwrap();
+ let config_state=state.clone();emb::register_pinned_embedding(emb::PinnedJourneyEmbedding{provider:std::sync::Arc::new(crate::journey_embedding_provider::test_provider(std::sync::Arc::new(move||config_state.integrations.snapshot().embedding))),model:crate::memory_search_commands::MODEL.into(),dimensions:1024,source:crate::memory_search_commands::SOURCE.into()}).unwrap();
+ let c=database::db::get_connection().unwrap();emb::enqueue(&c,"fact:never-embeds",emb::JourneyEmbeddingKind::ConfirmedFact,owner,"f","r","content that cannot be embedded").unwrap();drop(c);
+ let status=|o:&str|invoke(&w,"memory_index_status",json!({"ownerSessionId":o}));
+ for attempt in 1..=emb::MAX_EMBEDDING_ATTEMPTS{
+  if attempt>1{let c=database::db::get_connection().unwrap();assert_eq!(emb::requeue_retryable_failures(&c).unwrap(),1);}
+  assert!(emb::run_pinned_embedding_job().await);
+  let st=status(owner).unwrap();let last=attempt==emb::MAX_EMBEDDING_ATTEMPTS;
+  assert_eq!((st["failed"].as_i64(),st["terminalFailed"].as_i64(),st["indexed"].as_i64(),st["maxAttempts"].as_i64()),(Some(1),Some(last as i64),Some(0),Some(emb::MAX_EMBEDDING_ATTEMPTS)),"attempt {attempt}");
+  let f=&st["failures"][0];assert_eq!((f["sourceId"].as_str(),f["attempt"].as_i64(),f["terminal"].as_bool(),f["error"].as_str()),(Some("fact:never-embeds"),Some(attempt),Some(last),Some("memory_query_config_fingerprint_mismatch")));
+ }
+ // Exhausted: no further automatic retry, even once the configuration is corrected; the failure stays visible.
+ invoke(&w,"integrations_update_patch",json!({"patch":{"embedding":{"provider":"embedding_api","model":"qwen/qwen3-vl-embedding","dimensions":1024}}})).unwrap();
+ let c=database::db::get_connection().unwrap();assert_eq!(emb::requeue_retryable_failures(&c).unwrap(),0);drop(c);assert!(!emb::run_pinned_embedding_job().await);
+ let st=status(owner).unwrap();assert_eq!((st["terminalFailed"].as_i64(),st["failures"].as_array().unwrap().len()),(Some(1),1));
+ // Another registered owner sees none of it; unregistered and CLI owners are refused.
+ let st=status(other).unwrap();assert_eq!((st["failed"].as_i64(),st["queued"].as_i64(),st["failures"].as_array().unwrap().len()),(Some(0),Some(0),0));
+ assert!(status("not-registered").is_err());assert!(status("cli:old").is_err());
+ });
+}
+
+#[test]
+fn journey_owner_semantic_chain_producer_index_query_source_location(){
+ // Real chain: journey_confirm (registered IPC) -> durable outbox -> pinned producer job -> index -> memory_search -> same-owner source anchor -> exact prefix preview.
+ let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+ let _sandbox=test_helpers::test_env::sandbox();
+ agent_core::foundation::db_bridge::register(database::db::get_connection);
+ tauri::async_runtime::block_on(async {
+ use wiremock::{Mock,MockServer,ResponseTemplate};use wiremock::matchers::{method,path};
+ use agent_core::core::session::{journey_application_service as svc,journey_embedding as emb,journey_lifecycle as life};
+ let server=MockServer::start().await;let mut vector=vec![0.0f32;1024];vector[0]=1.;
+ Mock::given(method("POST")).and(path("/api/v1/embeddings")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"object":"list","data":[{"object":"embedding","index":0,"embedding":vector}],"model":"qwen/qwen3-vl-embedding","usage":{"prompt_tokens":30,"total_tokens":30,"cost":"0.000003","cost_details":{"prompt":"0.000003","completion":"0"}}}))).expect(7).mount(&server).await;
+ let mut key=key_vault::key_store::ModelKey::new(key_vault::key_store::ModelType::OpenaiApi);key.api_key=Some("synthetic-no-production-key".into());key.base_url=Some(format!("{}/api/v1",server.uri()));key.enabled_models=vec!["qwen/qwen3-vl-embedding".into()];key.health_status=key_vault::key_store::HealthStatus::Valid;key.last_validated_at=Some(chrono::Utc::now());key_vault::key_store::KEY_SERVICE.save_key(key).unwrap();
+ let state=agent_core::state::AgentAppState::new();let owner="semantic-chain-owner";
+ state.register_session(agent_core::state::AgentSession::new(owner.into(),agent_core::definitions::sde_agent())).await;
+ let c=database::db::get_connection().unwrap();agent_core::foundation::persistence::session_snapshots::ensure_tables_with(&c).unwrap();
+ c.execute("INSERT INTO agent_sessions(session_id,created_at,updated_at) VALUES(?1,'2026-10-12T00:00:00Z','2026-10-12T00:00:00Z')",[owner]).unwrap();
+ c.execute("INSERT INTO agent_messages(id,session_id,role,content,sequence,created_at) VALUES('sm-1',?1,'user','chain root',1,'2026-10-12T00:00:00Z')",[owner]).unwrap();drop(c);
+ let app=mock_builder().manage(state.clone()).invoke_handler(tauri::generate_handler![journey_snapshot,journey_boundary_preview,journey_task_start,journey_task_finish,journey_fork_start,journey_confirm,crate::memory_search_commands::memory_search,crate::memory_search_commands::memory_index_status,agent_core::definitions::commands::integrations_update_patch]).build(mock_context(noop_assets())).unwrap();
+ let w=tauri::WebviewWindowBuilder::new(&app,"main",Default::default()).build().unwrap();
+ invoke(&w,"integrations_update_patch",json!({"patch":{"embedding":{"provider":"embedding_api","model":"qwen/qwen3-vl-embedding","dimensions":1024},"rerank":{"provider":"disabled"}}})).unwrap();
+ assert_eq!(invoke(&w,"journey_task_start",json!({"ownerSessionId":owner,"request":{"sessionId":owner,"expectedRevision":0,"taskId":"chain-root-task","name":"root","position":"最近用户消息"}})).unwrap()["revision"],1);
+ let c=database::db::get_connection().unwrap();let tx=c.unchecked_transaction().unwrap();
+ agent_core::session::journey_runtime_persistence::assign_inserted_message(&tx,owner,"sm-1",1,"user").unwrap();
+ tx.execute("INSERT INTO agent_messages(id,session_id,role,content,sequence,created_at) VALUES('sm-2',?1,'user','chain endpoint',2,'2026-10-12T00:00:00Z')",[owner]).unwrap();
+ agent_core::session::journey_runtime_persistence::assign_inserted_message(&tx,owner,"sm-2",2,"user").unwrap();tx.commit().unwrap();drop(c);
+ let snapshot=invoke(&w,"journey_snapshot",json!({"ownerSessionId":owner})).unwrap();let anchor=snapshot["nodes"].as_array().unwrap().iter().find(|n|n["anchor"]["durableMessageId"]=="sm-2").unwrap()["anchor"].clone();
+ assert_eq!(invoke(&w,"journey_task_finish",json!({"ownerSessionId":owner,"request":{"sessionId":owner,"expectedRevision":1,"outcome":"completed","messageId":"sm-2"}})).unwrap()["revision"],2);
+ assert_eq!(invoke(&w,"journey_fork_start",json!({"ownerSessionId":owner,"request":{"sessionId":owner,"expectedRevision":2,"forkId":"chain-fork","taskId":"chain-fork-task","taskName":"fork","anchorMessageId":"sm-2"},"anchor":anchor})).unwrap()["revision"],3);
+ let c=database::db::get_connection().unwrap();let tx=c.unchecked_transaction().unwrap();
+ tx.execute("INSERT INTO agent_messages(id,session_id,role,content,sequence,created_at) VALUES('sm-child',?1,'assistant','chain child evidence',3,'2026-10-12T00:00:00Z')",[owner]).unwrap();
+ agent_core::session::journey_runtime_persistence::assign_inserted_message(&tx,owner,"sm-child",3,"assistant").unwrap();tx.commit().unwrap();
+ let mut c=c;
+ svc::SessionJourneyApplicationService::request_fork_close(&mut c,svc::RequestForkCloseRequest{session_id:owner.into(),expected_revision:3,fork_id:"chain-fork".into(),review_id:"chain-review".into(),outcome:life::TaskOutcome::Completed,message_id:"sm-child".into()}).unwrap();
+ svc::SessionJourneyApplicationService::mark_review_ready(&mut c,svc::MarkReviewReadyRequest{session_id:owner.into(),expected_revision:4,review_id:"chain-review".into(),provenance:life::RuntimeProvenance{model_id:"m".into(),account_id:"a".into(),protocol:"p".into()},annotation:"chain review annotation".into()}).unwrap();
+ drop(c);
+ assert_eq!(invoke(&w,"journey_confirm",json!({"ownerSessionId":owner,"request":{"sessionId":owner,"expectedRevision":5,"reviewId":"chain-review","factId":"chain-fact","text":"chain confirmed fact","evidenceStartMessageId":"sm-child","evidenceEndMessageId":"sm-child"}})).unwrap()["revision"],6);
+ // The review-annotation producer path is the review queue's own enqueue; same outbox, same pinned worker.
+ let c=database::db::get_connection().unwrap();emb::enqueue(&c,"review:chain-review",emb::JourneyEmbeddingKind::ReviewAnnotation,owner,"chain-fork","chain-review","chain review annotation").unwrap();
+ let queued=|c:&rusqlite::Connection,st:&str|c.query_row("SELECT COUNT(*) FROM session_journey_embedding_outbox WHERE session_id=?1 AND state=?2",rusqlite::params![owner,st],|r|r.get::<_,i64>(0)).unwrap();
+ assert_eq!(queued(&c,"queued"),2);drop(c);
+ // Without a pinned provider the worker claims nothing and rows remain queued (no silent fallback).
+ let config_state=state.clone();emb::register_pinned_embedding(emb::PinnedJourneyEmbedding{provider:std::sync::Arc::new(crate::journey_embedding_provider::test_provider(std::sync::Arc::new(move||config_state.integrations.snapshot().embedding))),model:crate::memory_search_commands::MODEL.into(),dimensions:1024,source:crate::memory_search_commands::SOURCE.into()}).unwrap();
+ let mut ran=0;while emb::run_pinned_embedding_job().await{ran+=1;assert!(ran<5);}assert_eq!(ran,2);
+ let c=database::db::get_connection().unwrap();assert_eq!(queued(&c,"completed"),2);
+ assert_eq!(c.query_row("SELECT COUNT(*) FROM session_journey_embedding_index WHERE session_id=?1 AND embedding_source=?2 AND embedding_dimensions=1024",rusqlite::params![owner,crate::memory_search_commands::SOURCE],|r|r.get::<_,i64>(0)).unwrap(),2);
+ // A foreign owner's identical vector must never surface for this owner.
+ let blob:Vec<u8>=vector.iter().flat_map(|v|v.to_le_bytes()).collect();
+ c.execute("INSERT INTO session_journey_embedding_index(source_id,source_kind,session_id,fork_id,review_id,content,embedding,embedding_model,embedding_source,embedding_dimensions) VALUES('fact:foreign','confirmed_fact','foreign-owner','f','r','foreign secret',?1,'qwen/qwen3-vl-embedding',?2,1024)",rusqlite::params![blob,crate::memory_search_commands::SOURCE]).unwrap();drop(c);
+ let hits=invoke(&w,"memory_search",json!({"ownerSessionId":owner,"query":"semantic chain query","topN":10})).unwrap();let hits=hits.as_array().unwrap();
+ assert_eq!(hits.len(),2);assert!(hits.iter().all(|h|h["sourceId"]!="fact:foreign"));
+ for h in hits{assert_eq!(h["sourceAnchor"]["durableMessageId"],"sm-child");assert!(h["sourceUnavailable"].is_null());assert_eq!(h["sourceAnchor"]["ownerSessionId"],owner);}
+ let fact=hits.iter().find(|h|h["sourceId"]=="fact:chain-fact").unwrap();assert_eq!(fact["sourceKind"],"confirmed_fact");assert_eq!(fact["content"],"chain confirmed fact");
+ assert!(hits.iter().any(|h|h["sourceId"]=="review:chain-review"&&h["sourceKind"]=="review_annotation"));
+ let preview=invoke(&w,"journey_boundary_preview",json!({"ownerSessionId":owner,"anchor":fact["sourceAnchor"]})).unwrap();let ids:Vec<_>=preview["records"].as_array().unwrap().iter().map(|r|r["durableMessageId"].as_str().unwrap().to_string()).collect();assert_eq!(ids.last().map(String::as_str),Some("sm-child"));
+ // Pipeline state is visible to the owner: both jobs completed and indexed, nothing failed.
+ let st=invoke(&w,"memory_index_status",json!({"ownerSessionId":owner})).unwrap();assert_eq!((st["completed"].as_i64(),st["indexed"].as_i64(),st["failed"].as_i64(),st["terminalFailed"].as_i64(),st["queued"].as_i64()),(Some(2),Some(2),Some(0),Some(0),Some(0)));assert!(st["failures"].as_array().unwrap().is_empty());
+ assert!(invoke(&w,"memory_index_status",json!({"ownerSessionId":"foreign-owner"})).is_err(),"unregistered owner has no status");
+ // Owner-internal rerank over the real index. The provider receives exactly this owner's candidates (the foreign row never leaves the owner), order and score come from the provider,
+ // and every reranked hit still carries its own re-verified source anchor and kind.
+ let mut rk=key_vault::key_store::ModelKey::new(key_vault::key_store::ModelType::ZenmuxApi);rk.api_key=Some("synthetic-zenmux-no-production-key".into());rk.base_url=Some(format!("{}/api/v1",server.uri()));rk.enabled=true;rk.enabled_models=vec!["qwen/qwen3-vl-rerank".into()];rk.health_status=key_vault::key_store::HealthStatus::Valid;rk.last_validated_at=Some(chrono::Utc::now());key_vault::key_store::KEY_SERVICE.save_key(rk).unwrap();
+ Mock::given(method("POST")).and(path("/api/v1/rerank")).and(wiremock::matchers::body_json(json!({"model":"qwen/qwen3-vl-rerank","input":{"query":"semantic chain query","documents":["chain confirmed fact","chain review annotation"]},"parameters":{"top_n":2,"return_documents":true}}))).respond_with(ResponseTemplate::new(200).set_body_json(json!({"results":[{"index":1,"relevance_score":0.9},{"index":0,"relevance_score":0.1}]}))).expect(1).mount(&server).await;
+ invoke(&w,"integrations_update_patch",json!({"patch":{"rerank":{"provider":"zenmux_api","model":"qwen/qwen3-vl-rerank","baseUrl":format!("{}/api/v1",server.uri())}}})).unwrap();
+ let hits=invoke(&w,"memory_search",json!({"ownerSessionId":owner,"query":"semantic chain query","topN":10})).unwrap();let hits=hits.as_array().unwrap();assert_eq!(hits.len(),2);
+ assert_eq!((hits[0]["sourceId"].as_str(),hits[0]["sourceKind"].as_str()),(Some("review:chain-review"),Some("review_annotation")));assert!((hits[0]["score"].as_f64().unwrap()-0.9).abs()<1e-6);
+ assert_eq!((hits[1]["sourceId"].as_str(),hits[1]["sourceKind"].as_str()),(Some("fact:chain-fact"),Some("confirmed_fact")));assert!((hits[1]["score"].as_f64().unwrap()-0.1).abs()<1e-6);
+ for h in hits{assert_eq!(h["sourceAnchor"]["durableMessageId"],"sm-child");assert_eq!(h["sourceAnchor"]["ownerSessionId"],owner);assert!(h["sourceUnavailable"].is_null());}
+ // A provider failure is an explicit error, never cosine-ordered hits and never another provider.
+ Mock::given(method("POST")).and(path("/api/v1/rerank")).respond_with(ResponseTemplate::new(503)).with_priority(1).expect(1).mount(&server).await;
+ assert!(invoke(&w,"memory_search",json!({"ownerSessionId":owner,"query":"semantic chain query","topN":10})).is_err());
+ invoke(&w,"integrations_update_patch",json!({"patch":{"rerank":{"provider":"disabled"}}})).unwrap();
+ // Index content that disagrees with the owner's Journey aggregate yields an explicit unavailable reason, never a guessed source.
+ let c=database::db::get_connection().unwrap();c.execute("UPDATE session_journey_embedding_index SET content='tampered' WHERE source_id='fact:chain-fact'",[]).unwrap();c.execute("DELETE FROM session_journey_embedding_index WHERE source_id='review:chain-review'",[]).unwrap();drop(c);
+ let hits=invoke(&w,"memory_search",json!({"ownerSessionId":owner,"query":"semantic chain query","topN":10})).unwrap();assert_eq!(hits.as_array().unwrap().len(),1);
+ assert!(hits[0]["sourceAnchor"].is_null());assert_eq!(hits[0]["sourceUnavailable"],"source_fact_mismatch");
+ // Deleting the evidence message makes the source unresolvable, again explicitly.
+ let c=database::db::get_connection().unwrap();c.execute("UPDATE session_journey_embedding_index SET content='chain confirmed fact' WHERE source_id='fact:chain-fact'",[]).unwrap();c.execute("DELETE FROM agent_messages WHERE id='sm-child'",[]).unwrap();drop(c);
+ let hits=invoke(&w,"memory_search",json!({"ownerSessionId":owner,"query":"semantic chain query","topN":10})).unwrap();assert_eq!(hits[0]["sourceUnavailable"],"source_anchor_unresolvable");
  server.verify().await;
  });
 }

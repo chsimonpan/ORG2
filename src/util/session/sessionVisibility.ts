@@ -4,6 +4,7 @@ interface SessionVisibilityInput {
   session_id: string;
   orgMemberId?: string;
   parentSessionId?: string;
+  historicalRuntimeForkOwnerId?: string;
   parent_session_id?: string | null;
   agentOrgId?: string;
   agentOrgMode?: "current" | "history_only";
@@ -35,7 +36,7 @@ export function isPrimarySessionListSession(
   const isChildSession =
     hasParentSessionId ||
     session.session_id.includes(SUBAGENT_SESSION_ID_SEGMENT);
-  if (isChildSession) return false;
+  if (isChildSession && !(hasParentSessionId && session.historicalRuntimeForkOwnerId === (session.parentSessionId ?? session.parent_session_id))) return false;
   return (
     !session.orgMemberId ||
     Boolean(session.agentOrgId) ||

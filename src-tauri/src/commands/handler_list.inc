@@ -1193,3 +1193,4 @@ crate::market_connection::market_connection_configure_profile,
 crate::market_connection::market_connection_configure_catalog,
 
 crate::memory_search_commands::memory_search,
+crate::memory_search_commands::memory_index_status,

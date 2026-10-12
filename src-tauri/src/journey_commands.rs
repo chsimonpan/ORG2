@@ -237,7 +237,7 @@ fn historical_fork_commit(owner:&str,request:&HistoricalRuntimeForkRequest)->Res
  }} }
  if !pending.is_empty(){return Err("historical_fork_unpaired_tool_prefix".into());}
  let child=format!("{}-history-{}",owner,uuid::Uuid::new_v4());
- tx.execute("INSERT INTO agent_sessions(session_id,name,status,model,account_id,workspace_path,created_at,updated_at,parent_session_id) SELECT ?1,name,'idle',model,account_id,workspace_path,?3,?3,session_id FROM agent_sessions WHERE session_id=?2",params![child,owner,chrono::Utc::now().to_rfc3339()]).map_err(|e|e.to_string())?;
+ tx.execute("INSERT INTO agent_sessions(session_id,name,status,model,account_id,workspace_path,created_at,updated_at,parent_session_id,session_type) SELECT ?1,name,'idle',model,account_id,workspace_path,?3,?3,session_id,session_type FROM agent_sessions WHERE session_id=?2",params![child,owner,chrono::Utc::now().to_rfc3339()]).map_err(|e|e.to_string())?;
  // Copy every physical transcript column, including tool and compact metadata,
  // but mint child-local message identity. Usage/snapshots/gateway bindings stay parent-owned.
  let columns={let mut s=tx.prepare("PRAGMA table_info(agent_messages)").map_err(|e|e.to_string())?;let v=s.query_map([],|r|r.get::<_,String>(1)).map_err(|e|e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e|e.to_string())?;v};

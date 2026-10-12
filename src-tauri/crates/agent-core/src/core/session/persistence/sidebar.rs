@@ -54,6 +54,8 @@ fn list_agent_sessions_page(
     agent_org_root: Option<bool>,
 ) -> Result<Vec<UnifiedSessionRecord>, String> {
     let conn = get_connection().map_err(|err| err.to_string())?;
+    crate::foundation::persistence::session_snapshots::ensure_tables_with(&conn)
+        .map_err(|err| err.to_string())?;
     let root_predicate = match agent_org_root {
         Some(true) => "AND (EXISTS (SELECT 1 FROM agent_org_execution_runs r
             WHERE r.root_session_id=s.session_id) OR EXISTS (SELECT 1 FROM org_history_sessions h
@@ -72,7 +74,7 @@ fn list_agent_sessions_page(
                AND (s.status != ?2 OR EXISTS (SELECT 1 FROM org_history_sessions h WHERE h.session_id=s.session_id))
                AND NOT EXISTS (SELECT 1 FROM org_history_copies c WHERE c.copy_session_id=s.session_id)
                AND s.pinned = 0
-               AND s.parent_session_id IS NULL
+               AND (s.parent_session_id IS NULL OR EXISTS (SELECT 1 FROM historical_runtime_fork_intents f WHERE f.child_session_id=s.session_id AND f.parent_session_id=s.parent_session_id AND f.owner_session_id=s.parent_session_id))
                {root_predicate}
                AND (
                  s.updated_at < ?3
@@ -105,7 +107,7 @@ fn list_agent_sessions_page(
            AND (s.status != ?2 OR EXISTS (SELECT 1 FROM org_history_sessions h WHERE h.session_id=s.session_id))
                AND NOT EXISTS (SELECT 1 FROM org_history_copies c WHERE c.copy_session_id=s.session_id)
            AND s.pinned = 0
-           AND s.parent_session_id IS NULL
+           AND (s.parent_session_id IS NULL OR EXISTS (SELECT 1 FROM historical_runtime_fork_intents f WHERE f.child_session_id=s.session_id AND f.parent_session_id=s.parent_session_id AND f.owner_session_id=s.parent_session_id))
            {root_predicate}
          ORDER BY s.updated_at DESC, s.session_id DESC
          LIMIT ?3"
@@ -220,6 +222,39 @@ mod tests {
             ],
         )
         .expect("insert Agent Org run");
+    }
+
+    #[test]
+    fn durable_historical_children_keep_parent_and_paginate_without_delegates() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        ensure_runtime_schemas();
+        for (id, stamp, parent) in [
+            ("owner", "2026-10-11T01:00:00Z", None),
+            ("historical", "2026-10-11T03:00:00Z", Some("owner")),
+            ("delegate", "2026-10-11T05:00:00Z", Some("owner")),
+            ("wrong-owner", "2026-10-11T04:00:00Z", Some("owner")),
+        ] {
+            upsert_sidebar_session(id, stamp, "idle", session_type::CODING, parent);
+        }
+        let conn = get_connection().unwrap();
+        conn.execute_batch("INSERT INTO historical_runtime_fork_intents VALUES
+            ('owner','good','{}','historical','owner'),
+            ('other-owner','bad','{}','wrong-owner','owner');").unwrap();
+        drop(conn);
+        let first = list_standalone_coding_sessions_page(1, None).unwrap();
+        assert_eq!(first[0].session_id, "historical");
+        assert_eq!(first[0].parent_session_id.as_deref(), Some("owner"));
+        let second = list_standalone_coding_sessions_page(1,
+            Some((&first[0].updated_at, &first[0].session_id))).unwrap();
+        assert_eq!(second[0].session_id, "owner");
+        // A fresh query after dropping every local connection rediscovers the durable child.
+        let reopened = list_standalone_coding_sessions_page(10, None).unwrap();
+        assert_eq!(reopened.len(), 2);
+        let conn = get_connection().unwrap();
+        conn.execute("UPDATE agent_sessions SET pinned=1 WHERE session_id='historical'", []).unwrap();
+        drop(conn);
+        let unpinned = list_standalone_coding_sessions_page(1, None).unwrap();
+        assert_eq!(unpinned[0].session_id, "owner");
     }
 
     #[test]

@@ -121,6 +121,8 @@ pub struct SessionAggregateRecord {
     /// Parent/root session id for child sessions such as Agent Org member sessions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub historical_runtime_fork_owner_id: Option<String>,
     /// Agent Org roster member id for org member session rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub org_member_id: Option<String>,

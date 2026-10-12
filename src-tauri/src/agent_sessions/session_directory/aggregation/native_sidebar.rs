@@ -139,7 +139,7 @@ fn list_pinned_native_sidebar_sessions(
         WHERE s.pinned = 1
           AND (s.status != ?1 OR EXISTS (SELECT 1 FROM org_history_sessions h WHERE h.session_id=s.session_id))
           AND NOT EXISTS (SELECT 1 FROM org_history_copies c WHERE c.copy_session_id=s.session_id)
-          AND s.parent_session_id IS NULL
+          AND (s.parent_session_id IS NULL OR EXISTS (SELECT 1 FROM historical_runtime_fork_intents f WHERE f.child_session_id=s.session_id AND f.parent_session_id=s.parent_session_id AND f.owner_session_id=s.parent_session_id))
           AND s.session_type IN (?2, ?3, ?4)
           AND (
               s.org_member_id IS NULL

@@ -82,3 +82,9 @@ describe("isPrimarySessionListSession", () => {
     ).toBe(false);
   });
 });
+
+it("admits backend-verified durable runtime child without clearing parent", () => {
+  expect(isPrimarySessionListSession({session_id: "sdeagent-history", parentSessionId: "owner", historicalRuntimeForkOwnerId: "owner"})).toBe(true);
+  expect(isPrimarySessionListSession({session_id: "sdeagent-history", parentSessionId: "owner", historicalRuntimeForkOwnerId: "foreign"})).toBe(false);
+  expect(isPrimarySessionListSession({session_id: "sdeagent-delegate", parentSessionId: "owner"})).toBe(false);
+});

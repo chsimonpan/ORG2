@@ -376,4 +376,30 @@ pub(crate) fn spawn_background_workers(app: &tauri::App) {
             }
         }
     });
+
+    // Durable Journey embedding producer: pinned explicit provider (same space as
+    // `memory_search`) plus an embedding-only worker. Deliberately does not start the
+    // LLM review executor.
+    {
+        let config_handle = app.handle().clone();
+        match crate::journey_embedding_provider::register(std::sync::Arc::new(move || {
+            config_handle
+                .state::<agent_core::state::AgentAppState>()
+                .integrations
+                .snapshot()
+                .embedding
+        })) {
+            Ok(()) => {
+                tauri::async_runtime::spawn(
+                    agent_core::core::session::journey_embedding::run_embedding_worker(
+                        tokio_util::sync::CancellationToken::new(),
+                    ),
+                );
+                tracing::info!("[journey-embedding] pinned producer worker started");
+            }
+            Err(error) => {
+                tracing::error!(error = %error, "[journey-embedding] pinned producer not started")
+            }
+        }
+    }
 }

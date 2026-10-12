@@ -161,6 +161,7 @@ export function toFrontendSession(record: SessionAggregateRecord): Session {
     workItemId: record.workItemId,
     agentRole: record.agentRole,
     parentSessionId: record.parentSessionId,
+    historicalRuntimeForkOwnerId: record.historicalRuntimeForkOwnerId,
     orgMemberId: record.orgMemberId,
     agentOrgId: record.agentOrgId,
     agentOrgMode: record.agentOrgMode,

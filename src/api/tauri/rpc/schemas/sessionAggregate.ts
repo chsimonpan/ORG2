@@ -232,6 +232,7 @@ export const SessionAggregateRecordSchema = z.object({
   isActive: z.boolean(),
   displayLabel: z.string().optional(),
   parentSessionId: z.string().optional(),
+  historicalRuntimeForkOwnerId: z.string().optional(),
   orgMemberId: z.string().optional(),
   agentOrgId: z.string().optional(),
   agentOrgMode: z.enum(["current", "history_only"]).optional(),

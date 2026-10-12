@@ -350,6 +350,48 @@ mod tests {
         server.verify().await;
     }
 
+    /// Response shape captured from the real ZenMux `qwen/qwen3-vl-rerank` endpoint (synthetic Chinese corpus, 2026-10-12):
+    /// `document` is an object `{"text":..}` (not a string) and `object`/`model`/`usage` envelope fields are present.
+    #[tokio::test]
+    async fn zenmux_real_response_schema_is_accepted() {
+        install_crypto_provider_for_tests();
+        let server = MockServer::start().await;
+        let documents = vec![
+            "行车记录仪拍到前方车辆突然变道".to_string(),
+            "今天食堂的红烧肉很好吃".to_string(),
+            "雨天高速路面湿滑需减速".to_string(),
+        ];
+        Mock::given(method("POST"))
+            .and(path("/api/v1/rerank"))
+            .and(body_json(json!({
+                "model": "qwen/qwen3-vl-rerank",
+                "input": {"query": "前方车辆突然变道", "documents": documents},
+                "parameters": {"top_n": 3, "return_documents": true}
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "object": "list",
+                "model": "qwen/qwen3-vl-rerank",
+                "results": [
+                    {"index": 0, "relevance_score": 0.8830227890431575, "document": {"text": "行车记录仪拍到前方车辆突然变道"}},
+                    {"index": 2, "relevance_score": 0.643440497591373, "document": {"text": "雨天高速路面湿滑需减速"}},
+                    {"index": 1, "relevance_score": 0.4204557519856007, "document": {"text": "今天食堂的红烧肉很好吃"}}
+                ],
+                "usage": {"prompt_tokens": 242, "total_tokens": 242, "image_tokens": 0, "cost": "0.0000242",
+                          "cost_details": {"prompt": "0.0000242", "completion": "0", "image_input": "0"}}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let reranker = ConfiguredReranker::for_test(RerankTransport::Zenmux {
+            endpoint: format!("{}/api/v1/rerank", server.uri()),
+            model: "qwen/qwen3-vl-rerank".to_string(),
+            api_key: "test-secret".to_string(),
+        });
+        let ranked = reranker.rerank("前方车辆突然变道", &documents, 3).await.expect("real schema must parse");
+        assert_eq!(ranked.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![0, 2, 1]);
+        server.verify().await;
+    }
+
     #[tokio::test]
     async fn local_uses_explicit_v1_shape_without_auth_or_model() {
         install_crypto_provider_for_tests();

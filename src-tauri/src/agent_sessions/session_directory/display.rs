@@ -160,6 +160,7 @@ mod tests {
             is_active: is_active_status(status),
             display_label: generate_display_label(&name, None),
             parent_session_id: None,
+            historical_runtime_fork_owner_id: None,
             org_member_id: None,
             agent_org_id: None,
             agent_org_mode: None,

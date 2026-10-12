@@ -186,6 +186,7 @@ pub fn cli_session_to_aggregate_record(
         is_active,
         display_label,
         parent_session_id: session.parent_session_id,
+        historical_runtime_fork_owner_id: None,
         org_member_id: session.org_member_id,
         agent_org_id: None,
         agent_org_mode: None,
@@ -267,6 +268,7 @@ pub fn imported_history_to_aggregate_record(
         is_active: row.is_active,
         display_label,
         parent_session_id: row.parent_session_id,
+        historical_runtime_fork_owner_id: None,
         org_member_id: None,
         agent_org_id: None,
         agent_org_mode: None,
@@ -332,6 +334,7 @@ pub fn cursor_ide_history_to_aggregate_record(
         is_active: row.is_active,
         display_label,
         parent_session_id: None,
+        historical_runtime_fork_owner_id: None,
         org_member_id: None,
         agent_org_id: None,
         agent_org_mode: None,
@@ -375,6 +378,13 @@ pub fn sde_session_to_aggregate_record(
         metadata_resolver.resolve(&session.session_id, session.agent_definition_id.as_deref());
     let (files_changed, lines_added, lines_removed, touched_files) =
         native_impact_fields(metadata_resolver.impact_connection(), &session.session_id);
+    let historical_runtime_fork_owner_id = session.parent_session_id.as_ref().and_then(|parent| {
+        let connection = database::db::get_connection().ok()?;
+        connection.query_row(
+            "SELECT owner_session_id FROM historical_runtime_fork_intents WHERE child_session_id=?1 AND parent_session_id=?2 AND owner_session_id=?2",
+            rusqlite::params![session.session_id, parent], |row| row.get::<_, String>(0)
+        ).ok()
+    });
     SessionAggregateRecord {
         session_id: session.session_id,
         name: session.name,
@@ -412,6 +422,7 @@ pub fn sde_session_to_aggregate_record(
         is_active,
         display_label,
         parent_session_id: session.parent_session_id,
+        historical_runtime_fork_owner_id,
         org_member_id: session.org_member_id,
         agent_org_id: None,
         agent_org_mode: None,
@@ -485,6 +496,7 @@ pub fn os_session_to_aggregate_record(
         is_active,
         display_label,
         parent_session_id: session.parent_session_id,
+        historical_runtime_fork_owner_id: None,
         org_member_id: session.org_member_id,
         agent_org_id: None,
         agent_org_mode: None,
@@ -558,6 +570,7 @@ pub fn human_session_to_aggregate_record(
         is_active: false,
         display_label,
         parent_session_id: None,
+        historical_runtime_fork_owner_id: None,
         org_member_id: None,
         agent_org_id: None,
         agent_org_mode: None,

@@ -50,6 +50,7 @@
 pub mod editor_file_io;
 pub mod journey_commands;
 pub mod memory_search_commands;
+pub(crate) mod journey_embedding_provider;
 pub mod context_import_commands;
 pub mod agent_sessions; // Agent session management (CLI, event pipeline, persistence, aggregation)
 pub mod api;
