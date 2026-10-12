@@ -402,4 +402,8 @@ pub(crate) fn spawn_background_workers(app: &tauri::App) {
             }
         }
     }
+
+    // Durable Task-fork summary jobs: resume after restart; never starts a model run by itself
+    // beyond the session's own resolved runtime.
+    crate::task_fork_commands::spawn_recovery_worker(app.handle().clone());
 }

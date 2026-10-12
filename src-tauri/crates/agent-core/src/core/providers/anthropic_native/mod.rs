@@ -16,6 +16,9 @@ mod stream_parser_tests;
 pub mod streaming;
 mod thinking;
 mod tools;
+#[cfg(test)]
+#[path = "tests/task_fork_prefix_tests.rs"]
+mod task_fork_prefix_tests;
 pub mod types;
 mod usage;
 

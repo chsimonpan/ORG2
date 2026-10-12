@@ -332,6 +332,26 @@ mod tests {
     }
 
     #[test]
+    fn gateway_slug_sonnet_5_5_is_adaptive_so_plain_text_omits_thinking_and_sampling() {
+        // ZenMux wire id. Before the slug-aware classification this fell into the legacy budget
+        // family: every side query sent `{type:disabled}` (HTTP 400 on this model) plus a
+        // `temperature` the model rejects.
+        let o = build_thinking_params(
+            "anthropic/claude-sonnet-5.5",
+            None,
+            false,
+            ThinkingDirective::PlainText,
+            &caps(ThinkingSupport::Optional),
+            1024,
+            0.0,
+        );
+        assert!(o.thinking.is_none(), "{:?}", o.thinking);
+        assert!(o.temperature.is_none());
+        assert!(crate::providers::thinking_mode::is_claude_opus_47_or_newer("anthropic/claude-opus-4.8"));
+        assert!(!crate::providers::thinking_mode::is_claude_opus_47_or_newer("anthropic/claude-sonnet-4.5"));
+    }
+
+    #[test]
     fn plain_text_on_alwayson_pads_and_omits_temperature_for_mythos() {
         let o = build_thinking_params(
             "claude-mythos",

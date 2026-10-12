@@ -346,8 +346,10 @@ fn opus47_or_newer_regex() -> &'static Regex {
     RE.get_or_init(|| {
         // minor capped at two digits so date suffixes (e.g. -20250514) fall
         // into the trailing-suffix group rather than being read as the minor.
+        // `anthropic/` is accepted next to Bedrock's `anthropic.` prefix: gateway slugs such as
+        // ZenMux's `anthropic/claude-sonnet-5.5` are the same models and must classify the same.
         Regex::new(
-            r"^(?:anthropic\.)?claude-(opus|fable|sonnet)-(\d+)(?:[.-](\d{1,2}))?(?:[@\-:][\w\-:]+)?$",
+            r"^(?:anthropic[./])?claude-(opus|fable|sonnet)-(\d+)(?:[.-](\d{1,2}))?(?:[@\-:][\w\-:]+)?$",
         )
         .expect("opus47 regex")
     })

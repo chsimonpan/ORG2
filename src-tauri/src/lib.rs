@@ -49,6 +49,7 @@
 // Workstation (IDE functionality and development tools)
 pub mod editor_file_io;
 pub mod journey_commands;
+pub mod task_fork_commands;
 pub mod memory_search_commands;
 pub(crate) mod journey_embedding_provider;
 pub mod context_import_commands;

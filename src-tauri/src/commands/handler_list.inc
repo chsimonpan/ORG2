@@ -1194,3 +1194,7 @@ crate::market_connection::market_connection_configure_catalog,
 
 crate::memory_search_commands::memory_search,
 crate::memory_search_commands::memory_index_status,
+crate::task_fork_commands::task_fork_create,
+crate::task_fork_commands::task_fork_finish,
+crate::task_fork_commands::task_fork_cancel_finish,
+crate::task_fork_commands::task_fork_list,
