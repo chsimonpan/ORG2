@@ -91,7 +91,9 @@ CREATE TABLE IF NOT EXISTS task_fork_summary_jobs(
  appended_at TEXT,
  event_published_at TEXT,
  created_at TEXT NOT NULL,
- updated_at TEXT NOT NULL
+ updated_at TEXT NOT NULL,
+ finish_seq INTEGER,
+ merge_index INTEGER
 );";
 
 // ───────────────────────── model & wire types ─────────────────────────
@@ -213,6 +215,10 @@ pub struct TaskForkJob {
     pub parent_prefix_hash_before: Option<String>,
     pub parent_prefix_hash_after: Option<String>,
     pub event_published_at: Option<String>,
+    /// Per-parent order in which the user finished Tasks; summaries merge in this order.
+    pub finish_seq: Option<i64>,
+    /// 1-based position at which this summary was merged into the parent (set on append).
+    pub merge_index: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -221,6 +227,8 @@ pub struct TaskForkView {
     #[serde(flatten)]
     pub link: TaskForkLink,
     pub job: Option<TaskForkJob>,
+    /// The Task child accepts no new turns (finishing/finished); `cancel_finish` reopens a finishing one.
+    pub read_only: bool,
     /// True only when this call published the child (not an idempotent replay).
     pub newly_published: bool,
 }
@@ -309,7 +317,25 @@ fn deterministic_ids(owner: &str, intent: &str) -> (String, String) {
 }
 
 pub fn ensure_schema(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch(SCHEMA).map_err(err)
+    conn.execute_batch(SCHEMA).map_err(err)?;
+    // Databases created before merge ordering existed lack these columns.
+    for column in ["finish_seq", "merge_index"] {
+        let present: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('task_fork_summary_jobs') WHERE name=?1)",
+                [column],
+                |r| r.get(0),
+            )
+            .map_err(err)?;
+        if !present {
+            conn.execute(
+                &format!("ALTER TABLE task_fork_summary_jobs ADD COLUMN {column} INTEGER"),
+                [],
+            )
+            .map_err(err)?;
+        }
+    }
+    Ok(())
 }
 
 // ───────────────────────── transcript view ─────────────────────────
@@ -696,7 +722,8 @@ fn load_job(conn: &Connection, id: &str) -> Result<Option<TaskForkJob>, String> 
                 CASE WHEN summary_text IS NULL THEN NULL ELSE length(summary_text) END,
                 summary_hash,summary_model_id,parent_message_id,parent_sequence,
                 appended_after_message_id,appended_after_sequence,
-                parent_prefix_hash_before,parent_prefix_hash_after,event_published_at
+                parent_prefix_hash_before,parent_prefix_hash_after,event_published_at,
+                finish_seq,merge_index
          FROM task_fork_summary_jobs WHERE task_fork_id=?1",
         [id],
         |r| {
@@ -717,6 +744,8 @@ fn load_job(conn: &Connection, id: &str) -> Result<Option<TaskForkJob>, String> 
                 parent_prefix_hash_before: r.get(13)?,
                 parent_prefix_hash_after: r.get(14)?,
                 event_published_at: r.get(15)?,
+                finish_seq: r.get(16)?,
+                merge_index: r.get(17)?,
             })
         },
     )
@@ -728,6 +757,7 @@ fn view(conn: &Connection, id: &str, newly_published: bool) -> Result<TaskForkVi
     let link = load_link(conn, id)?.ok_or("task_fork_not_found")?;
     let job = load_job(conn, id)?;
     Ok(TaskForkView {
+        read_only: is_read_only_state(&link.state),
         link,
         job,
         newly_published,
@@ -769,6 +799,97 @@ pub fn authorize(
         return Err("task_fork_owner_mismatch".into());
     }
     Ok(link)
+}
+
+// ───────────────────────── read-only lock ─────────────────────────
+
+fn is_read_only_state(state: &str) -> bool {
+    matches!(state, "finishing" | "finished")
+}
+
+/// Why `session_id` may not start new turns, when it is a Task child that is being (or has been)
+/// finished. `None` for every other session. The error text is user-facing and stable-prefixed.
+pub fn child_write_block(conn: &Connection, session_id: &str) -> Result<Option<String>, String> {
+    if !crate::coordination::agent_org_history_store::table_exists(conn, "task_forks")
+        .map_err(err)?
+    {
+        return Ok(None);
+    }
+    let row: Option<(String, String)> = conn
+        .query_row(
+            "SELECT name,state FROM task_forks WHERE child_session_id=?1",
+            [session_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(err)?;
+    Ok(row.filter(|(_, state)| is_read_only_state(state)).map(|(name, state)| {
+        if state == "finished" {
+            format!("task_fork_child_read_only: Task「{name}」已结束并把摘要归并到主线，该会话只读；如需继续请回主线新建 Task")
+        } else {
+            format!("task_fork_child_read_only: Task「{name}」正在结束并总结，该会话暂时只读；取消结束后可继续")
+        }
+    }))
+}
+
+// ───────────────────────── restore from persisted config ─────────────────────────
+
+/// Summarizer built from the session's *persisted, legal* configuration (model + exactly one of
+/// account / credential source + harness), for use when the session has no live runtime
+/// (typically right after an app restart). It never picks a default model, never applies fallback
+/// models, and fails closed with an explicit reason when the persisted configuration is absent,
+/// ambiguous or no longer valid.
+pub async fn summarizer_from_persisted_config(
+    session_id: &str,
+) -> Result<SideQuerySummarizer, String> {
+    let sid = session_id.to_string();
+    let (record, workspace) = tokio::task::spawn_blocking(move || {
+        let record = crate::session::persistence::get_session(&sid).map_err(err)?;
+        let workspace = crate::session::persistence::load_workspace(&sid).map_err(err)?;
+        Ok::<_, String>((record, workspace))
+    })
+    .await
+    .map_err(err)??;
+    let record = record.ok_or_else(|| {
+        format!("task_fork_runtime_unavailable: 会话 {session_id} 没有持久记录，无法恢复模型配置")
+    })?;
+    let model = record
+        .model
+        .filter(|m| !m.trim().is_empty())
+        .ok_or_else(|| {
+            "task_fork_session_config_invalid: 会话没有持久化的模型，拒绝选择默认模型".to_string()
+        })?;
+    let account = record.account_id.filter(|a| !a.trim().is_empty());
+    let source = record.credential_source.filter(|c| !c.trim().is_empty());
+    if account.is_some() == source.is_some() {
+        return Err(
+            "task_fork_session_config_invalid: 会话必须恰好有一个凭据归属（账号或凭据源），当前为缺失或冲突"
+                .into(),
+        );
+    }
+    let native = record
+        .native_harness_type
+        .as_deref()
+        .filter(|v| !v.is_empty())
+        .map(|v| {
+            core_types::providers::NativeHarnessType::parse(v).ok_or_else(|| {
+                format!("task_fork_session_config_invalid: 未知的 native harness {v:?}")
+            })
+        })
+        .transpose()?;
+    let provider = crate::providers::factory::create_provider_with_selection_preflight(
+        &model,
+        account.as_deref(),
+        source.as_deref(),
+        &crate::config::ReliabilityConfig::default(),
+        native,
+        workspace,
+    )
+    .await
+    .map_err(|e| {
+        format!("task_fork_session_config_invalid: 无法用持久配置构建 provider（{model}）：{e}")
+    })?;
+    SideQuerySummarizer::new(Arc::from(provider), model, account)
 }
 
 // ───────────────────────── create ─────────────────────────
@@ -1091,6 +1212,18 @@ fn publish(
 
 // ───────────────────────── finish ─────────────────────────
 
+/// Next merge-order number for `parent`: strictly increasing in the order the user finished Tasks.
+/// Must be called inside the `BEGIN IMMEDIATE` transaction that writes the job.
+fn next_finish_seq(tx: &Transaction<'_>, parent: &str) -> Result<i64, String> {
+    tx.query_row(
+        "SELECT COALESCE(MAX(j.finish_seq),0)+1 FROM task_fork_summary_jobs j
+         JOIN task_forks f ON f.id=j.task_fork_id WHERE f.parent_session_id=?1",
+        [parent],
+        |r| r.get(0),
+    )
+    .map_err(err)
+}
+
 /// Freeze the child, create (or revive) the single summary job. Idempotent.
 /// Returns the view and whether a driver should be started.
 pub fn begin_finish(
@@ -1116,10 +1249,11 @@ pub fn begin_finish(
             ("active", None) | ("finishing", None) => {
                 let rows = load_rows(&tx, &child, None)?;
                 let end = rows.last().map(|r| r.sequence).unwrap_or(-1);
+                let seq = next_finish_seq(&tx, &link.parent_session_id)?;
                 tx.execute(
-                    "INSERT INTO task_fork_summary_jobs(task_fork_id,state,outcome,frozen_child_end_sequence,frozen_child_hash,created_at,updated_at)
-                     VALUES(?1,'queued',?2,?3,?4,?5,?5)",
-                    params![link.id, request.outcome, end, rows_hash(&rows), stamp],
+                    "INSERT INTO task_fork_summary_jobs(task_fork_id,state,outcome,frozen_child_end_sequence,frozen_child_hash,created_at,updated_at,finish_seq)
+                     VALUES(?1,'queued',?2,?3,?4,?5,?5,?6)",
+                    params![link.id, request.outcome, end, rows_hash(&rows), stamp, seq],
                 )
                 .map_err(err)?;
                 tx.execute(
@@ -1135,11 +1269,13 @@ pub fn begin_finish(
                 // Explicit retry/re-finish: re-freeze the child, discard any unappended summary.
                 let rows = load_rows(&tx, &child, None)?;
                 let end = rows.last().map(|r| r.sequence).unwrap_or(-1);
+                // A re-finish is a new explicit finish: it takes a fresh place in the merge order.
+                let seq = next_finish_seq(&tx, &link.parent_session_id)?;
                 tx.execute(
                     "UPDATE task_fork_summary_jobs SET state='queued',outcome=?2,frozen_child_end_sequence=?3,frozen_child_hash=?4,
-                       summary_text=NULL,summary_hash=NULL,error=NULL,deferred_reason=NULL,lease_token=NULL,updated_at=?5
+                       summary_text=NULL,summary_hash=NULL,error=NULL,deferred_reason=NULL,lease_token=NULL,updated_at=?5,finish_seq=?6
                      WHERE task_fork_id=?1 AND state<>'appended'",
-                    params![link.id, request.outcome, end, rows_hash(&rows), stamp],
+                    params![link.id, request.outcome, end, rows_hash(&rows), stamp, seq],
                 )
                 .map_err(err)?;
                 tx.execute(
@@ -1497,6 +1633,7 @@ pub enum AppendError {
 
 fn summary_message(
     link: &TaskForkLink,
+    merge_order: (i64, i64),
     job_outcome: &str,
     summary: &str,
     summary_model: &str,
@@ -1505,7 +1642,7 @@ fn summary_message(
 ) -> Result<String, String> {
     let label = outcome_label(job_outcome)?;
     Ok(format!(
-        "{SUMMARY_MESSAGE_PREFIX}来源：Task「{}」（{}）\n子会话：{}\n起点：主线消息 {}（序号 {}）\n结果：{}\n摘要模型：{}（{}）\n追加位置：主线消息 {}（序号 {}）之后\n—— 以下为 Task 结论摘要，不是 Task 的完整对话 ——\n{}",
+        "{SUMMARY_MESSAGE_PREFIX}来源：Task「{}」（{}）\n子会话：{}\n起点：主线消息 {}（序号 {}）\n结果：{}\n摘要模型：{}（{}）\n归并顺序：第 {} 个归并（按结束 Task 的先后，结束序 {}）\n追加位置：主线消息 {}（序号 {}）之后\n—— 以下为 Task 结论摘要，不是 Task 的完整对话 ——\n{}",
         link.name,
         link.id,
         link.child_session_id.clone().unwrap_or_default(),
@@ -1514,6 +1651,8 @@ fn summary_message(
         label,
         summary_model,
         summary_protocol,
+        merge_order.0,
+        merge_order.1,
         after.id,
         after.sequence,
         summary.trim()
@@ -1563,6 +1702,45 @@ pub fn append_summary_to_parent(task_fork_id: &str) -> Result<(), AppendError> {
         if tail_has_open_tool_call(&rows) {
             return Err(AppendError::Deferred("parent_tool_call_open".into()));
         }
+        // Merge order: summaries enter the parent in the order Tasks were finished. A Task whose
+        // earlier-finished sibling is still pending (queued/running/summarized) waits for it;
+        // failed/cancelled siblings need an explicit user action and never block.
+        let (finish_seq, own_name): (Option<i64>, String) = (
+            tx.query_row(
+                "SELECT finish_seq FROM task_fork_summary_jobs WHERE task_fork_id=?1",
+                [task_fork_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| AppendError::Fatal(err(e)))?,
+            link.name.clone(),
+        );
+        let finish_seq = finish_seq.unwrap_or(0);
+        let blocker: Option<(String, i64)> = tx
+            .query_row(
+                "SELECT f.name,COALESCE(j.finish_seq,0) FROM task_fork_summary_jobs j
+                 JOIN task_forks f ON f.id=j.task_fork_id
+                 WHERE f.parent_session_id=?1 AND j.task_fork_id<>?2
+                   AND j.state IN ('queued','running','summarized')
+                   AND (COALESCE(j.finish_seq,0)<?3 OR (COALESCE(j.finish_seq,0)=?3 AND j.task_fork_id<?2))
+                 ORDER BY COALESCE(j.finish_seq,0),j.task_fork_id LIMIT 1",
+                params![parent, task_fork_id, finish_seq],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(|e| AppendError::Fatal(err(e)))?;
+        if let Some((blocking_name, blocking_seq)) = blocker {
+            return Err(AppendError::Deferred(format!(
+                "merge_order_wait: 「{own_name}」（结束序 {finish_seq}）等待更早结束的 Task「{blocking_name}」（结束序 {blocking_seq}）先归并"
+            )));
+        }
+        let merge_index: i64 = tx
+            .query_row(
+                "SELECT COUNT(*)+1 FROM task_fork_summary_jobs j JOIN task_forks f ON f.id=j.task_fork_id
+                 WHERE f.parent_session_id=?1 AND j.state='appended'",
+                [&parent],
+                |r| r.get(0),
+            )
+            .map_err(|e| AppendError::Fatal(err(e)))?;
         let before = rows_hash(&rows);
         let message_id = format!("task-summary:{task_fork_id}");
         // Defensive receipt recovery: the id is a primary key, so a second insert cannot succeed.
@@ -1573,6 +1751,7 @@ pub fn append_summary_to_parent(task_fork_id: &str) -> Result<(), AppendError> {
         }
         let content = summary_message(
             &link,
+            (merge_index, finish_seq),
             &outcome,
             &summary,
             model.as_deref().unwrap_or(""),
@@ -1615,8 +1794,8 @@ pub fn append_summary_to_parent(task_fork_id: &str) -> Result<(), AppendError> {
         tx.execute(
             "UPDATE task_fork_summary_jobs SET state='appended',deferred_reason=NULL,parent_message_id=?2,parent_sequence=?3,
                appended_after_message_id=?4,appended_after_sequence=?5,parent_prefix_hash_before=?6,parent_prefix_hash_after=?7,
-               appended_at=?8,updated_at=?8 WHERE task_fork_id=?1 AND state='summarized'",
-            params![task_fork_id, message_id, sequence, tail.id, tail.sequence, before, after, stamp],
+               appended_at=?8,updated_at=?8,merge_index=?9 WHERE task_fork_id=?1 AND state='summarized'",
+            params![task_fork_id, message_id, sequence, tail.id, tail.sequence, before, after, stamp, merge_index],
         )
         .map_err(|e| AppendError::Fatal(err(e)))?;
         tx.execute(
@@ -1637,7 +1816,7 @@ pub async fn recover_pending(host: &dyn TaskForkHost, options: DriveOptions) -> 
         let conn = get_connection().map_err(err)?;
         ensure_schema(&conn)?;
         let mut stmt = conn
-            .prepare("SELECT task_fork_id FROM task_fork_summary_jobs WHERE state IN ('queued','running','summarized') OR (state='appended' AND event_published_at IS NULL) ORDER BY created_at")
+            .prepare("SELECT task_fork_id FROM task_fork_summary_jobs WHERE state IN ('queued','running','summarized') OR (state='appended' AND event_published_at IS NULL) ORDER BY COALESCE(finish_seq,0),created_at,task_fork_id")
             .map_err(err)?;
         let rows = stmt
             .query_map([], |r| r.get(0))

@@ -982,3 +982,268 @@ async fn summary_joins_the_journey_branch_membership_and_stays_provider_visible(
         .unwrap();
     assert_eq!(journey.tasks["jt"].state, TaskState::Active);
 }
+
+// ───────────────────────── closure: merge order, read-only, restore ─────────────────────────
+
+/// A further Task on the already-seeded parent (the anchor prefix is unchanged).
+async fn published_extra(intent: &str, fake: &Arc<Fake>, marker: &str) -> (TaskForkLink, String) {
+    let anchor = anchor_for(PARENT, "p-a2");
+    let v = create_task_fork(PARENT, req(intent, anchor), fake.as_ref())
+        .await
+        .unwrap();
+    let child = v.link.child_session_id.clone().unwrap();
+    put(&child, &format!("{marker}-u1"), "user", marker);
+    put(
+        &child,
+        &format!("{marker}-a1"),
+        "assistant",
+        &format!("{marker} 完成"),
+    );
+    (v.link, child)
+}
+
+fn summary_rows() -> Vec<(String, i64, String)> {
+    let conn = get_connection().unwrap();
+    load_rows(&conn, PARENT, None)
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.id.starts_with("task-summary:"))
+        .map(|r| (r.id, r.sequence, r.content))
+        .collect()
+}
+
+#[tokio::test]
+async fn merge_order_follows_finish_order_and_is_idempotent() {
+    let _s = setup();
+    let fake = Fake::new(Mode::Ok("c".into()));
+    let (a, _) = published("mo-a", &fake).await;
+    let (b, _) = published_extra("mo-b", &fake, "B 任务").await;
+    fake.set(Mode::Ok("结论".into()));
+    let h = host(&fake);
+
+    // The user finishes B first, then A: B must merge first even though A is driven first.
+    let vb = begin_finish(PARENT, &finish_req(&b.id)).unwrap().0;
+    let va = begin_finish(PARENT, &finish_req(&a.id)).unwrap().0;
+    assert_eq!(vb.job.unwrap().finish_seq, Some(1));
+    assert_eq!(va.job.unwrap().finish_seq, Some(2));
+
+    let waiting = drive_finish_job(&h, &a.id, NO_WAIT)
+        .await
+        .unwrap()
+        .job
+        .unwrap();
+    assert_eq!(waiting.state, "summarized", "A is summarized but must wait");
+    assert!(waiting
+        .deferred_reason
+        .as_deref()
+        .unwrap()
+        .starts_with("merge_order_wait"));
+    assert!(summary_rows().is_empty(), "nothing merged out of order");
+
+    let first = drive_finish_job(&h, &b.id, NO_WAIT)
+        .await
+        .unwrap()
+        .job
+        .unwrap();
+    assert_eq!(
+        (first.state.as_str(), first.merge_index),
+        ("appended", Some(1))
+    );
+    // Recovery (which is ordered by finish order) completes A; repeating it changes nothing.
+    assert_eq!(recover_pending(&h, NO_WAIT).await, 1);
+    let second = view_by_id(&a.id).unwrap().job.unwrap();
+    assert_eq!(
+        (second.state.as_str(), second.merge_index),
+        ("appended", Some(2))
+    );
+    assert_eq!(recover_pending(&h, NO_WAIT).await, 0);
+
+    let rows = summary_rows();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].0, format!("task-summary:{}", b.id));
+    assert_eq!(rows[1].0, format!("task-summary:{}", a.id));
+    assert!(rows[0].1 < rows[1].1);
+    assert!(rows[0].2.contains("第 1 个归并") && rows[0].2.contains("结束序 1"));
+    assert!(rows[1].2.contains("第 2 个归并") && rows[1].2.contains("结束序 2"));
+    // A's receipt records B's summary as its append anchor.
+    assert_eq!(
+        second.appended_after_message_id.as_deref(),
+        Some(rows[0].0.as_str())
+    );
+}
+
+#[tokio::test]
+async fn a_cancelled_or_failed_sibling_never_blocks_the_merge_queue() {
+    let _s = setup();
+    let fake = Fake::new(Mode::Ok("c".into()));
+    let (a, _) = published("mq-a", &fake).await;
+    let (b, _) = published_extra("mq-b", &fake, "B 任务").await;
+    fake.set(Mode::Ok("结论".into()));
+    let h = host(&fake);
+    begin_finish(PARENT, &finish_req(&b.id)).unwrap();
+    begin_finish(PARENT, &finish_req(&a.id)).unwrap();
+    let held = drive_finish_job(&h, &a.id, NO_WAIT)
+        .await
+        .unwrap()
+        .job
+        .unwrap();
+    assert_eq!(held.state, "summarized");
+    // B (earlier) is cancelled by the user: A proceeds as the first merge.
+    cancel_finish(PARENT, &b.id).unwrap();
+    assert_eq!(recover_pending(&h, NO_WAIT).await, 1);
+    let a_job = view_by_id(&a.id).unwrap().job.unwrap();
+    assert_eq!(
+        (a_job.state.as_str(), a_job.merge_index),
+        ("appended", Some(1))
+    );
+    // B re-finishes afterwards: fresh finish number, merges second, still exactly once each.
+    let rb = begin_finish(PARENT, &finish_req(&b.id)).unwrap().0;
+    assert_eq!(rb.job.unwrap().finish_seq, Some(3));
+    drive_finish_job(&h, &b.id, NO_WAIT).await.unwrap();
+    assert_eq!(view_by_id(&b.id).unwrap().job.unwrap().merge_index, Some(2));
+    assert_eq!(summary_rows().len(), 2);
+}
+
+#[tokio::test]
+async fn finishing_and_finished_children_are_read_only_until_cancelled() {
+    let _s = setup();
+    let fake = Fake::new(Mode::Ok("c".into()));
+    let (link, child) = published("ro-1", &fake).await;
+    let conn = get_connection().unwrap();
+    assert!(!view_by_id(&link.id).unwrap().read_only);
+    assert_eq!(child_write_block(&conn, &child).unwrap(), None);
+    crate::coordination::agent_org_history_store::require_writable(&conn, &child).unwrap();
+
+    begin_finish(PARENT, &finish_req(&link.id)).unwrap();
+    let blocked = child_write_block(&conn, &child).unwrap().unwrap();
+    assert!(blocked.starts_with("task_fork_child_read_only") && blocked.contains("暂时只读"));
+    assert!(view_by_id(&link.id).unwrap().read_only);
+    let denied =
+        crate::coordination::agent_org_history_store::require_writable(&conn, &child).unwrap_err();
+    assert!(denied.starts_with("task_fork_child_read_only"));
+    // The parent and unrelated sessions are never affected.
+    assert_eq!(child_write_block(&conn, PARENT).unwrap(), None);
+    assert_eq!(child_write_block(&conn, "sde-other").unwrap(), None);
+
+    // Cancelling the finish reopens the Task.
+    cancel_finish(PARENT, &link.id).unwrap();
+    assert_eq!(child_write_block(&conn, &child).unwrap(), None);
+
+    // Finishing for real keeps it read-only for good (and says why).
+    fake.set(Mode::Ok("结论".into()));
+    let h = host(&fake);
+    begin_finish(PARENT, &finish_req(&link.id)).unwrap();
+    drive_finish_job(&h, &link.id, NO_WAIT).await.unwrap();
+    let done = child_write_block(&conn, &child).unwrap().unwrap();
+    assert!(done.contains("已结束") && done.contains("只读"));
+    assert!(view_by_id(&link.id).unwrap().read_only);
+    // Repeating finish stays a read-only no-op.
+    let (_, start) = begin_finish(PARENT, &finish_req(&link.id)).unwrap();
+    assert!(!start);
+}
+
+#[test]
+fn schema_migration_adds_ordering_columns_to_a_pre_existing_jobs_table() {
+    let _s = setup();
+    let conn = get_connection().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE task_fork_summary_jobs(task_fork_id TEXT PRIMARY KEY,state TEXT NOT NULL,outcome TEXT NOT NULL,
+          frozen_child_end_sequence INTEGER NOT NULL,frozen_child_hash TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,
+          lease_token TEXT,summary_text TEXT,summary_hash TEXT,summary_model_id TEXT,summary_account_id TEXT,summary_protocol TEXT,
+          usage_json TEXT,error TEXT,deferred_reason TEXT,parent_message_id TEXT,parent_sequence INTEGER,
+          appended_after_message_id TEXT,appended_after_sequence INTEGER,parent_prefix_hash_before TEXT,parent_prefix_hash_after TEXT,
+          appended_at TEXT,event_published_at TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);",
+    )
+    .unwrap();
+    ensure_schema(&conn).unwrap();
+    ensure_schema(&conn).unwrap();
+    for column in ["finish_seq", "merge_index"] {
+        let present: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('task_fork_summary_jobs') WHERE name=?1)",
+                [column],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(present, "{column}");
+    }
+}
+
+fn set_session_config(
+    session: &str,
+    model: Option<&str>,
+    account: Option<&str>,
+    source: Option<&str>,
+) {
+    get_connection()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET model=?2,account_id=?3,credential_source=?4 WHERE session_id=?1",
+            params![session, model, account, source],
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn persisted_config_restores_the_summarizer_without_a_live_runtime() {
+    let _s = setup();
+    set_session_config(
+        PARENT,
+        Some("e2e-fake-provider-restore"),
+        Some("acct-restore"),
+        None,
+    );
+    let summarizer = summarizer_from_persisted_config(PARENT).await.unwrap();
+    let p = summarizer.provenance();
+    assert_eq!(
+        (p.model_id.as_str(), p.account_id.as_str()),
+        ("e2e-fake-provider-restore", "acct-restore")
+    );
+    // The restored summarizer really answers (debug-only e2e provider; no network).
+    let out = summarizer
+        .summarize(SummaryRequest {
+            kind: SummaryKind::Compress,
+            task_name: "t",
+            transcript: "恢复后的转写",
+            cancel: None,
+        })
+        .await
+        .unwrap();
+    assert!(out.text.contains("恢复后的转写"), "{}", out.text);
+}
+
+#[tokio::test]
+async fn persisted_config_failures_are_explicit_and_never_pick_a_default_model() {
+    let _s = setup();
+    for (model, account, source, needle) in [
+        (None, Some("acct-1"), None, "没有持久化的模型"),
+        (Some(""), Some("acct-1"), None, "没有持久化的模型"),
+        (Some("fake/model-1"), None, None, "凭据归属"),
+        (
+            Some("fake/model-1"),
+            Some("acct-1"),
+            Some("src-1"),
+            "凭据归属",
+        ),
+        // Present and unambiguous, but the account no longer resolves: provider build fails closed.
+        (
+            Some("fake/model-1"),
+            Some("acct-gone"),
+            None,
+            "无法用持久配置构建 provider",
+        ),
+    ] {
+        set_session_config(PARENT, model, account, source);
+        let e = match summarizer_from_persisted_config(PARENT).await {
+            Ok(_) => panic!("expected failure for {model:?}/{account:?}/{source:?}"),
+            Err(e) => e,
+        };
+        assert!(e.starts_with("task_fork_session_config_invalid"), "{e}");
+        assert!(e.contains(needle), "{e}");
+    }
+    let e = match summarizer_from_persisted_config("sde-no-such-session").await {
+        Ok(_) => panic!("unknown session must not restore"),
+        Err(e) => e,
+    };
+    assert!(e.starts_with("task_fork_runtime_unavailable"), "{e}");
+}

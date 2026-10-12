@@ -34,23 +34,26 @@ async fn idle_claim(
     }
 }
 
-/// Summarizer bound to `session_id`'s live runtime, if it has one.
-async fn runtime_summarizer(
+/// Summarizer for `session_id`: its live runtime when it has one, otherwise a provider rebuilt
+/// from the session's persisted, legal configuration (e.g. right after an app restart). Never
+/// substitutes another model/account; an absent or invalid configuration is an explicit error.
+async fn session_summarizer(
     state: &State,
     session_id: &str,
-) -> Result<Option<Arc<dyn tf::TaskForkSummarizer>>, String> {
-    let Some(session) = state.get_session(session_id).await else {
-        return Ok(None);
-    };
-    let Some(runtime) = session.get_runtime().await else {
-        return Ok(None);
-    };
-    let summarizer = tf::SideQuerySummarizer::new(
-        runtime.provider.clone(),
-        runtime.model.clone(),
-        runtime.account_id.clone(),
-    )?;
-    Ok(Some(Arc::new(summarizer)))
+) -> Result<Arc<dyn tf::TaskForkSummarizer>, String> {
+    if let Some(session) = state.get_session(session_id).await {
+        if let Some(runtime) = session.get_runtime().await {
+            let summarizer = tf::SideQuerySummarizer::new(
+                runtime.provider.clone(),
+                runtime.model.clone(),
+                runtime.account_id.clone(),
+            )?;
+            return Ok(Arc::new(summarizer));
+        }
+    }
+    Ok(Arc::new(
+        tf::summarizer_from_persisted_config(session_id).await?,
+    ))
 }
 
 #[derive(Clone)]
@@ -71,15 +74,9 @@ impl tf::TaskForkHost for TauriTaskForkHost {
         link: &tf::TaskForkLink,
     ) -> Result<Arc<dyn tf::TaskForkSummarizer>, String> {
         let state = &self.state;
-        // The model the Task actually ran on: its own runtime first.
+        // The model the Task actually ran on: its own live runtime, else its persisted config.
         if let Some(child) = &link.child_session_id {
-            if let Some(summarizer) = runtime_summarizer(state, child).await? {
-                return Ok(summarizer);
-            }
-        }
-        // Otherwise the parent's runtime, but only when it is the very same
-        // model/account/protocol the Task was compressed with — never a silent switch.
-        if let Some(summarizer) = runtime_summarizer(state, &link.parent_session_id).await? {
+            let summarizer = session_summarizer(state, child).await?;
             let p = summarizer.provenance();
             if p.model_id == link.model_id
                 && p.account_id == link.account_id
@@ -87,15 +84,21 @@ impl tf::TaskForkHost for TauriTaskForkHost {
             {
                 return Ok(summarizer);
             }
-            return Err(format!(
-                "task_fork_runtime_unavailable: 子会话无运行时，且主线运行时（{}）与创建 Task 时的模型（{}）不一致，拒绝切换模型",
-                p.model_id, link.model_id
-            ));
         }
-        Err(
-            "task_fork_runtime_unavailable: 子会话与主线都没有活动运行时；打开该会话后会自动继续"
-                .into(),
-        )
+        // Otherwise the parent (live or persisted), but only when it is the very same
+        // model/account/protocol the Task was compressed with — never a silent switch.
+        let summarizer = session_summarizer(state, &link.parent_session_id).await?;
+        let p = summarizer.provenance();
+        if p.model_id == link.model_id
+            && p.account_id == link.account_id
+            && p.protocol == link.protocol
+        {
+            return Ok(summarizer);
+        }
+        Err(format!(
+            "task_fork_runtime_unavailable: Task 与主线的当前模型配置（{}）都与创建 Task 时的模型（{}）不一致，拒绝切换模型",
+            p.model_id, link.model_id
+        ))
     }
 
     async fn try_lock_parent(
@@ -155,20 +158,23 @@ pub async fn task_fork_create(
     state: tauri::State<'_, State>,
 ) -> Result<tf::TaskForkView, String> {
     check_owner(&owner_session_id)?;
-    if state.get_session(&owner_session_id).await.is_none() {
+    let Some(owner_session) = state.get_session(&owner_session_id).await else {
         return Err("journey_owner_not_registered".into());
-    }
-    let Some(summarizer) = runtime_summarizer(&state, &owner_session_id).await? else {
-        return Err(
-            "task_fork_runtime_unavailable: 主线会话还没有活动运行时，请先发送一条消息再创建 Task"
-                .into(),
-        );
     };
+    // Live runtime when present; after a restart, the persisted legal session config.
+    let summarizer = session_summarizer(&state, &owner_session_id).await?;
     let view = tf::create_task_fork(&owner_session_id, request, summarizer.as_ref()).await?;
-    // A durable child must also be a runnable runtime; replays heal a failed rehydrate.
+    // A durable child must also be a runnable runtime; replays heal a failed rehydrate. The child
+    // runs the parent's own agent definition — never a builtin guessed from the id prefix, which
+    // would collapse custom agents (and ids without a builtin prefix) to the wrong identity.
     if let Some(child) = &view.link.child_session_id {
         if state.get_session(child).await.is_none() {
-            agent_core::init::register_session_with_rehydrate(&state, child).await?;
+            agent_core::init::register_session_with_definition_and_rehydrate(
+                &state,
+                child,
+                owner_session.definition.clone(),
+            )
+            .await;
         }
     }
     // Show the compressed seed in the Task's own chat (idempotent; best effort — the seed is
@@ -303,26 +309,8 @@ mod tests {
         .map(|b| b.deserialize::<Value>().unwrap())
     }
 
-    struct FixedSummarizer(&'static str);
-    #[async_trait::async_trait]
-    impl tf::TaskForkSummarizer for FixedSummarizer {
-        fn provenance(&self) -> agent_core::core::session::journey_lifecycle::RuntimeProvenance {
-            agent_core::core::session::journey_lifecycle::RuntimeProvenance {
-                model_id: "fake/model".into(),
-                account_id: "acct".into(),
-                protocol: "fake".into(),
-            }
-        }
-        async fn summarize(&self, _r: tf::SummaryRequest<'_>) -> Result<tf::SummaryOutput, String> {
-            Ok(tf::SummaryOutput {
-                text: self.0.into(),
-                usage: vec![],
-            })
-        }
-    }
-
-    /// Registered IPC contract: owner isolation, no-runtime fail-closed create, and a finish that
-    /// defers (never fails, never switches model) while no runtime is active, then cancels cleanly.
+    /// Registered IPC contract with NO live runtime: owner isolation, fail-closed create on an invalid
+    /// persisted config, restore-create/finish from a legal one, read-only lock, failed -> cancel -> retry.
     #[test]
     fn registered_ipc_owner_isolation_and_no_runtime_behaviour() {
         let _sandbox = test_helpers::test_env::sandbox();
@@ -366,7 +354,8 @@ mod tests {
             .unwrap(),
             json!([])
         );
-        // Create with a registered owner that has no live runtime fails closed with an explicit reason.
+        // No live runtime + an invalid persisted config (account unknown): create fails closed with an
+        // explicit reason, leaves no link, and never substitutes another model.
         let anchor = {
             let c = database::db::get_connection().unwrap();
             agent_core::core::session::journey_canonical::resolve_with_connection(
@@ -379,12 +368,12 @@ mod tests {
             )
             .unwrap()
         };
-        let create = json!({"ownerSessionId": owner, "request": {"intentId": "ipc-1", "name": "IPC Task", "anchor": anchor}});
-        let e = invoke(&w, "task_fork_create", create).unwrap_err();
+        let create = |intent: &str| json!({"ownerSessionId": owner, "request": {"intentId": intent, "name": "IPC Task", "anchor": anchor}});
+        let e = invoke(&w, "task_fork_create", create("ipc-1")).unwrap_err();
         assert!(
             e.as_str()
                 .unwrap()
-                .starts_with("task_fork_runtime_unavailable"),
+                .starts_with("task_fork_session_config_invalid"),
             "{e}"
         );
         assert_eq!(
@@ -392,22 +381,34 @@ mod tests {
             json!([]),
             "failed create must leave no link"
         );
-        // Seed a published Task through the core (the production summarizer needs a live provider).
-        let request = tf::CreateTaskForkRequest {
-            intent_id: "ipc-2".into(),
-            name: "IPC Task".into(),
-            anchor: serde_json::from_value(anchor_json(owner)).unwrap(),
+        let set_config = |model: &str, account: Option<&str>| {
+            database::db::get_connection()
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET model=?1,account_id=?2 WHERE session_id=?3 OR session_id LIKE ?3 || '-task-%'",
+                    rusqlite::params![model, account, owner],
+                )
+                .unwrap();
         };
-        let view = tauri::async_runtime::block_on(tf::create_task_fork(
-            owner,
-            request,
-            &FixedSummarizer("压缩摘要"),
-        ))
-        .unwrap();
-        let id = view.link.id.clone();
+        // A legal persisted config (debug-only e2e provider, no network) restores creation with NO
+        // live runtime — the post-restart path.
+        set_config("e2e-fake-provider-ipc", Some("acct"));
+        assert!(tauri::async_runtime::block_on(async {
+            state
+                .get_session(owner)
+                .await
+                .unwrap()
+                .get_runtime()
+                .await
+                .is_none()
+        }));
+        let view = invoke(&w, "task_fork_create", create("ipc-2")).unwrap();
+        assert_eq!(view["state"], "active", "{view}");
+        assert_eq!(view["readOnly"], false);
+        assert_eq!(view["modelId"], "e2e-fake-provider-ipc");
+        let id = view["id"].as_str().unwrap().to_string();
         let list = invoke(&w, "task_fork_list", json!({"ownerSessionId": owner})).unwrap();
         assert_eq!(list.as_array().unwrap().len(), 1);
-        assert_eq!(list[0]["state"], "active");
         // Another owner cannot finish or cancel it.
         let finish = |o: &str| json!({"ownerSessionId": o, "request": {"taskForkId": id, "outcome": "completed"}});
         assert_eq!(
@@ -423,23 +424,29 @@ mod tests {
             .unwrap_err(),
             json!("task_fork_owner_mismatch")
         );
-        // The owner can: the job is frozen and queued; with no runtime it defers instead of failing.
+        let wait_job = |want: &str| {
+            for _ in 0..80 {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let v = invoke(&w, "task_fork_list", json!({"ownerSessionId": owner})).unwrap();
+                if v[0]["job"]["state"] == want {
+                    return v[0].clone();
+                }
+            }
+            panic!("job never reached {want}");
+        };
+        // Recovery failure: the persisted config breaks before finish -> explicit failed job, Task
+        // kept and read-only (finishing), nothing appended, no model switch.
+        set_config("e2e-fake-provider-ipc", None);
         let started = invoke(&w, "task_fork_finish", finish(owner)).unwrap();
         assert_eq!(started["state"], "finishing");
-        let mut deferred = Value::Null;
-        for _ in 0..50 {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            let v = invoke(&w, "task_fork_list", json!({"ownerSessionId": owner})).unwrap();
-            if v[0]["job"]["deferredReason"].is_string() {
-                deferred = v[0].clone();
-                break;
-            }
-        }
-        assert_eq!(deferred["job"]["state"], "queued", "{deferred}");
-        assert!(deferred["job"]["deferredReason"]
+        assert_eq!(started["readOnly"], true);
+        let failed = wait_job("failed");
+        assert!(failed["job"]["error"]
             .as_str()
             .unwrap()
-            .starts_with("task_fork_runtime_unavailable"));
+            .starts_with("task_fork_session_config_invalid"));
+        assert_eq!(failed["readOnly"], true);
+        // Cancel reopens the Task for writing.
         let cancelled = invoke(
             &w,
             "task_fork_cancel_finish",
@@ -449,27 +456,24 @@ mod tests {
         assert_eq!(
             (
                 cancelled["state"].as_str(),
-                cancelled["job"]["state"].as_str()
+                cancelled["job"]["state"].as_str(),
+                cancelled["readOnly"].as_bool()
             ),
-            (Some("active"), Some("cancelled"))
+            (Some("active"), Some("cancelled"), Some(false))
         );
-        let rows: i64 = database::db::get_connection().unwrap().query_row("SELECT COUNT(*) FROM agent_messages WHERE session_id=?1 AND id LIKE 'task-summary:%'", [owner], |r| r.get(0)).unwrap();
-        assert_eq!(rows, 0);
-    }
-
-    fn anchor_json(owner: &str) -> Value {
-        let c = database::db::get_connection().unwrap();
-        serde_json::to_value(
-            agent_core::core::session::journey_canonical::resolve_with_connection(
-                &c,
-                owner,
-                owner,
-                &format!("session:{owner}"),
-                "m1",
-                1,
-            )
-            .unwrap(),
-        )
-        .unwrap()
+        let rows = || -> i64 {
+            database::db::get_connection().unwrap().query_row("SELECT COUNT(*) FROM agent_messages WHERE session_id=?1 AND id LIKE 'task-summary:%'", [owner], |r| r.get(0)).unwrap()
+        };
+        assert_eq!(rows(), 0);
+        // Retry after the config is legal again: restored from persistence, appended exactly once.
+        set_config("e2e-fake-provider-ipc", Some("acct"));
+        invoke(&w, "task_fork_finish", finish(owner)).unwrap();
+        let done = wait_job("appended");
+        assert_eq!(done["state"], "finished");
+        assert_eq!(done["readOnly"], true);
+        assert_eq!(done["job"]["mergeIndex"], 1);
+        assert_eq!(rows(), 1);
+        invoke(&w, "task_fork_finish", finish(owner)).unwrap();
+        assert_eq!(rows(), 1, "repeat finish never appends twice");
     }
 }

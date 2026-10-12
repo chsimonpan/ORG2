@@ -52,10 +52,13 @@ pub fn is_history(conn: &Connection, session_id: &str) -> rusqlite::Result<bool>
 
 pub fn require_writable(conn: &Connection, session_id: &str) -> Result<(), String> {
     if is_history(conn, session_id).map_err(|error| error.to_string())? {
-        Err(READ_ONLY_ERROR.into())
-    } else {
-        Ok(())
+        return Err(READ_ONLY_ERROR.into());
     }
+    // A Task child that is finishing/finished accepts no new turns or tool calls.
+    if let Some(reason) = crate::core::session::task_fork::child_write_block(conn, session_id)? {
+        return Err(reason);
+    }
+    Ok(())
 }
 
 pub(crate) fn table_exists(conn: &Connection, table: &str) -> rusqlite::Result<bool> {

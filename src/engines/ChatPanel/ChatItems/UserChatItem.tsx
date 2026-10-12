@@ -20,6 +20,7 @@ import UserMessageContent from "../ChatHistory/components/UserMessageContent";
 import InputArea from "../InputArea";
 import SessionIdentityIcon from "../components/SessionIdentityIcon";
 import { UserChatItemBubble } from "./UserChatItem/UserChatItemBubble";
+import { parseTaskForkMessage } from "./UserChatItem/TaskForkMessageCard";
 import { UserChatItemToolbar } from "./UserChatItem/UserChatItemToolbar";
 import { useUserChatItemEdit } from "./UserChatItem/useUserChatItemEdit";
 import { useUserChatItemModel } from "./UserChatItem/useUserChatItemModel";
@@ -140,10 +141,12 @@ const UserChatItem = ({
   const isPlanApproved = fullContent.startsWith(PLAN_APPROVED_PREFIX);
   const planApprovedEdited =
     isPlanApproved && fullContent.startsWith("[Plan approved (edited)");
+  const taskForkMessage = parseTaskForkMessage(fullContent);
   const isEditableDisplay = Boolean(
     (onEditSubmit || deliveryActions.canEditFailed) &&
     deliveryStatus !== "pending" &&
     !isRepoSetup &&
+    !taskForkMessage &&
     !isAgentOrgInboxTranscript &&
     !isPlanApproved &&
     (!event?.args?.["sessionDiscussion"] || deliveryStatus === "failed") &&
@@ -223,6 +226,7 @@ const UserChatItem = ({
           onEditClick={handleEditClick}
           isRepoSetup={isRepoSetup}
           isPlanApproved={isPlanApproved}
+          taskForkMessage={taskForkMessage}
           planApprovedEdited={planApprovedEdited}
           fullContent={fullContent}
           messageImages={messageImages}

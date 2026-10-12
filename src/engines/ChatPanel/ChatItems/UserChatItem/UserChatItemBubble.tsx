@@ -14,6 +14,10 @@ import { ChatImageThumbnailRow } from "@src/engines/ChatPanel/ChatImageThumbnail
 import { ClipboardCheckIcon, HugeiconsIcon, SparklesIcon } from "@src/icons";
 
 import CachedFileChip from "./CachedFileChip";
+import {
+  TaskForkMessageCard,
+  type TaskForkMessageInfo,
+} from "./TaskForkMessageCard";
 
 // Continuous chat leaves roughly ten rendered lines visible before folding.
 const USER_MSG_CONTINUOUS_PREVIEW_HEIGHT = 10 * 24;
@@ -36,6 +40,7 @@ interface UserChatItemBubbleProps {
   onEditClick: () => void;
   isRepoSetup: boolean;
   isPlanApproved: boolean;
+  taskForkMessage: TaskForkMessageInfo | null;
   planApprovedEdited: boolean;
   fullContent: string;
   messageImages: string[] | undefined;
@@ -56,6 +61,7 @@ export function UserChatItemBubble({
   onEditClick,
   isRepoSetup,
   isPlanApproved,
+  taskForkMessage,
   planApprovedEdited,
   fullContent,
   messageImages,
@@ -94,7 +100,9 @@ export function UserChatItemBubble({
       onDoubleClick={isEditableDisplay ? onEditClick : undefined}
     >
       <div className="flex min-w-0 flex-1 flex-col gap-[6px]">
-        {isRepoSetup ? (
+        {taskForkMessage ? (
+          <TaskForkMessageCard info={taskForkMessage} />
+        ) : isRepoSetup ? (
           <div className="flex items-center gap-2 py-0.5">
             <HugeiconsIcon
               icon={SparklesIcon}
