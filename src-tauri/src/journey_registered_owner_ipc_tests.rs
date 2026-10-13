@@ -437,3 +437,51 @@ fn historical_runtime_registered_rejects_unpaired_inclusive_endpoint(){
  assert!(invoke(&w,"historical_runtime_fork",json!({"ownerSessionId":owner,"request":{"anchor":anchor,"intentId":"incomplete"}})).unwrap_err().to_string().contains("historical_fork_unpaired_tool_prefix"));
  let result=invoke(&w,"historical_runtime_fork",json!({"ownerSessionId":owner,"request":{"anchor":legal,"intentId":"complete"}})).unwrap();assert!(tauri::async_runtime::block_on(state.get_session(result["childSessionId"].as_str().unwrap())).is_some());
 }
+
+// R3 small matrix: two registered owners share ordinal coordinates and intent ids.
+fn seed_history_owner(state:&agent_core::state::AgentAppState,owner:&str){
+ tauri::async_runtime::block_on(state.register_session(agent_core::state::AgentSession::new(owner.into(),agent_core::definitions::sde_agent())));
+ let c=database::db::get_connection().unwrap();agent_core::foundation::persistence::session_snapshots::ensure_tables_with(&c).unwrap();
+ c.execute("INSERT INTO agent_sessions(session_id,created_at,updated_at) VALUES(?1,'fixture','fixture')",[owner]).unwrap();
+ for(suffix,seq,role)in[("user",1,"user"),("answer",2,"assistant"),("suffix",3,"user")]{c.execute("INSERT INTO agent_messages(id,session_id,role,content,sequence,created_at) VALUES(?1,?2,?3,?1,?4,'fixture')",rusqlite::params![format!("{owner}-{suffix}"),owner,role,seq]).unwrap();}
+}
+fn history_anchor(owner:&str,suffix:&str)->Value{
+ let c=database::db::get_connection().unwrap();
+ serde_json::to_value(agent_core::core::session::journey_canonical::resolve_with_connection(&c,owner,owner,&format!("session:{owner}"),&format!("{owner}-{suffix}"),3).unwrap()).unwrap()
+}
+#[test]
+fn historical_runtime_two_owners_same_ordinal_interleaved_a_b_a(){
+ let _sandbox=test_helpers::test_env::sandbox();let (a,b)=("osagent-history-ord-a","osagent-history-ord-b");let state=agent_core::state::AgentAppState::new();
+ seed_history_owner(&state,a);seed_history_owner(&state,b);
+ let app=mock_builder().manage(state.clone()).invoke_handler(tauri::generate_handler![historical_runtime_fork]).build(mock_context(noop_assets())).unwrap();
+ let w=tauri::WebviewWindowBuilder::new(&app,"main",Default::default()).build().unwrap();
+ let fork=|owner:&str,suffix:&str,intent:&str|invoke(&w,"historical_runtime_fork",json!({"ownerSessionId":owner,"request":{"anchor":history_anchor(owner,suffix),"intentId":intent}}));
+ // A: first fork. Then A's turn is busy while B forks the same ordinal + intent.
+ let a1=fork(a,"answer","same-intent").unwrap();
+ let a_session=tauri::async_runtime::block_on(state.get_session(a)).unwrap();let a_turn=a_session.processing_lock.clone().try_lock_owned().unwrap();
+ let b1=fork(b,"answer","same-intent").unwrap();
+ assert!(fork(a,"answer","second-intent").unwrap_err().to_string().contains("journey_session_busy"),"A busy must not block or be served by B");
+ drop(a_turn);
+ // A again, after B committed: parent identity follows the request owner only.
+ let a2=fork(a,"answer","second-intent").unwrap();
+ let children=[&a1,&b1,&a2].map(|r|r["childSessionId"].as_str().unwrap().to_string());
+ assert_eq!(std::collections::HashSet::<&String>::from_iter(&children).len(),3,"same ordinal/intent must not collide across owners");
+ assert!(children[0].starts_with(&format!("{a}-history-")));assert!(children[1].starts_with(&format!("{b}-history-")));assert!(children[2].starts_with(&format!("{a}-history-")));
+ let c=database::db::get_connection().unwrap();
+ for(child,owner)in[(&children[0],a),(&children[1],b),(&children[2],a)]{
+  assert_eq!(c.query_row("SELECT parent_session_id FROM agent_sessions WHERE session_id=?1",[child],|r|r.get::<_,String>(0)).unwrap(),owner);
+  let rows=agent_core::session::persistence::load_messages(child).unwrap();
+  assert_eq!(rows.iter().map(|r|r.content.clone()).collect::<Vec<_>>(),vec![format!("{owner}-user"),format!("{owner}-answer")],"exclusive end + no cross-owner rows");
+ }
+ let intents=|owner:&str|c.query_row("SELECT COUNT(*) FROM historical_runtime_fork_intents WHERE owner_session_id=?1",[owner],|r|r.get::<_,i64>(0)).unwrap();
+ assert_eq!((intents(a),intents(b)),(2,1));drop(c);
+ // Same owner + intent with a different endpoint is an exact conflict, not a new child.
+ assert_eq!(fork(a,"user","same-intent").unwrap_err(),json!("historical_fork_intent_conflict"));
+ assert_eq!(fork(b,"user","same-intent").unwrap_err(),json!("historical_fork_intent_conflict"));
+ // Owner B cannot replay or fork through A's anchor, even with A's intent id.
+ assert!(invoke(&w,"historical_runtime_fork",json!({"ownerSessionId":b,"request":{"anchor":history_anchor(a,"answer"),"intentId":"same-intent"}})).is_err());
+ // Replay after both runtimes are removed and re-registered stays owner-scoped.
+ for child in &children{tauri::async_runtime::block_on(state.remove_session(child));}
+ assert_eq!(fork(a,"answer","same-intent").unwrap(),a1);assert_eq!(fork(b,"answer","same-intent").unwrap(),b1);assert_eq!(fork(a,"answer","second-intent").unwrap(),a2);
+ assert_eq!(agent_core::session::persistence::load_messages(a).unwrap().len(),3);assert_eq!(agent_core::session::persistence::load_messages(b).unwrap().len(),3);
+}

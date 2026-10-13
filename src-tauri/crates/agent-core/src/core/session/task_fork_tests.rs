@@ -389,6 +389,150 @@ async fn create_rejects_foreign_anchor_stale_anchor_and_unpaired_tool_prefix() {
     assert_eq!(fake.calls(), 0);
 }
 
+fn put_tool_row(session: &str, id: &str, role: &str, call: Option<&str>) {
+    let conn = get_connection().unwrap();
+    let seq = max_sequence(&conn, session).unwrap() + 1;
+    conn.execute(
+        "INSERT INTO agent_messages(id,session_id,role,content,tool_name,tool_call_id,sequence,created_at,tool_is_error)
+         VALUES(?1,?2,?3,'tool','read_file',?4,?5,'2026-10-12T00:01:00Z',0)",
+        params![id, session, role, call, seq],
+    )
+    .unwrap();
+}
+
+fn put_boundary(session: &str, id: &str, from_sequence: i64) {
+    let conn = get_connection().unwrap();
+    let seq = max_sequence(&conn, session).unwrap() + 1;
+    conn.execute(
+        "INSERT INTO agent_messages(id,session_id,role,content,sequence,created_at,compact_from_sequence,tool_is_error)
+         VALUES(?1,?2,'system','此前对话摘要：账单导出',?3,'2026-10-12T00:02:00Z',?4,0)",
+        params![id, session, seq, from_sequence],
+    )
+    .unwrap();
+}
+
+/// R3 tool-pair matrix: every malformed visible prefix fails closed before
+/// any model call and publishes nothing; a pair hidden behind the compact
+/// floor does not count, and a well-formed parallel pair is accepted.
+#[tokio::test]
+async fn create_tool_pair_matrix_fails_closed_before_the_model_call() {
+    let _s = setup();
+    // Rejections roll back before the reserve; make the ledger table queryable.
+    ensure_schema(&get_connection().unwrap()).unwrap();
+    seed_parent();
+    let fake = Fake::new(Mode::Ok("矩阵摘要".into()));
+    type Shape = &'static [(&'static str, Option<&'static str>)];
+    let rejected: &[(&str, Shape)] = &[
+        // Cut between call and result: the endpoint is the call itself.
+        ("mid-pair", &[("tool_call", Some("m1"))]),
+        // A result whose call is not in the visible prefix.
+        (
+            "orphan-result",
+            &[("tool_result", Some("ghost")), ("assistant", None)],
+        ),
+        // Two parallel calls, only one answered before the next turn row.
+        (
+            "parallel-partial",
+            &[
+                ("tool_call", Some("pa")),
+                ("tool_call", Some("pb")),
+                ("tool_result", Some("pa")),
+                ("assistant", None),
+            ],
+        ),
+        // The same call id issued twice.
+        (
+            "duplicate-id",
+            &[
+                ("tool_call", Some("d1")),
+                ("tool_call", Some("d1")),
+                ("tool_result", Some("d1")),
+                ("tool_result", Some("d1")),
+                ("assistant", None),
+            ],
+        ),
+        // A call without an id can never be paired.
+        ("missing-id", &[("tool_call", None), ("assistant", None)]),
+    ];
+    for (case, shape) in rejected {
+        let before = parent_rows_snapshot();
+        let mut last = String::new();
+        for (i, (role, call)) in shape.iter().enumerate() {
+            last = format!("{case}-{i}");
+            if *role == "assistant" {
+                put(PARENT, &last, "assistant", "继续");
+            } else {
+                put_tool_row(PARENT, &last, role, *call);
+            }
+        }
+        let intent = format!("i-{case}");
+        let e = create_task_fork(
+            PARENT,
+            req(&intent, anchor_for(PARENT, &last)),
+            fake.as_ref(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(e, "task_fork_unpaired_tool_prefix", "{case}");
+        assert_eq!(fake.calls(), 0, "{case}: model called");
+        let (_, child) = deterministic_ids(PARENT, &intent);
+        assert_eq!(
+            count(
+                "SELECT COUNT(*) FROM agent_sessions WHERE session_id=?1",
+                &child
+            ),
+            0,
+            "{case}"
+        );
+        assert_eq!(
+            count(
+                "SELECT COUNT(*) FROM task_forks WHERE intent_id=?1",
+                &intent
+            ),
+            0,
+            "{case}"
+        );
+        // The parent only gained the rows this case appended; nothing rewritten.
+        assert_eq!(parent_rows_snapshot()[..before.len()], before[..], "{case}");
+        // Neutralise this case's shape so the next case starts paired again.
+        put_boundary(
+            PARENT,
+            &format!("{case}-floor"),
+            max_sequence(&get_connection().unwrap(), PARENT).unwrap() + 1,
+        );
+    }
+
+    // An unpaired call below the compact floor is not in the visible prefix.
+    put_tool_row(PARENT, "below-floor-call", "tool_call", Some("hidden"));
+    put_boundary(
+        PARENT,
+        "floor",
+        max_sequence(&get_connection().unwrap(), PARENT).unwrap() + 1,
+    );
+    put(PARENT, "after-floor", "user", "压缩后继续");
+    // Parallel calls fully answered in either order are a valid prefix.
+    put_tool_row(PARENT, "ok-a", "tool_call", Some("oa"));
+    put_tool_row(PARENT, "ok-b", "tool_call", Some("ob"));
+    put_tool_row(PARENT, "ok-rb", "tool_result", Some("ob"));
+    put_tool_row(PARENT, "ok-ra", "tool_result", Some("oa"));
+    put(PARENT, "ok-end", "assistant", "两个工具都完成了");
+    let view = create_task_fork(
+        PARENT,
+        req("i-paired", anchor_for(PARENT, "ok-end")),
+        fake.as_ref(),
+    )
+    .await
+    .unwrap();
+    assert!(view.newly_published);
+    assert_eq!(fake.calls(), 1);
+    let transcript = fake.last_transcript.lock().unwrap().clone();
+    assert!(transcript.contains("压缩后继续"));
+    assert!(
+        !transcript.contains("旧上下文细节"),
+        "rows below the floor leaked"
+    );
+}
+
 #[tokio::test]
 async fn parent_keeps_running_while_compression_is_in_flight() {
     let _s = setup();

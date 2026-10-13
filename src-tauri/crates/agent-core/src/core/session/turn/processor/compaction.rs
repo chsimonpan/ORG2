@@ -100,6 +100,31 @@ pub(super) enum CompactionPhaseOutcome {
 }
 
 impl UnifiedMessageProcessor {
+    /// A pre-turn rewrite became durable (in-place boundary or fork): the
+    /// SM sequence anchor and the provider-reported fill both described the
+    /// pre-compaction history, so invalidate them now — and only now.
+    async fn mark_compaction_committed(&self) {
+        self.sm_state.lock().await.reset_after_compaction();
+        self.session
+            .last_context_tokens
+            .store(0, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// The candidate history was never committed (cancel / persist failure):
+    /// restore the frame and the in-memory compactor state so the next turn
+    /// re-triggers from the same baseline instead of a phantom summary.
+    async fn abandon_uncommitted_compaction(
+        &self,
+        messages: &mut Vec<Value>,
+        pre_compact_messages: Vec<Value>,
+        compaction_state_before: Option<crate::model_context::compaction::CompactionState>,
+    ) {
+        *messages = pre_compact_messages;
+        if let Some(before) = compaction_state_before {
+            *self.session.compaction.lock().await = before;
+        }
+    }
+
     /// Reactive-path LLM compaction with a last-resort rescue.
     ///
     /// The provider has ALREADY rejected the prompt when this runs, so a
@@ -540,12 +565,14 @@ impl UnifiedMessageProcessor {
                 );
                 *messages = rebuilt;
                 need_llm_compact = false;
-
-                let mut sm_state = self.sm_state.lock().await;
-                sm_state.reset_after_compaction();
+                // The SM anchor is reset only once the rewrite is committed
+                // (fork redirect or durable boundary below).
             }
         }
 
+        // In-memory compactor state as it was before this attempt; restored
+        // when the summary never becomes durable (cancel / persist failure).
+        let mut compaction_state_before = None;
         if need_llm_compact {
             // Fork-form summarization inputs: the summary request rides on
             // the main turn's EXACT wire prefix (same messages after
@@ -581,6 +608,7 @@ impl UnifiedMessageProcessor {
             let lock_phase = crate::core::model_context::phase_observation::Phase::new(request, "state_lock_wait");
             let mut state = self.session.compaction.lock().await;
             lock_phase.finish("ok");
+            compaction_state_before = Some(state.clone());
             info!(
                 session_id,
                 wait_ms = lock_started.elapsed().as_millis(),
@@ -650,9 +678,6 @@ impl UnifiedMessageProcessor {
 
             let cleaned_tail = crate::model_context::cleanup::post_compact_cleanup(compacted);
             *messages = append_compacted_tail(&prefix, cleaned_tail);
-
-            let mut sm_state = self.sm_state.lock().await;
-            sm_state.reset_after_compaction();
         }
 
         // Post-compact file re-injection
@@ -666,12 +691,6 @@ impl UnifiedMessageProcessor {
             &pre_compact_messages,
             messages,
         );
-
-        // The provider-reported fill referred to the pre-compaction history;
-        // clear it so the next trigger doesn't act on a stale value.
-        self.session
-            .last_context_tokens
-            .store(0, std::sync::atomic::Ordering::SeqCst);
 
         // Fired before the compact-fork branch: the compaction itself is
         // done regardless of whether the session id gets redirected below.
@@ -690,7 +709,8 @@ impl UnifiedMessageProcessor {
             .cancel_flag
             .load(std::sync::atomic::Ordering::SeqCst)
         {
-            *messages = pre_compact_messages;
+            self.abandon_uncommitted_compaction(messages, pre_compact_messages, compaction_state_before)
+                .await;
             return CompactionPhaseOutcome::Continue;
         }
 
@@ -720,6 +740,7 @@ impl UnifiedMessageProcessor {
             .await;
             match outcome {
                 super::super::super::compaction::fork::ForkOutcome::Forked { new_session_id } => {
+                    self.mark_compaction_committed().await;
                     if let Err(err) = unified_persistence::clear_session_memory_state(session_id) {
                         warn!(
                             "[unified_processor] Failed to clear old SM state after compact-fork for session {}: {}",
@@ -766,7 +787,8 @@ impl UnifiedMessageProcessor {
             .cancel_flag
             .load(std::sync::atomic::Ordering::SeqCst)
         {
-            *messages = pre_compact_messages;
+            self.abandon_uncommitted_compaction(messages, pre_compact_messages, compaction_state_before)
+                .await;
             return CompactionPhaseOutcome::Continue;
         }
         let compacted_for_persist = durable_compacted_messages.clone();
@@ -797,8 +819,8 @@ impl UnifiedMessageProcessor {
                 // anchor — the summarized region is now folded into the
                 // compact summary, so the old anchor describes rows the
                 // visible window no longer contains.
-                let mut sm_state = self.sm_state.lock().await;
-                sm_state.reset_after_compaction();
+                self.mark_compaction_committed().await;
+                let sm_state = self.sm_state.lock().await;
                 let persist_outcome = match sm_state.content.as_deref() {
                     Some(content) if !content.trim().is_empty() => {
                         unified_persistence::save_session_memory_state(session_id, content, None)
@@ -818,14 +840,16 @@ impl UnifiedMessageProcessor {
                 );
             }
             Ok(Err(err)) => {
-                *messages = pre_compact_messages;
+                self.abandon_uncommitted_compaction(messages, pre_compact_messages, compaction_state_before)
+                    .await;
                 warn!(
                     "[unified_processor] Failed to persist compact boundary for session {}: {}",
                     session_id, err
                 );
             }
             Err(err) => {
-                *messages = pre_compact_messages;
+                self.abandon_uncommitted_compaction(messages, pre_compact_messages, compaction_state_before)
+                    .await;
                 warn!("[unified_processor] Failed to join compact boundary persistence for session {}: {}", session_id, err);
             }
         }
