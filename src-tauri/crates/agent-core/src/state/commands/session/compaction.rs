@@ -15,7 +15,7 @@ use crate::model_context::session_memory;
 use crate::session::persistence as unified_persistence;
 use crate::state::{AgentAppState, AgentSession};
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ManualCompactStatus {
     Compacted,
@@ -25,6 +25,49 @@ pub enum ManualCompactStatus {
     NoRuntime,
     ChannelAttached,
     Failed,
+    /// Idle trigger only: the activity-epoch guard found newer activity (or
+    /// the switch was turned off) before any model call was made.
+    Skipped,
+}
+
+impl ManualCompactStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Compacted => "compacted",
+            Self::TooShort => "too_short",
+            Self::AlreadyCompact => "already_compact",
+            Self::Busy => "busy",
+            Self::NoRuntime => "no_runtime",
+            Self::ChannelAttached => "channel_attached",
+            Self::Failed => "failed",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+/// Who asked for this compaction. Only affects hook labels, runtime-init
+/// policy and the in-job epoch guard; the pipeline itself is identical.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactionTrigger {
+    Manual,
+    Idle { epoch_ms: i64 },
+}
+
+impl CompactionTrigger {
+    /// Hook payload contract is `auto` | `manual`; idle is an automatic trigger.
+    fn hook_label(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Idle { .. } => "auto",
+        }
+    }
+
+    fn job_label(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Idle { .. } => "idle",
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -143,6 +186,24 @@ pub async fn agent_session_manual_compact(
     session_id: String,
     instructions: Option<String>,
 ) -> Result<ManualCompactCommandResult, String> {
+    run_scheduled_compaction(
+        state.inner(),
+        &session_id,
+        instructions,
+        CompactionTrigger::Manual,
+    )
+    .await
+}
+
+/// Shared entry for manual and idle compaction: enqueue the pipeline as a
+/// Maintenance job on the session scheduler and await its structured result.
+pub async fn run_scheduled_compaction(
+    state: &AgentAppState,
+    session_id: &str,
+    instructions: Option<String>,
+    trigger: CompactionTrigger,
+) -> Result<ManualCompactCommandResult, String> {
+    let session_id = session_id.to_string();
     // Channel-attached sessions compact by forking (gateway `/compact`); an
     // in-place boundary would silently diverge the Hermes-side transcript
     // from what the channel participants see.
@@ -163,13 +224,25 @@ pub async fn agent_session_manual_compact(
     // resolved config. Initialize on demand exactly like `agent_send_message`
     // does (idempotent fast-path when already live) instead of bouncing the
     // user with "send a message first".
-    let session = match prepare_session_for_scheduler_maintenance(state.inner(), &session_id).await
-    {
-        Ok(session) => session,
-        Err(err) => {
-            return Ok(ManualCompactCommandResult::failed(format!(
-                "session runtime init failed: {err}"
-            )))
+    let session = if matches!(trigger, CompactionTrigger::Idle { .. }) {
+        // A background trigger must never spin up a runtime for a session
+        // the user is not using (MCP servers, workspace init, ...).
+        match state.get_session(&session_id).await {
+            Some(session) if session.get_runtime().await.is_some() => session,
+            _ => {
+                return Ok(ManualCompactCommandResult::status(
+                    ManualCompactStatus::NoRuntime,
+                ))
+            }
+        }
+    } else {
+        match prepare_session_for_scheduler_maintenance(state, &session_id).await {
+            Ok(session) => session,
+            Err(err) => {
+                return Ok(ManualCompactCommandResult::failed(format!(
+                    "session runtime init failed: {err}"
+                )))
+            }
         }
     };
 
@@ -189,7 +262,7 @@ pub async fn agent_session_manual_compact(
             // `running`) and must not route a concurrent user message into
             // the steering queue (no turn loop would drain it).
             kind: ScheduledKind::Maintenance,
-            message_id: format!("manual-compact-{}", uuid::Uuid::new_v4()),
+            message_id: format!("{}-compact-{}", trigger.job_label(), uuid::Uuid::new_v4()),
             generation: 0,
             client_message_id: None,
             // Empty intent id keeps the worker's turn-lifecycle writes
@@ -197,7 +270,7 @@ pub async fn agent_session_manual_compact(
             // turn indexer.
             turn_intent_id: String::new(),
             org_run_id: None,
-            content: "[manual compact]".to_string(),
+            content: format!("[{} compact]", trigger.job_label()),
             execute: Box::new(move || {
                 Box::pin(async move {
                     use futures::FutureExt;
@@ -205,6 +278,7 @@ pub async fn agent_session_manual_compact(
                         exec_session,
                         exec_session_id,
                         instructions,
+                        trigger,
                     ))
                     .catch_unwind()
                     .await
@@ -251,7 +325,21 @@ async fn run_manual_compact_exclusive(
     session: Arc<AgentSession>,
     session_id: String,
     instructions: Option<String>,
+    trigger: CompactionTrigger,
 ) -> ManualCompactCommandResult {
+    // Re-check inside the exclusive job: a turn that started between the
+    // monitor's decision and this job (the scheduler is FIFO) changed the
+    // activity epoch, and the cache this trigger was meant for is live again.
+    if let CompactionTrigger::Idle { epoch_ms } = trigger {
+        if !crate::session::compaction_prefs::idle_monitor::epoch_still_current(
+            &session_id,
+            epoch_ms,
+        ) {
+            let mut result = ManualCompactCommandResult::status(ManualCompactStatus::Skipped);
+            result.message = Some("session activity resumed before idle compaction ran".into());
+            return result;
+        }
+    }
     let runtime = {
         match session.get_runtime().await {
             Some(runtime) => runtime,
@@ -320,7 +408,7 @@ async fn run_manual_compact_exclusive(
     crate::specialization::hooks::dispatch::fire_pre_compaction(
         Some(&hook_executor),
         &session_id,
-        "manual",
+        trigger.hook_label(),
         messages_before,
     )
     .await;
@@ -410,7 +498,7 @@ async fn run_manual_compact_exclusive(
     crate::specialization::hooks::dispatch::fire_post_compaction(
         Some(&hook_executor),
         &session_id,
-        "manual",
+        trigger.hook_label(),
         messages_before,
         candidate_messages_after,
     );

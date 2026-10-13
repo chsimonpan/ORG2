@@ -453,12 +453,21 @@ impl UnifiedMessageProcessor {
                 None // DB failure cannot suppress independent context safety.
             }
         };
-        let cost_triggered = weighted_checkpoint.as_ref().is_some_and(|checkpoint| {
-            weighted_trigger_due(
-                checkpoint.milli,
-                &self.runtime.resolved.compaction,
-                compactable_tail.len(),
+        // Per-session override is read at every turn start so a UI change
+        // applies to the next turn without rebuilding the runtime.
+        let (effective_threshold, _) = tokio::task::block_in_place(|| {
+            crate::session::compaction_prefs::effective_threshold(
+                session_id,
+                self.runtime.resolved.compaction.weighted_token_threshold,
             )
+        });
+        let spend_config = {
+            let mut config = self.runtime.resolved.compaction.clone();
+            config.weighted_token_threshold = effective_threshold;
+            config
+        };
+        let cost_triggered = weighted_checkpoint.as_ref().is_some_and(|checkpoint| {
+            weighted_trigger_due(checkpoint.milli, &spend_config, compactable_tail.len())
         });
         let size_triggered = ContextCompactor::needs_compaction_observed(
             &compactable_tail,
@@ -480,7 +489,7 @@ impl UnifiedMessageProcessor {
             broadcast_agent_warning(session_id, &format!(
                 "Automatic compaction: equivalent-token spend {} >= {} (context capacity is a separate trigger)",
                 weighted_checkpoint.as_ref().map(|c| c.milli / 1000).unwrap_or(0),
-                self.runtime.resolved.compaction.weighted_token_threshold), "compaction");
+                effective_threshold), "compaction");
         }
 
         // Budget in ESTIMATED tokens for the compactors below: effective

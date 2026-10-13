@@ -70,6 +70,9 @@ pub(crate) fn register_database_schemas() {
         // They never replace canonical messages or compact-boundary rows.
         agent_core::session::housekeeper_compaction::init_schema(conn)?;
 
+        // Per-session spend-threshold override + idle-compaction opt-in.
+        agent_core::session::compaction_prefs::init_schema(conn)?;
+
         Ok(())
     }
 

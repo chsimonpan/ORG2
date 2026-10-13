@@ -5,6 +5,19 @@ use tauri::test::{mock_builder,mock_context,noop_assets,MockRuntime};
 fn invoke(w:&tauri::WebviewWindow<MockRuntime>,cmd:&str,body:Value)->Result<Value,Value>{
  tauri::test::get_ipc_response(w,tauri::webview::InvokeRequest{cmd:cmd.into(),callback:tauri::ipc::CallbackFn(0),error:tauri::ipc::CallbackFn(1),url:w.url().unwrap(),body:tauri::ipc::InvokeBody::Json(body),headers:Default::default(),invoke_key:tauri::test::INVOKE_KEY.into()}).map(|b|b.deserialize::<Value>().unwrap())
 }
+/// `KEY_SERVICE` is a process-wide `LazyLock` bound to the first sandbox that touched it; that sandbox's
+/// directory is deleted when its guard drops, so a later `save_key` in the same process fails with
+/// "Failed to write credentials temp file". Recreate the directory (never delete it: when it is the live
+/// sandbox root it also holds the test DB) and keep `credentials.json` empty before and after each test.
+/// Refuses any directory outside the system temp dir so it can never touch a real `~/.orgii`.
+struct KeyVaultFixture(std::path::PathBuf);
+fn clear_credentials(dir:&std::path::Path){for f in ["credentials.json","credentials.json.tmp"]{let _=std::fs::remove_file(dir.join(f));}}
+fn key_vault_fixture()->KeyVaultFixture{
+ let dir=key_vault::key_store::KEY_SERVICE.get_storage_dir().clone();
+ assert!(dir.starts_with(std::env::temp_dir()),"key vault dir {dir:?} is outside the temp dir; refusing to touch it");
+ std::fs::create_dir_all(&dir).unwrap();clear_credentials(&dir);KeyVaultFixture(dir)
+}
+impl Drop for KeyVaultFixture{fn drop(&mut self){clear_credentials(&self.0);}}
 #[test]
 fn journey_registered_selected_session_durable_task_checkpoint_fork_cas_roundtrip(){
  let _sandbox=test_helpers::test_env::sandbox();let owner="native-selected-journey-owner";let state=agent_core::state::AgentAppState::new();
@@ -139,6 +152,7 @@ fn memory_search_registered_execution_contract(){
 fn memory_query_transport_registered_contract(){
  let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
  let _sandbox=test_helpers::test_env::sandbox();
+ let _kv=key_vault_fixture();
  tauri::async_runtime::block_on(async {
  use wiremock::{Mock,MockServer,ResponseTemplate};use wiremock::matchers::{method,path,body_json};
  let server=MockServer::start().await;let mut vector=vec![0.0f32;1024];vector[0]=1.;
@@ -159,6 +173,7 @@ fn memory_query_transport_registered_contract(){
 fn memory_full_embedding_rerank_registered_contract(){
  let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
  let _sandbox=test_helpers::test_env::sandbox();
+ let _kv=key_vault_fixture();
  tauri::async_runtime::block_on(async {
  use wiremock::{Mock,MockServer,ResponseTemplate};use wiremock::matchers::{method,path,body_json};
  let server=MockServer::start().await;let mut vector=vec![0.0f32;1024];vector[0]=1.;
@@ -192,6 +207,7 @@ fn memory_search_candidate_hard_caps_registered_contract(){
  // Hard limits: the index scan is bounded (explicit error above it) and only the cosine top-K reach the rerank provider.
  let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
  let _sandbox=test_helpers::test_env::sandbox();
+ let _kv=key_vault_fixture();
  tauri::async_runtime::block_on(async {
  use wiremock::{Mock,MockServer,ResponseTemplate};use wiremock::matchers::{method,path};use std::sync::{Arc,Mutex};
  use crate::memory_search_commands::{MAX_CANDIDATES,MAX_RERANK_CANDIDATES,SOURCE};
@@ -266,6 +282,7 @@ fn journey_owner_semantic_chain_producer_index_query_source_location(){
  // Real chain: journey_confirm (registered IPC) -> durable outbox -> pinned producer job -> index -> memory_search -> same-owner source anchor -> exact prefix preview.
  let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
  let _sandbox=test_helpers::test_env::sandbox();
+ let _kv=key_vault_fixture();
  agent_core::foundation::db_bridge::register(database::db::get_connection);
  tauri::async_runtime::block_on(async {
  use wiremock::{Mock,MockServer,ResponseTemplate};use wiremock::matchers::{method,path};
@@ -485,3 +502,6 @@ fn historical_runtime_two_owners_same_ordinal_interleaved_a_b_a(){
  assert_eq!(fork(a,"answer","same-intent").unwrap(),a1);assert_eq!(fork(b,"answer","same-intent").unwrap(),b1);assert_eq!(fork(a,"answer","second-intent").unwrap(),a2);
  assert_eq!(agent_core::session::persistence::load_messages(a).unwrap().len(),3);assert_eq!(agent_core::session::persistence::load_messages(b).unwrap().len(),3);
 }
+
+#[path="journey_historical_fork_ownership_tests.rs"]
+mod historical_fork_ownership_tests;

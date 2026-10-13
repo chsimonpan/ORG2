@@ -937,6 +937,13 @@ pub fn backfill_agent_definition_id(session_id: &str, definition_id: &str) -> Re
 pub fn delete_session(session_id: &str) -> SqliteResult<()> {
     prepare_session_delete(session_id)?;
     shared::delete_session_cascade(session_id, SESSION_DELETE_TABLES)?;
+    if let Err(err) = crate::session::compaction_prefs::delete(session_id) {
+        warn!(
+            "Failed to delete compaction prefs for session {}: {}",
+            session_id, err
+        );
+    }
+    crate::session::compaction_prefs::idle_monitor::forget(session_id);
     notify_session_delete_mirror(session_id);
 
     // Lineage tables can't ride the generic cascade: `commit_lineage` is keyed
@@ -1045,6 +1052,7 @@ pub(crate) fn delete_session_with_connection(
         return Err(rusqlite::Error::QueryReturnedNoRows);
     }
     shared::delete_session_cascade_with_connection(conn, session_id, SESSION_DELETE_TABLES)?;
+    crate::session::compaction_prefs::delete_with_connection(conn, session_id)?;
     project_management::lineage::delete_session_lineage_with_connection(conn, session_id)?;
     conn.execute(
         "UPDATE learnings SET source_session_id = NULL WHERE source_session_id = ?1",
@@ -1056,6 +1064,7 @@ pub(crate) fn delete_session_with_connection(
 /// Run post-commit mirrors and derived filesystem cleanup for one deleted
 /// session.
 pub(crate) fn finish_session_delete(session_id: &str) {
+    crate::session::compaction_prefs::idle_monitor::forget(session_id);
     notify_session_delete_mirror(session_id);
     cleanup_session_derived_resources(session_id);
 }

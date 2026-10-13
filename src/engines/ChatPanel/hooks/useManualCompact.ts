@@ -176,6 +176,7 @@ export function useManualCompact(): UseManualCompactReturn {
             Message.info(t("contextInfo.manualCompactAlreadyCompact"));
             return false;
           case "busy":
+          case "skipped":
             Message.info(t("contextInfo.manualCompactBusy"));
             return false;
           case "no_runtime":

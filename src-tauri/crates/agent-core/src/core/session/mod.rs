@@ -14,6 +14,7 @@
 
 pub(crate) mod auxiliary_usage;
 pub mod compaction;
+pub mod compaction_prefs;
 pub mod exec_modes;
 pub(crate) mod file_registry;
 pub mod gateway_pipeline;

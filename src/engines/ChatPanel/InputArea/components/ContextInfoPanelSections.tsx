@@ -13,6 +13,7 @@ import {
   UnfoldMoreIcon,
 } from "@src/icons";
 
+import CompactionPrefsCard from "./CompactionPrefsCard";
 import ContextBreakdownBar from "./ContextBreakdownBar";
 import ContextCategoryRow from "./ContextCategoryRow";
 import MiniCpmCompactCard from "./MiniCpmCompactCard";
@@ -277,6 +278,8 @@ export const ContextInfoManualCompactSection: React.FC<
             ? t("contextInfo.manualCompactRunning")
             : t("contextInfo.manualCompactAction")}
         </Button>
+
+        {sessionId && <CompactionPrefsCard sessionId={sessionId} />}
 
         {housekeeperEnabled && contextCompactEnabled && sessionId && (
           <ConfiguredMiniCpmCompactCard sessionId={sessionId} />

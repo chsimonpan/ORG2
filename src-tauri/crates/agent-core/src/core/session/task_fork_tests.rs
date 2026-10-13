@@ -1391,3 +1391,7 @@ async fn persisted_config_failures_are_explicit_and_never_pick_a_default_model()
     };
     assert!(e.starts_with("task_fork_runtime_unavailable"), "{e}");
 }
+
+#[cfg(test)]
+#[path = "../../tests/journey_fork_ownership_tests.rs"]
+mod journey_fork_ownership_tests;

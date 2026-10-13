@@ -544,6 +544,86 @@ async fn compaction_pre_turn_failure_preserves_weighted_and_observed_baseline() 
     assert_eq!(compaction.consecutive_failures, 1);
 }
 
+/// Spend-only arming: large window + ratio 1.0 so only the weighted trigger can fire.
+fn arm_spend_only(processor: &mut UnifiedMessageProcessor, sid: &str, agent_threshold: u64) {
+    processor.sm_config.enabled = false;
+    let resolved = &mut Arc::get_mut(&mut processor.runtime).unwrap().resolved;
+    resolved.context_window = 100_000;
+    let config = &mut resolved.compaction;
+    config.enabled = true;
+    config.weighted_token_threshold = agent_threshold;
+    config.trigger_ratio = 1.0;
+    config.min_messages = 2;
+    config.keep_ratio = 0.2;
+    config.floor_tokens = 100;
+    let conn = database::db::get_connection().unwrap();
+    // 5_000_000 equivalent tokens of recorded spend.
+    crate::model_context::weighted_usage::record_with_connection(&conn, sid, "spend", 0, 5_000_000_000)
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn compaction_session_threshold_override_above_spend_blocks_agent_default_trigger() {
+    let _sandbox = test_helpers::test_env::sandbox();
+    let sid = "pref-override-above";
+    let (mut processor, provider) = fixture(sid, false);
+    arm_spend_only(&mut processor, sid, 1); // agent default would fire
+    crate::session::compaction_prefs::set_threshold(sid, Some(6_000_000)).unwrap();
+    let mut messages = unified_persistence::load_llm_history(sid).unwrap();
+    assert!(matches!(
+        processor.run_pre_turn_compaction(sid, &mut messages).await,
+        CompactionPhaseOutcome::Continue
+    ));
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(boundary_rows(sid), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn compaction_session_threshold_zero_disables_only_spend_trigger() {
+    let _sandbox = test_helpers::test_env::sandbox();
+    let sid = "pref-override-zero";
+    let (mut processor, provider) = fixture(sid, false);
+    arm_spend_only(&mut processor, sid, 1);
+    crate::session::compaction_prefs::set_threshold(sid, Some(0)).unwrap();
+    let mut messages = unified_persistence::load_llm_history(sid).unwrap();
+    assert!(matches!(
+        processor.run_pre_turn_compaction(sid, &mut messages).await,
+        CompactionPhaseOutcome::Continue
+    ));
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+
+    // Context-capacity safety is independent of the spend override.
+    let sid = "pref-override-zero-context";
+    let (mut processor, provider) = fixture(sid, false);
+    arm_weighted_pre_turn(&mut processor, sid); // window 1000, ratio 0.0
+    crate::session::compaction_prefs::set_threshold(sid, Some(0)).unwrap();
+    let mut messages = unified_persistence::load_llm_history(sid).unwrap();
+    let _ = processor.run_pre_turn_compaction(sid, &mut messages).await;
+    assert!(
+        provider.calls.load(Ordering::SeqCst) >= 1,
+        "context trigger must still fire with spend disabled"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn compaction_session_threshold_override_below_spend_triggers_when_agent_disabled() {
+    let _sandbox = test_helpers::test_env::sandbox();
+    let sid = "pref-override-below";
+    let (mut processor, provider) = fixture(sid, false);
+    arm_spend_only(&mut processor, sid, 0); // agent spend trigger disabled
+    let mut messages = unified_persistence::load_llm_history(sid).unwrap();
+    let _ = processor.run_pre_turn_compaction(sid, &mut messages).await;
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0, "no override: stays off");
+
+    crate::session::compaction_prefs::set_threshold(sid, Some(4_000_000)).unwrap();
+    let mut messages = unified_persistence::load_llm_history(sid).unwrap();
+    let _ = processor.run_pre_turn_compaction(sid, &mut messages).await;
+    assert!(
+        provider.calls.load(Ordering::SeqCst) >= 1,
+        "override below recorded spend must trigger at the next turn"
+    );
+}
+
 // Real processor entry and session mutex; in-process provider fixture, no network/model.
 #[tokio::test]
 async fn compaction_processor_queued_lock_failure_recovery_cancel_capture() {
@@ -745,4 +825,152 @@ fn compaction_real_wry_reactive_then_checkpoint_fork() {
         assert_eq!(crate::model_context::weighted_usage::snapshot_with_connection(&conn, &new_sid).unwrap().milli, 0);
         eprintln!("REAL_WRY_REACTIVE_CHECKPOINT_FORK_OK request={request} new={new_sid}");
     });
+}
+
+mod idle_compaction_e2e {
+    use super::*;
+    use crate::session::compaction_prefs::{self as prefs, idle_monitor};
+    use crate::state::commands::session::{
+        run_scheduled_compaction, CompactionTrigger, ManualCompactStatus,
+    };
+    use crate::state::AgentAppState;
+
+    async fn live_state(sid: &str) -> (AgentAppState, Arc<FixtureProvider>, Arc<AgentSession>) {
+        let (mut processor, provider) = fixture(sid, false);
+        {
+            // Small fixture transcript: shrink the keep window so a segment is compactable.
+            let config = &mut Arc::get_mut(&mut processor.runtime).unwrap().resolved.compaction;
+            config.keep_ratio = 0.2;
+            config.floor_tokens = 100;
+            config.min_messages = 2;
+        }
+        let state = AgentAppState::new();
+        let def = AgentDefinition {
+            selected_model_id: Some("test/model".into()),
+            ..Default::default()
+        };
+        let session = state.register_session(AgentSession::new(sid.into(), def)).await;
+        session.set_runtime(processor.runtime.clone()).await.unwrap();
+        (state, provider, session)
+    }
+
+    fn opt_in(sid: &str) -> i64 {
+        let stored = prefs::set_idle(sid, true, 59).unwrap();
+        idle_monitor::configure(&stored);
+        idle_monitor::note_turn_activity(sid);
+        idle_monitor::live_view(sid).unwrap().0.expect("epoch stamped")
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stale_epoch_makes_no_model_call_and_changes_nothing() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let sid = "idle-e2e-stale";
+        let (state, provider, _session) = live_state(sid).await;
+        let epoch = opt_in(sid);
+        let before = unified_persistence::load_llm_history(sid).unwrap().len();
+
+        let result = run_scheduled_compaction(
+            &state,
+            sid,
+            None,
+            CompactionTrigger::Idle { epoch_ms: epoch - 1 },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.status, ManualCompactStatus::Skipped);
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(unified_persistence::load_llm_history(sid).unwrap().len(), before);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn switch_turned_off_between_decision_and_job_skips() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let sid = "idle-e2e-off";
+        let (state, provider, _session) = live_state(sid).await;
+        let epoch = opt_in(sid);
+        idle_monitor::configure(&prefs::set_idle(sid, false, 59).unwrap());
+
+        let result = run_scheduled_compaction(&state, sid, None, CompactionTrigger::Idle { epoch_ms: epoch })
+            .await
+            .unwrap();
+
+        assert_eq!(result.status, ManualCompactStatus::Skipped);
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn current_epoch_compacts_once_without_rearming_activity() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let sid = "idle-e2e-fire";
+        let (state, provider, _session) = live_state(sid).await;
+        let epoch = opt_in(sid);
+        let before = unified_persistence::load_llm_history(sid).unwrap().len();
+
+        let first = run_scheduled_compaction(&state, sid, None, CompactionTrigger::Idle { epoch_ms: epoch })
+            .await
+            .unwrap();
+        eprintln!(
+            "IDLE_E2E first status={} calls={} before={before} msgs_after={:?}",
+            first.status.as_str(),
+            provider.calls.load(Ordering::SeqCst),
+            first.messages_after
+        );
+        assert_eq!(first.status, ManualCompactStatus::Compacted, "{:?}", first.message);
+        assert!(first.boundary.is_some());
+        assert!(provider.calls.load(Ordering::SeqCst) <= 1);
+        assert_eq!(
+            idle_monitor::live_view(sid).unwrap().0,
+            Some(epoch),
+            "the compaction job itself must not count as activity"
+        );
+
+        let calls_after_first = provider.calls.load(Ordering::SeqCst);
+        let again = run_scheduled_compaction(&state, sid, None, CompactionTrigger::Idle { epoch_ms: epoch })
+            .await
+            .unwrap();
+        // After 8 -> 2 rows the transcript is below the manual minimum; either way no model call.
+        assert!(matches!(again.status, ManualCompactStatus::TooShort | ManualCompactStatus::AlreadyCompact), "{:?}", again.status);
+        assert_eq!(provider.calls.load(Ordering::SeqCst), calls_after_first);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn idle_never_initializes_a_runtime_for_an_unloaded_session() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let conn = database::db::get_connection().unwrap();
+        crate::persistence::test_schema::ensure_agent_sessions_schema(&conn);
+        let state = AgentAppState::new();
+        let sid = "idle-e2e-unloaded";
+        conn.execute("INSERT INTO agent_sessions (session_id,name,session_type,status,created_at,updated_at) VALUES (?1,'x','agent','idle',datetime('now'),datetime('now'))", [sid]).unwrap();
+
+        let result = run_scheduled_compaction(&state, sid, None, CompactionTrigger::Idle { epoch_ms: 1 })
+            .await
+            .unwrap();
+
+        assert_eq!(result.status, ManualCompactStatus::NoRuntime);
+        assert!(state.get_session(sid).await.is_none(), "idle must not lazy-init");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn channel_attached_session_is_refused_for_idle() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let sid = "idle-e2e-channel";
+        let (state, provider, _session) = live_state(sid).await;
+        let epoch = opt_in(sid);
+        state
+            .gateway_bindings
+            .set(
+                crate::integrations::gateway::binding::SessionKey("chan:1".into()),
+                sid.into(),
+            )
+            .await
+            .unwrap();
+
+        let result = run_scheduled_compaction(&state, sid, None, CompactionTrigger::Idle { epoch_ms: epoch })
+            .await
+            .unwrap();
+
+        assert_eq!(result.status, ManualCompactStatus::ChannelAttached);
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    }
 }

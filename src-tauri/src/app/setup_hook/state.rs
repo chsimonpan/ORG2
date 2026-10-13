@@ -167,6 +167,7 @@ pub(crate) fn init_core_state(app: &tauri::App) {
     let agent_org_archive_reconcile_state = unified_state.clone();
     let agent_org_handoff_reconcile_state = unified_state.clone();
     let housekeeper_compaction_state = unified_state.clone();
+    let idle_compaction_state = unified_state.clone();
     app.manage(unified_state);
     tracing::info!("[UnifiedAgent] Unified agent state initialized");
 
@@ -218,6 +219,9 @@ pub(crate) fn init_core_state(app: &tauri::App) {
     tracing::info!(
         "[HousekeeperCompaction] opt-in MiniCPM context worker initialized"
     );
+
+    agent_core::session::compaction_prefs::idle_monitor::spawn(idle_compaction_state);
+    tracing::info!("[IdleCompaction] opt-in idle compaction monitor initialized");
 }
 
 pub(crate) fn init_settings_and_stores(app: &tauri::App) {

@@ -19,6 +19,20 @@ export const agentSession = {
     .input(schemas.agentSession.ManualCompactInput)
     .output(schemas.agentSession.ManualCompactResultSchema)
     .build(),
+  compactionPrefsGet: defineProcedure("session_compaction_prefs_get")
+    .input(schemas.agentSession.SessionIdInput)
+    .output(schemas.agentSession.CompactionPrefsViewSchema)
+    .build(),
+  compactionPrefsSetThreshold: defineProcedure(
+    "session_compaction_prefs_set_threshold"
+  )
+    .input(schemas.agentSession.CompactionPrefsSetThresholdInput)
+    .output(schemas.agentSession.CompactionPrefsViewSchema)
+    .build(),
+  compactionPrefsSetIdle: defineProcedure("session_compaction_prefs_set_idle")
+    .input(schemas.agentSession.CompactionPrefsSetIdleInput)
+    .output(schemas.agentSession.CompactionPrefsViewSchema)
+    .build(),
   housekeeperContextCompactionStatus: defineProcedure(
     "housekeeper_context_compaction_status"
   )

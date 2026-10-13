@@ -11,6 +11,7 @@ pub mod channel;
 mod coding;
 pub(crate) mod common;
 mod compaction;
+mod compaction_prefs;
 pub(crate) mod create;
 pub mod debug;
 mod follow_up_suggestions;
@@ -26,6 +27,7 @@ mod workspace;
 
 pub use coding::*;
 pub use compaction::*;
+pub use compaction_prefs::*;
 pub use follow_up_suggestions::*;
 pub use housekeeper::*;
 pub use interaction::*;

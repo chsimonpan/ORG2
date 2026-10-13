@@ -88,6 +88,25 @@ pub fn commit_with_connection(conn: &Connection, checkpoint: &WeightedCheckpoint
     Ok(())
 }
 
+/// Read-only spend lookup for display: never creates a row; a session that has
+/// not recorded usage yet (or a DB without the table) reads as zero.
+pub fn peek_milli(session_id: &str) -> Result<i64> {
+    use rusqlite::OptionalExtension;
+    let conn = database::db::get_connection()?;
+    match conn
+        .query_row(
+            "SELECT milli FROM session_weighted_usage WHERE session_id=?1",
+            [session_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()
+    {
+        Ok(found) => Ok(found.unwrap_or(0)),
+        Err(rusqlite::Error::SqliteFailure(_, Some(msg))) if msg.contains("no such table") => Ok(0),
+        Err(err) => Err(err),
+    }
+}
+
 pub fn snapshot(session_id: &str) -> Result<WeightedCheckpoint> {
     database::db::with_sessions_writer(|| {
         let conn = database::db::get_connection()?;

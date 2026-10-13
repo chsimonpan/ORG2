@@ -2,6 +2,7 @@ import { z } from "zod/v4";
 
 import type {
   AgentStatusInfo,
+  CompactionPrefsView,
   DeleteSessionReceipt,
   FileResolution,
   HousekeeperContextCompactionState,
@@ -101,6 +102,62 @@ export const ManualCompactInput = z.object({
   instructions: z.string().optional(),
 });
 
+export const CompactionPrefsSetThresholdInput = z.object({
+  sessionId: z.string(),
+  /** `null` clears the override (inherit agent default); `0` disables only the spend trigger. */
+  threshold: z.number().int().nonnegative().nullable(),
+});
+
+export const CompactionPrefsSetIdleInput = z.object({
+  sessionId: z.string(),
+  enabled: z.boolean(),
+  minutes: z.number().int().positive(),
+});
+
+const IdleCompactionAttemptSchema = z.object({
+  epochMs: z.number(),
+  atMs: z.number(),
+  status: z.string(),
+  tokensBefore: z.number().nullable(),
+  tokensAfter: z.number().nullable(),
+});
+
+export const CompactionPrefsViewSchema = z.object({
+  sessionId: z.string(),
+  weightedThreshold: z.number().nullable(),
+  weightedUsedTokens: z.number(),
+  agentDefaultThreshold: z.number(),
+  agentDefaultFromRuntime: z.boolean(),
+  effectiveThreshold: z.number(),
+  thresholdSource: z.enum(["session", "agent_default"]),
+  thresholdMin: z.number(),
+  thresholdMax: z.number(),
+  idle: z.object({
+    supported: z.boolean(),
+    unsupportedReason: OptionalWireStringSchema,
+    enabled: z.boolean(),
+    minutes: z.number(),
+    minutesMin: z.number(),
+    minutesMax: z.number(),
+    state: z.enum([
+      "disabled",
+      "unsupported",
+      "waiting_activity",
+      "waiting",
+      "busy",
+      "in_flight",
+      "attempted",
+      "due",
+      "overdue",
+    ]),
+    lastActivityMs: z.number().optional(),
+    nextDueMs: z.number().optional(),
+    lastAttempt: IdleCompactionAttemptSchema.nullable(),
+    nowMs: z.number(),
+    overdueGraceMs: z.number(),
+  }),
+}) as z.ZodType<CompactionPrefsView, CompactionPrefsView>;
+
 export const HousekeeperContextCompactionEnabledInput = z.object({
   sessionId: z.string(),
   enabled: z.boolean(),
@@ -148,6 +205,7 @@ export const ManualCompactResultSchema = z.object({
     "no_runtime",
     "channel_attached",
     "failed",
+    "skipped",
   ]),
   message: z.string().optional(),
   messagesBefore: z.number().optional(),

@@ -55,7 +55,8 @@ export type ManualCompactStatus =
   | "busy"
   | "no_runtime"
   | "channel_attached"
-  | "failed";
+  | "failed"
+  | "skipped";
 
 export interface ManualCompactBoundary {
   id: string;
@@ -72,6 +73,59 @@ export interface ManualCompactResult {
   tokensAfter?: number;
   /** Set on `compacted`: persisted boundary row for in-place chat append. */
   boundary?: ManualCompactBoundary;
+}
+
+export type CompactionThresholdSource = "session" | "agent_default";
+
+export type IdleCompactionState =
+  | "disabled"
+  | "unsupported"
+  | "waiting_activity"
+  | "waiting"
+  | "busy"
+  | "in_flight"
+  | "attempted"
+  | "due"
+  | "overdue";
+
+export interface IdleCompactionAttempt {
+  epochMs: number;
+  atMs: number;
+  /** compacted | too_short | already_compact | busy | no_runtime | failed | skipped_overdue ... */
+  status: string;
+  tokensBefore: number | null;
+  tokensAfter: number | null;
+}
+
+export interface IdleCompactionView {
+  supported: boolean;
+  unsupportedReason?: string;
+  enabled: boolean;
+  minutes: number;
+  minutesMin: number;
+  minutesMax: number;
+  state: IdleCompactionState;
+  lastActivityMs?: number;
+  nextDueMs?: number;
+  lastAttempt: IdleCompactionAttempt | null;
+  nowMs: number;
+  overdueGraceMs: number;
+}
+
+export interface CompactionPrefsView {
+  sessionId: string;
+  /** Per-session override; `null` inherits the agent default. */
+  weightedThreshold: number | null;
+  /** Equivalent tokens spent since the last compaction boundary. */
+  weightedUsedTokens: number;
+  agentDefaultThreshold: number;
+  /** False when the session runtime is not loaded and the value is the global default. */
+  agentDefaultFromRuntime: boolean;
+  effectiveThreshold: number;
+  thresholdSource: CompactionThresholdSource;
+  thresholdMin: number;
+  thresholdMax: number;
+  idle: IdleCompactionView;
 }
 
 export type HousekeeperContextCompactionStatus =

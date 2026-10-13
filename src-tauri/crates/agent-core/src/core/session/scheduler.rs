@@ -533,6 +533,11 @@ impl WorkerTask {
             let is_turn = msg.kind == ScheduledKind::Turn;
             self.processing.store(true, Ordering::Relaxed);
             self.processing_turn.store(is_turn, Ordering::Relaxed);
+            if is_turn {
+                crate::session::compaction_prefs::idle_monitor::note_turn_activity(
+                    &self.session_id,
+                );
+            }
 
             info!(
                 "[scheduler] Processing {:?} {} for session {}",
@@ -746,6 +751,13 @@ impl WorkerTask {
             }
             self.processing_turn.store(false, Ordering::Relaxed);
             self.processing.store(false, Ordering::Relaxed);
+            if is_turn {
+                crate::session::compaction_prefs::idle_monitor::note_turn_activity(
+                    &self.session_id,
+                );
+            } else {
+                crate::session::compaction_prefs::idle_monitor::wake();
+            }
             self.broadcast_idle_status();
         }
 
@@ -1161,5 +1173,72 @@ mod tests {
 
         assert_eq!(executed.load(Ordering::SeqCst), 1);
         assert_eq!(scheduler.pending_count(), 0);
+    }
+
+    async fn run_job(scheduler: &DialogScheduler, kind: ScheduledKind, hold: Arc<tokio::sync::Notify>) {
+        scheduler
+            .enqueue(ScheduledMessage {
+                kind,
+                message_id: format!("idle-stamp-{:?}", kind),
+                generation: 0,
+                client_message_id: None,
+                turn_intent_id: String::new(),
+                org_run_id: None,
+                content: "x".to_string(),
+                execute: Box::new(move || {
+                    Box::pin(async move {
+                        hold.notified().await;
+                        Ok(ExecutionCompletion::Finished)
+                    })
+                }),
+            })
+            .await
+            .expect("enqueue");
+    }
+
+    async fn settle(scheduler: &DialogScheduler) {
+        for _ in 0..200 {
+            if !scheduler.is_processing() && scheduler.pending_count() == 0 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("scheduler did not settle");
+    }
+
+    #[tokio::test]
+    async fn idle_monitor_is_stamped_by_turn_jobs_at_start_and_end_but_not_maintenance() {
+        use crate::session::compaction_prefs::{idle_monitor, CompactionPrefs};
+        let sid = "sched-idle-stamp";
+        idle_monitor::configure(&CompactionPrefs {
+            idle_enabled: true,
+            ..CompactionPrefs::defaults(sid)
+        });
+        assert_eq!(idle_monitor::live_view(sid).unwrap().0, None);
+
+        let scheduler = DialogScheduler::new(sid, 8);
+        let hold = Arc::new(tokio::sync::Notify::new());
+        run_job(&scheduler, ScheduledKind::Maintenance, Arc::clone(&hold)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        assert!(scheduler.is_processing());
+        hold.notify_one();
+        settle(&scheduler).await;
+        assert_eq!(
+            idle_monitor::live_view(sid).unwrap().0,
+            None,
+            "maintenance (compaction) must never count as activity"
+        );
+
+        run_job(&scheduler, ScheduledKind::Turn, Arc::clone(&hold)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        let at_start = idle_monitor::live_view(sid).unwrap().0.expect("stamped at turn start");
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        hold.notify_one();
+        settle(&scheduler).await;
+        let at_end = idle_monitor::live_view(sid).unwrap().0.unwrap();
+        assert!(at_end > at_start, "turn end re-stamps so a long turn restarts the clock");
+
+        idle_monitor::forget(sid);
+        assert!(idle_monitor::live_view(sid).is_none());
     }
 }

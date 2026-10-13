@@ -16,6 +16,7 @@ import type { WorkspaceSnapshot } from "@src/services/context/workspaceSnapshot"
 import { isCliSession } from "@src/util/session/sessionDispatch";
 
 import type {
+  CompactionPrefsView,
   DeleteSessionReceipt,
   HousekeeperContextCompactionState,
   ManualCompactResult,
@@ -44,6 +45,32 @@ export async function manualCompactSession(
   return rpc.agentSession.manualCompact({
     sessionId,
     ...(instructions ? { instructions } : {}),
+  });
+}
+
+export async function getCompactionPrefs(
+  sessionId: string
+): Promise<CompactionPrefsView> {
+  return rpc.agentSession.compactionPrefsGet({ sessionId });
+}
+
+/** `threshold: null` clears the override; `0` disables only the spend trigger. */
+export async function setCompactionThreshold(
+  sessionId: string,
+  threshold: number | null
+): Promise<CompactionPrefsView> {
+  return rpc.agentSession.compactionPrefsSetThreshold({ sessionId, threshold });
+}
+
+export async function setIdleCompaction(
+  sessionId: string,
+  enabled: boolean,
+  minutes: number
+): Promise<CompactionPrefsView> {
+  return rpc.agentSession.compactionPrefsSetIdle({
+    sessionId,
+    enabled,
+    minutes,
   });
 }
 
