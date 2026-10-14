@@ -163,20 +163,23 @@ const CompactionPrefsCard: React.FC<CompactionPrefsCardProps> = memo(
                 })}
           </p>
           <div className="mt-2 flex items-center gap-2">
-            <NumberInput
-              size="small"
-              dataTestId="context-info-compaction-threshold-input"
-              value={draftMillions}
-              min={minMillions}
-              max={maxMillions}
-              step={0.5}
-              suffix={t("contextInfo.compactionMillionTokens")}
-              disabled={pending}
-              onValueChange={setDraftMillions}
-            />
+            <div className="min-w-0 flex-1">
+              <NumberInput
+                size="small"
+                dataTestId="context-info-compaction-threshold-input"
+                value={draftMillions}
+                min={minMillions}
+                max={maxMillions}
+                step={0.25}
+                suffix={t("contextInfo.compactionMillionTokens")}
+                disabled={pending}
+                onValueChange={setDraftMillions}
+              />
+            </div>
             <Button
               size="small"
               variant="primary"
+              className="shrink-0"
               data-testid="context-info-compaction-threshold-apply"
               disabled={pending || !dirty || !draftTokens}
               onClick={() =>

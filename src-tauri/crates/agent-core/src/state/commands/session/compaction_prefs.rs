@@ -29,7 +29,6 @@ pub struct IdleView {
     pub last_activity_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_due_ms: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub last_attempt: Option<IdleAttempt>,
     pub now_ms: i64,
     pub overdue_grace_ms: i64,
@@ -224,6 +223,19 @@ mod tests {
         let conn = database::db::get_connection().expect("sandbox database");
         crate::persistence::test_schema::ensure_agent_sessions_schema(&conn);
         conn
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn wire_json_always_carries_last_attempt_as_null_when_none() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let _conn = sandbox_db();
+        let state = AgentAppState::new();
+        let view = build_view(&state, "view-wire").await.unwrap();
+        assert!(view.idle.last_attempt.is_none());
+        let wire = serde_json::to_value(&view).unwrap();
+        let idle = wire.get("idle").and_then(|v| v.as_object()).expect("idle object");
+        assert_eq!(idle.get("lastAttempt"), Some(&serde_json::Value::Null), "TS contract is `IdleCompactionAttempt | null`; an omitted key fails the strict RPC output schema");
+        assert!(wire.get("weightedThreshold").is_some_and(|v| v.is_null()));
     }
 
     #[tokio::test(flavor = "multi_thread")]

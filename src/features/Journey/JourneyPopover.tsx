@@ -8,6 +8,7 @@ import {NativeContextImportControls} from "./NativeContextImportControls";
 import {useEffect,useRef,useState} from "react";
 import {JourneyCanvas} from "./JourneyCanvas";
 import {JourneyLifecycleControls} from "./JourneyLifecycleControls";
+import {JourneyReviewQueue} from "./JourneyReviewQueue";
 import {loadJourneySnapshot,loadJourneyDomainSnapshot,loadJourneyBoundaryPreview,openDurableJourneyOwner} from "./nativeAdapter";
 import type {JourneyDomainSnapshot,BoundaryPreview} from "./nativeAdapter";
 import {validateAnchor} from "./canonicalScope";
@@ -44,7 +45,8 @@ export function JourneyOwnerPanel({ownerSessionId,onClose}:{ownerSessionId:strin
   <NativeContextImportControls key={ownerSessionId+":import"} ownerSessionId={ownerSessionId} anchor={active}/>
   {domain?.snapshot.session_id===ownerSessionId&&<aside aria-label="Journey branch tree"><strong>Branches / tasks</strong><p>Active branch: {domain.snapshot.active_branch_id}</p><ul>{Object.values(domain.snapshot.branches).map(f=><li key={f.id}>{f.name||f.id}: {f.state} / parent {f.parent_branch_id} / exact endpoint {f.parent_anchor_message_id||"unavailable"}</li>)}</ul><ul>{Object.values(domain.snapshot.tasks).map(task=><li key={task.id}>{task.name}: {task.state} / branch {task.branch_id}</li>)}</ul><p>{Object.keys(domain.snapshot.facts).length} facts / {Object.keys(domain.snapshot.reviews).length} review items</p></aside>}
   {domain?.snapshot.session_id===ownerSessionId&&<JourneyLifecycleControls key={ownerSessionId} ownerSessionId={ownerSessionId} domain={domain} anchor={active} onCommitted={()=>setReload(v=>v+1)}/>}
-  <JourneyHistoricalForkControls ownerSessionId={ownerSessionId} anchor={active} onCommitted={child=>{setReload(v=>v+1);openChild({sessionId:child});onClose();}}/>
+  {domain?.snapshot.session_id===ownerSessionId&&<JourneyReviewQueue key={ownerSessionId+":review"} ownerSessionId={ownerSessionId} domain={domain} anchor={active} onChanged={()=>setReload(v=>v+1)}/>}
+  <JourneyHistoricalForkControls ownerSessionId={ownerSessionId} anchor={active} forkable={visible?.nodes.find(n=>n.anchor.durableMessageId===active?.durableMessageId)?.providerVisible!==false} onCommitted={child=>{setReload(v=>v+1);openChild({sessionId:child});onClose();}}/>
   <TaskForkControls ownerSessionId={ownerSessionId} anchor={active} onOpenSession={id=>{setReload(v=>v+1);openChild({sessionId:id});}}/>
   <button type="button" disabled={!active} onClick={()=>void requestPreview()}>Preview exact historical prefix</button>{previewError&&<p role="alert">{previewError}</p>}{preview?.ownerSessionId===ownerSessionId&&preview.anchor.boundaryHash===active?.boundaryHash&&<article aria-label="Journey exact prefix preview"><p>Prefix hash: {preview.prefixHash}</p>{preview.records.map(row=><section key={row.durableMessageId}><strong>{row.role}: {row.durableMessageId}</strong><pre className="whitespace-pre-wrap">{row.content}</pre></section>)}</article>}
   {error&&<p role="alert">{error}</p>}{!visible&&!error&&<p role="status">Loading canonical Journey</p>}

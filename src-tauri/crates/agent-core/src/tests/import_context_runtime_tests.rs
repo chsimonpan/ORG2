@@ -36,6 +36,12 @@ fn seed(owner:&str)->DurableAnchor {
     crate::foundation::db_bridge::register(database::db::get_connection);
     let c=database::db::get_connection().unwrap();
     crate::foundation::persistence::session_snapshots::ensure_tables_with(&c).unwrap();
+    // Hermetic per-owner reset: the DB under HOME persists across test runs, so stale rows
+    // (extra imports, a prior run's revision-bumping message) must not leak into this run.
+    c.execute("DELETE FROM agent_messages WHERE session_id=?1",[owner]).unwrap();
+    if c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_context_imports_v1')",[],|r|r.get::<_,bool>(0)).unwrap() {
+        c.execute("DELETE FROM session_context_imports_v1 WHERE target_session_id=?1",[owner]).unwrap();
+    }
     c.execute("INSERT OR REPLACE INTO agent_sessions(session_id,created_at,updated_at) VALUES(?1,'2026-10-08T00:00:00Z','2026-10-08T00:00:00Z')",[owner]).unwrap();
     for (suffix,sequence,role,content) in [("start",1,"user","Important prior decision: imports must be explicit."),("end",2,"assistant","Keep the exact durable boundary."),("future",3,"user","FUTURE_AFTER_SELECTED_END_MUST_NOT_BE_IMPORTED")] {
         c.execute("INSERT OR REPLACE INTO agent_messages(id,session_id,role,content,sequence,created_at) VALUES(?1,?2,?3,?4,?5,'2026-10-08T00:00:00Z')",params![format!("{owner}-{suffix}"),owner,role,content,sequence]).unwrap();

@@ -4,7 +4,7 @@ use serde::Serialize;
 use agent_core::core::session::journey_canonical::DurableAnchor;
 #[derive(Debug,Serialize)]
 #[serde(rename_all="camelCase")]
-pub struct CanonicalNode{pub id:String,pub title:String,pub timestamp:i64,pub lane_id:String,pub kind:&'static str,pub anchor:DurableAnchor}
+pub struct CanonicalNode{pub id:String,pub title:String,pub timestamp:i64,pub lane_id:String,pub kind:&'static str,pub anchor:DurableAnchor,pub provider_visible:bool}
 #[derive(Debug,Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct Capabilities{pub read:bool,pub fork:bool,pub import:bool,pub mutate:bool}
@@ -37,12 +37,13 @@ fn read_canonical_snapshot(owner:&str)->Result<JourneySnapshot,String>{
  if rows.len()>10000{return Err("journey_snapshot_limit".into());}
  // Display revision is derived from durable message identity, not UI arrays.
  let revision=rows.iter().map(|r|r.sequence.max(0) as u64).max().unwrap_or(0);
+ let visible=agent_core::core::session::journey_runtime_persistence::provider_visible_message_ids(&conn,owner).map_err(|e|e.to_string())?;
  let branch=format!("session:{owner}");let mut nodes=Vec::new();
  for row in rows.into_iter().filter(|r|r.role=="user"||r.compact_from_sequence.is_some()){
   let timestamp=chrono::DateTime::parse_from_rfc3339(&row.created_at).map_err(|_|"journey_invalid_durable_time")?.timestamp_millis();
   let anchor=agent_core::core::session::journey_canonical::resolve_with_connection(&conn,owner,owner,&branch,&row.id,revision)?;
   let title=if row.compact_from_sequence.is_some(){"Context compacted".into()}else{row.content.chars().take(160).collect()};
-  nodes.push(CanonicalNode{id:format!("{owner}:{}:{}",branch,row.id),title,timestamp,lane_id:branch.clone(),kind:if row.compact_from_sequence.is_some(){"verify"}else{"question"},anchor});
+  nodes.push(CanonicalNode{id:format!("{owner}:{}:{}",branch,row.id),title,timestamp,lane_id:branch.clone(),kind:if row.compact_from_sequence.is_some(){"verify"}else{"question"},provider_visible:visible.as_ref().map_or(true,|v|v.contains(&row.id)),anchor});
  }
  // Mutation permissions are not inferred from a read or a UI selection.
  Ok(JourneySnapshot{schema_version:1,owner_session_id:owner.into(),revision,nodes,edges:vec![],capabilities:Capabilities{read:true,fork:false,import:false,mutate:false}})
@@ -167,6 +168,37 @@ pub async fn journey_fork_start(owner_session_id:String,request:journey_service:
 pub async fn journey_review_list(owner_session_id:String,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<Vec<agent_core::core::session::journey_lifecycle::ReviewItem>,String>{
  if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_not_registered".into());}let c=database::db::get_connection().map_err(|e|e.to_string())?;journey_service::SessionJourneyApplicationService::review_queue(&c,&owner_session_id).map_err(|e|e.to_string())
 }
+/// Close the active fork at an exact endpoint and enqueue its review in one transaction. The
+/// provenance comes from the owner session's persisted runtime; no provider call happens here.
+#[tauri::command]
+pub async fn journey_fork_close(owner_session_id:String,request:journey_service::RequestForkCloseRequest,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<agent_core::core::session::journey_review_queue::ReviewJob,String>{
+ check_journey_owner(&owner_session_id,&request.session_id)?;
+ if request.review_id.trim().is_empty()||request.review_id.len()>128{return Err("journey_review_id_invalid".into());}
+ let provenance=agent_core::core::session::journey_review_runtime::review_provenance_from_persisted_config(&owner_session_id).await?;
+ let _lease=journey_mutation_lease(&owner_session_id,&state).await?;
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_revoked".into());}
+ let job_id=format!("jv-review:{}",request.review_id);
+ tokio::task::spawn_blocking(move||database::db::with_sessions_writer(||{let mut c=database::db::get_connection().map_err(|e|e.to_string())?;journey_service::SessionJourneyApplicationService::request_fork_close_and_enqueue(&mut c,request,job_id,provenance).map_err(|e|e.to_string())})).await.map_err(|e|e.to_string())?
+}
+
+#[tauri::command]
+pub async fn journey_review_jobs(owner_session_id:String,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<Vec<agent_core::core::session::journey_review_queue::ReviewJob>,String>{
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_not_registered".into());}
+ tokio::task::spawn_blocking(move||{let c=database::db::get_connection().map_err(|e|e.to_string())?;agent_core::core::session::journey_review_queue::ReviewJobRepository::list_for_session(&c,&owner_session_id).map_err(|e|e.to_string())}).await.map_err(|e|e.to_string())?
+}
+
+#[derive(Debug,serde::Deserialize)]
+#[serde(rename_all="camelCase",deny_unknown_fields)]
+pub struct CancelReviewJobRequest{pub session_id:String,pub job_id:String}
+
+/// Cancel a queued or running review. Allowed while the session is busy (it never touches the
+/// transcript); a running provider call is aborted and a late result cannot publish.
+#[tauri::command]
+pub async fn journey_review_cancel(owner_session_id:String,request:CancelReviewJobRequest,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<agent_core::core::session::journey_review_queue::ReviewJob,String>{
+ check_journey_owner(&owner_session_id,&request.session_id)?;
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_not_registered".into());}
+ tokio::task::spawn_blocking(move||database::db::with_sessions_writer(||{let mut c=database::db::get_connection().map_err(|e|e.to_string())?;agent_core::core::session::journey_review_queue::cancel_review_job(&mut c,&request.session_id,&request.job_id).map_err(|e|e.to_string())})).await.map_err(|e|e.to_string())?
+}
 #[cfg(test)]mod lifecycle_owner_tests{use super::*;#[test]fn all_lifecycle_commands_require_exact_owner_not_ui_title_or_imported_cli(){assert!(check_journey_owner("A","A").is_ok());assert!(check_journey_owner("A","B").is_err());assert!(check_journey_owner("cli:A","cli:A").is_err());assert!(check_journey_owner("","").is_err());}}
 
 #[cfg(test)]
@@ -216,7 +248,11 @@ fn historical_fork_commit(owner:&str,request:&HistoricalRuntimeForkRequest)->Res
  tx.execute_batch("CREATE TABLE IF NOT EXISTS historical_runtime_fork_intents(owner_session_id TEXT NOT NULL,intent_id TEXT NOT NULL,anchor_json TEXT NOT NULL,child_session_id TEXT NOT NULL UNIQUE,parent_session_id TEXT NOT NULL,PRIMARY KEY(owner_session_id,intent_id));").map_err(|e|e.to_string())?;
  let anchor_json=serde_json::to_string(&request.anchor).map_err(|e|e.to_string())?;
  let prior=tx.query_row("SELECT anchor_json,child_session_id,parent_session_id FROM historical_runtime_fork_intents WHERE owner_session_id=?1 AND intent_id=?2",params![owner,request.intent_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?))).optional().map_err(|e|e.to_string())?;
- if let Some((stored,child,parent))=prior{if stored!=anchor_json{return Err("historical_fork_intent_conflict".into());}return Ok(HistoricalRuntimeForkResponse{child_session_id:child,parent_session_id:parent});}
+ if let Some((stored,child,parent))=prior{if stored!=anchor_json{return Err("historical_fork_intent_conflict".into());}
+  // Idempotent replay returns the child that already exists and never re-reads parent state. A deleted child is an explicit error, not a silent re-create.
+  let alive:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE session_id=?1)",[&child],|r|r.get(0)).map_err(|e|e.to_string())?;
+  if !alive{return Err("historical_fork_child_missing".into());}
+  return Ok(HistoricalRuntimeForkResponse{child_session_id:child,parent_session_id:parent});}
  let exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE session_id=?1)",[owner],|r|r.get(0)).map_err(|e|e.to_string())?;
  if !exists{return Err("historical_fork_owner_missing".into());}
  let revision:i64=tx.query_row("SELECT COALESCE(MAX(sequence),0) FROM agent_messages WHERE session_id=?1",[owner],|r|r.get(0)).map_err(|e|e.to_string())?;
@@ -226,11 +262,17 @@ fn historical_fork_commit(owner:&str,request:&HistoricalRuntimeForkRequest)->Res
  let unique:i64=tx.query_row("SELECT COUNT(*) FROM agent_messages WHERE session_id=?1 AND sequence=?2",params![owner,endpoint],|r|r.get(0)).map_err(|e|e.to_string())?;if unique!=1{return Err("historical_fork_ambiguous_endpoint".into());}
  // Validate the loader-visible inclusive prefix, never round the endpoint to a turn.
  // Compaction summaries are user projections; only their visible tail needs pairing.
- let compact_floor:Option<i64>=tx.query_row("SELECT compact_from_sequence FROM agent_messages WHERE session_id=?1 AND sequence<=?2 AND compact_from_sequence IS NOT NULL ORDER BY sequence DESC LIMIT 1",params![owner,endpoint],|r|r.get(0)).optional().map_err(|e|e.to_string())?;
+ // Inherit only what the parent's active branch shows the provider (None = legacy transcript, every row). Hidden history is never copied.
+ let visible=agent_core::core::session::journey_runtime_persistence::provider_visible_message_ids(&tx,owner).map_err(|e|e.to_string())?;
+ if let Some(v)=&visible{if !v.contains(&request.anchor.durable_message_id){return Err("historical_fork_anchor_not_visible".into());}}
+ let is_visible=|id:&str|visible.as_ref().map_or(true,|v|v.contains(id));
+ // A hidden compaction row is not a floor: only a compaction the provider can see bounds the visible tail.
+ let compact_floor:Option<i64>={let mut stmt=tx.prepare("SELECT id,compact_from_sequence FROM agent_messages WHERE session_id=?1 AND sequence<=?2 AND compact_from_sequence IS NOT NULL ORDER BY sequence DESC").map_err(|e|e.to_string())?;
+ let rows=stmt.query_map(params![owner,endpoint],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?))).map_err(|e|e.to_string())?;let mut floor=None;for row in rows{let(id,from)=row.map_err(|e|e.to_string())?;if is_visible(&id){floor=Some(from);break;}}floor};
  let mut pending=std::collections::HashSet::<String>::new();
- {let mut stmt=tx.prepare("SELECT role,tool_call_id FROM agent_messages WHERE session_id=?1 AND sequence<=?2 AND sequence>=?3 AND compact_from_sequence IS NULL ORDER BY sequence,id").map_err(|e|e.to_string())?;
- let rows=stmt.query_map(params![owner,endpoint,compact_floor.unwrap_or(i64::MIN)],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?))).map_err(|e|e.to_string())?;
- for row in rows{let(role,id)=row.map_err(|e|e.to_string())?;match role.as_str(){
+ {let mut stmt=tx.prepare("SELECT id,role,tool_call_id FROM agent_messages WHERE session_id=?1 AND sequence<=?2 AND sequence>=?3 AND compact_from_sequence IS NULL ORDER BY sequence,id").map_err(|e|e.to_string())?;
+ let rows=stmt.query_map(params![owner,endpoint,compact_floor.unwrap_or(i64::MIN)],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?))).map_err(|e|e.to_string())?;
+ for row in rows{let(mid,role,id)=row.map_err(|e|e.to_string())?;if !is_visible(&mid){continue;}match role.as_str(){
  "tool_call"=>{let id=id.filter(|v|!v.is_empty()).ok_or("historical_fork_unpaired_tool_prefix")?;if !pending.insert(id){return Err("historical_fork_unpaired_tool_prefix".into());}},
  "tool_result"=>{if !id.as_ref().is_some_and(|v|pending.remove(v)){return Err("historical_fork_unpaired_tool_prefix".into());}},
  "user"|"assistant"|"system"=>{if !pending.is_empty(){return Err("historical_fork_unpaired_tool_prefix".into());}},_=>{}
@@ -243,7 +285,20 @@ fn historical_fork_commit(owner:&str,request:&HistoricalRuntimeForkRequest)->Res
  let columns={let mut s=tx.prepare("PRAGMA table_info(agent_messages)").map_err(|e|e.to_string())?;let v=s.query_map([],|r|r.get::<_,String>(1)).map_err(|e|e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e|e.to_string())?;v};
  let quoted=columns.iter().map(|n|format!("\"{}\"",n.replace('"',"\"\""))).collect::<Vec<_>>();
  let expressions=columns.iter().zip(&quoted).map(|(n,q)|match n.as_str(){"id"=>"?1 || ':' || id".to_string(),"session_id"=>"?1".to_string(),_=>q.clone()}).collect::<Vec<_>>();
- tx.execute(&format!("INSERT INTO agent_messages({}) SELECT {} FROM agent_messages WHERE session_id=?2 AND sequence<=?3 ORDER BY sequence,id",quoted.join(","),expressions.join(",")),params![child,owner,endpoint]).map_err(|e|e.to_string())?;
+ if let Some(v)=&visible{
+  tx.execute_batch("CREATE TEMP TABLE IF NOT EXISTS _hf_visible(id TEXT PRIMARY KEY);DELETE FROM _hf_visible;").map_err(|e|e.to_string())?;
+  let mut ins=tx.prepare("INSERT OR IGNORE INTO _hf_visible(id) VALUES(?1)").map_err(|e|e.to_string())?;for id in v{ins.execute([id]).map_err(|e|e.to_string())?;}
+ }
+ let visible_filter=if visible.is_some(){" AND id IN (SELECT id FROM _hf_visible)"}else{""};
+ tx.execute(&format!("INSERT INTO agent_messages({}) SELECT {} FROM agent_messages WHERE session_id=?2 AND sequence<=?3{} ORDER BY sequence,id",quoted.join(","),expressions.join(","),visible_filter),params![child,owner,endpoint]).map_err(|e|e.to_string())?;
+ if visible.is_some(){
+  // The parent has a Journey: the child owns a Journey whose single branch contains exactly the inherited rows, so its later own memberships never deny the prefix.
+  use agent_core::core::session::journey_lifecycle::{SessionJourney,SqliteJourneyRepository};
+  tx.execute_batch("DROP TABLE IF EXISTS temp._hf_visible").map_err(|e|e.to_string())?;
+  SqliteJourneyRepository::ensure_schema(&tx).map_err(|e|e.to_string())?;
+  SqliteJourneyRepository::compare_and_store_in_transaction(&tx,&SessionJourney::new(child.clone(),"main"),0).map_err(|e|e.to_string())?;
+  tx.execute("INSERT INTO session_journey_memberships(session_id,message_id,sequence,branch_id,task_id) SELECT session_id,id,sequence,'main',NULL FROM agent_messages WHERE session_id=?1 AND sequence>=0",params![child]).map_err(|e|e.to_string())?;
+ }
  tx.execute("INSERT INTO historical_runtime_fork_intents VALUES(?1,?2,?3,?4,?1)",params![owner,request.intent_id,anchor_json,child]).map_err(|e|e.to_string())?;
  Ok(HistoricalRuntimeForkResponse{child_session_id:child,parent_session_id:owner.into()})
  })()?;

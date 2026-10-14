@@ -24,3 +24,36 @@ export async function openDurableJourneyOwner(ownerSessionId:string):Promise<voi
  if(!ownerSessionId||ownerSessionId.startsWith("cli:"))throw Error("Journey owner invalid");
  const snapshot=await invoke<JourneySnapshot>("journey_owner_open",{ownerSessionId});if(!snapshot||snapshot.schemaVersion!==1||!Number.isSafeInteger(snapshot.revision)||!Array.isArray(snapshot.nodes)||!Array.isArray(snapshot.edges))throw Error("Journey open snapshot invalid");if(snapshot.ownerSessionId!==ownerSessionId)throw Error("Journey owner mismatch");if(!snapshot.capabilities||snapshot.capabilities.read!==true)throw Error("Journey read capability unavailable");
 }
+
+export type ReviewJobState = "queued" | "running" | "ready" | "failed" | "cancelled";
+export interface ReviewJobView {
+  job_id: string;
+  review_id: string;
+  fork_id: string;
+  session_id: string;
+  state: ReviewJobState;
+  attempt: number;
+  error: string | null;
+  model_id: string;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+const JOB_STATES: readonly string[] = ["queued", "running", "ready", "failed", "cancelled"];
+function checkJob(job: ReviewJobView, ownerSessionId: string): ReviewJobView {
+  if (!job || job.session_id !== ownerSessionId || !job.job_id || !JOB_STATES.includes(job.state)) throw Error("Journey review job mismatch");
+  return job;
+}
+export async function loadJourneyReviewJobs(ownerSessionId: string): Promise<ReviewJobView[]> {
+  const jobs = await invoke<ReviewJobView[]>("journey_review_jobs", { ownerSessionId });
+  if (!Array.isArray(jobs)) throw Error("Journey review jobs invalid");
+  return jobs.map((job) => checkJob(job, ownerSessionId));
+}
+export async function closeJourneyForkForReview(ownerSessionId: string, request: { expectedRevision: number; forkId: string; reviewId: string; messageId: string }): Promise<ReviewJobView> {
+  const job = await invoke<ReviewJobView>("journey_fork_close", { ownerSessionId, request: { sessionId: ownerSessionId, outcome: "completed", ...request } });
+  return checkJob(job, ownerSessionId);
+}
+export async function cancelJourneyReviewJob(ownerSessionId: string, jobId: string): Promise<ReviewJobView> {
+  const job = await invoke<ReviewJobView>("journey_review_cancel", { ownerSessionId, request: { sessionId: ownerSessionId, jobId } });
+  return checkJob(job, ownerSessionId);
+}

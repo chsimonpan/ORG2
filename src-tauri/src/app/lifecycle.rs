@@ -430,6 +430,7 @@ fn run_pre_database_shutdown(app_handle: &tauri::AppHandle) {
     // Close the outbound Mobile Remote relay and all per-phone actors before
     // the persistence pool is drained.
     crate::api::mobile_bridge::relay::shutdown();
+    agent_core::core::session::journey_review_queue::JourneyReviewExecutorHandle::request_global_shutdown();
     app_handle
         .state::<::terminal::pty_commands::pty::PtyState>()
         .shutdown_kill_all();

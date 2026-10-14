@@ -11,6 +11,17 @@ pub fn assign_inserted_message(c:&Connection,owner:&str,message:&str,sequence:i6
  if journey.revision!=before{SqliteJourneyRepository::compare_and_store_in_transaction(c,&journey,before).map_err(|e|rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;}
  c.execute("INSERT INTO session_journey_memberships(session_id,message_id,sequence,branch_id,task_id) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(session_id,message_id) DO NOTHING",params![owner,message,sequence,journey.active_branch_id,journey.active_task_id])?;Ok(())
 }
+/// Ids of the owner's persisted rows the provider may see on the active branch, or `None` for a
+/// legacy transcript (no Journey, or a Journey without memberships) where every row is visible.
+pub fn provider_visible_message_ids(c:&Connection,owner:&str)->rusqlite::Result<Option<std::collections::BTreeSet<String>>>{
+ if !has_journeys(c)?{return Ok(None);}let Some(journey)=SqliteJourneyRepository::load(c,owner).map_err(|e|rusqlite::Error::ToSqlConversionFailure(Box::new(e)))? else{return Ok(None);};
+ let mut stmt=c.prepare("SELECT message_id,sequence,branch_id,task_id FROM session_journey_memberships WHERE session_id=?1")?;
+ let memberships=stmt.query_map([owner],|r|{let seq:i64=r.get(1)?;if seq<0{return Err(rusqlite::Error::InvalidQuery);}Ok(super::journey_context_visibility::JourneyMessageMembership{message_id:r.get(0)?,sequence:seq as u64,branch_id:r.get(2)?,task_id:r.get(3)?})})?.collect::<rusqlite::Result<Vec<_>>>()?;
+ if memberships.is_empty(){return Ok(None);}
+ let mut rows=c.prepare("SELECT id,sequence FROM agent_messages WHERE session_id=?1 AND sequence>=0")?;
+ let persisted=rows.query_map([owner],|r|Ok(super::journey_context_visibility::PersistedContextMessage{message_id:r.get(0)?,sequence:r.get::<_,i64>(1)? as u64}))?.collect::<rusqlite::Result<Vec<_>>>()?;
+ super::journey_context_visibility::project_prompt_message_ids(&journey,&journey.active_branch_id,&persisted,&memberships).map(Some).map_err(|e|rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
+}
 pub fn provider_visible_rows(c:&Connection,owner:&str,rows:Vec<crate::foundation::persistence::db_helpers::AgentMessageRow>)->rusqlite::Result<(Vec<crate::foundation::persistence::db_helpers::AgentMessageRow>,Vec<serde_json::Value>)>{
  if !has_journeys(c)?{return Ok((rows,vec![]));}let Some(journey)=SqliteJourneyRepository::load(c,owner).map_err(|e|rusqlite::Error::ToSqlConversionFailure(Box::new(e)))? else{return Ok((rows,vec![]));};
  let mut stmt=c.prepare("SELECT message_id,sequence,branch_id,task_id FROM session_journey_memberships WHERE session_id=?1")?;

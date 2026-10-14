@@ -5,8 +5,10 @@
 //! provider-visible view is read with `provider_visible_rows` (the same projection `load_llm_history`
 //! applies) because the agent-core db bridge is not registered in native tests.
 //!
-//! Where reading the code disagreed with the original hypothesis, the ACTUAL behaviour is asserted
-//! and tagged `AUDIT:`. Nothing here changes production behaviour.
+//! Contract (PRD V1 to V6): a historical child inherits only the rows the parent's active branch shows
+//! the provider, owns a Journey whose single branch holds exactly those rows, and never re-exposes
+//! hidden history at any depth. Hidden anchors are rejected; replay is an idempotent return of an
+//! existing child, never a re-read of parent state.
 use super::super::*;
 use super::invoke;
 use agent_core::core::session::journey_application_service as svc;
@@ -223,31 +225,35 @@ fn parent_with_journey_historical_fork_row_visibility() {
     assert!(child.starts_with(&format!("{owner}-history-")));
     assert_eq!(parent_of(&child).as_deref(), Some(owner));
 
-    // Child holds a physical copy of every prefix row (incl. the one the parent hides) under child-local ids.
+    // Child holds only the rows the parent shows the provider, under child-local ids; the hidden m-a1 is never copied.
     let child_ids: Vec<String> = rows(&child).into_iter().map(|r| r.0).collect();
+    assert_eq!(child_ids, ["m-u1", "f-u1", "f-a1"].iter().map(|m| format!("{child}:{m}")).collect::<Vec<_>>());
+    assert!(rows(&child).iter().all(|r| r.2 != "MARK-inactive-assistant"));
+    // The child owns a Journey (main branch, revision 0) whose memberships cover exactly the inherited rows.
+    let cj = journey_of(&child).expect("child must own a Journey");
+    assert_eq!((cj.active_branch_id.as_str(), cj.revision), ("main", 0));
+    assert_eq!(cj.branches.keys().cloned().collect::<Vec<_>>(), strs(&["main"]));
     assert_eq!(
-        child_ids,
-        ["m-u1", "m-a1", "f-u1", "f-a1"].iter().map(|m| format!("{child}:{m}")).collect::<Vec<_>>()
+        members(&child),
+        vec![(format!("{child}:m-u1"), 1, "main".to_string(), None), (format!("{child}:f-u1"), 3, "main".to_string(), None), (format!("{child}:f-a1"), 4, "main".to_string(), None)]
     );
-    // AUDIT: no Journey row / membership is copied, so the child's provider view is UNFILTERED:
-    // the row the parent's Journey hides (m-a1) IS visible to the child's model.
-    assert!(journey_of(&child).is_none());
-    assert!(members(&child).is_empty());
-    assert!(state_json(&child).is_none());
     assert_eq!(visible_ids(&child), child_ids);
-    assert!(visible_ids(&child).contains(&format!("{child}:m-a1")));
     // The parent is unaffected.
     assert_eq!(visible_ids(owner), strs(&["m-u1", "f-u1", "f-a1"]));
 
-    // AUDIT: a historical fork may be anchored at a row hidden by the parent's Journey (m-a1);
-    // the endpoint is a physical sequence, not a Journey-visible one.
-    let hidden = hfork(&w, owner, "m-a1", "vis-hidden").unwrap();
-    let hidden_child = child_of(&hidden);
-    assert_ne!(hidden_child, child);
-    assert_eq!(
-        rows(&hidden_child).into_iter().map(|r| r.0).collect::<Vec<_>>(),
-        ["m-u1", "m-a1"].iter().map(|m| format!("{hidden_child}:{m}")).collect::<Vec<_>>()
-    );
+    // A hidden anchor is rejected and creates no child.
+    let before = snap(owner);
+    let err = hfork(&w, owner, "m-a1", "vis-hidden").unwrap_err().to_string();
+    assert!(err.contains("historical_fork_anchor_not_visible"), "{err}");
+    let conn = database::db::get_connection().unwrap();
+    let children: i64 = conn.query_row("SELECT COUNT(*) FROM agent_sessions WHERE parent_session_id=?1", [owner], |r| r.get(0)).unwrap();
+    assert_eq!(children, 1);
+    assert_eq!(snap(owner), before);
+
+    // A visible mid-branch anchor copies only the visible prefix up to it.
+    let mid = child_of(&hfork(&w, owner, "f-u1", "vis-mid").unwrap());
+    assert_eq!(rows(&mid).into_iter().map(|r| r.0).collect::<Vec<_>>(), ["m-u1", "f-u1"].iter().map(|m| format!("{mid}:{m}")).collect::<Vec<_>>());
+    assert_eq!(visible_ids(&mid).len(), 2);
 }
 
 // 2. The parent's Journey (state, memberships, rows) is untouched by a historical fork, and the
@@ -272,9 +278,9 @@ fn parent_journey_unchanged_by_historical_fork() {
     assert_eq!(cj.active_branch_id, "main");
     assert_eq!(cj.active_task_id.as_deref(), Some("ct1"));
     assert_eq!(cj.tasks["ct1"].state, TaskState::Active);
-    assert_eq!(members(&child).len(), 2, "only the two newly written child rows carry memberships");
-    // AUDIT: once the child has any membership, the copied prefix rows (no membership) are DENIED.
-    assert_eq!(visible_ids(&child), strs(&["child-new-u1", "child-new-a1"]));
+    assert_eq!(members(&child).len(), 5, "three inherited rows plus the two newly written child rows");
+    // The inherited prefix stays visible next to the child's own rows.
+    assert_eq!(visible_ids(&child), vec![format!("{child}:m-u1"), format!("{child}:f-u1"), format!("{child}:f-a1"), "child-new-u1".to_string(), "child-new-a1".to_string()]);
     assert_eq!(snap(owner), before, "child Journey writes must not touch the parent");
 
     // Parent keeps writing + checkpointing; the child's Journey is untouched.
@@ -299,7 +305,7 @@ fn parent_journey_unchanged_by_historical_fork() {
     assert_ne!(state_json(owner), before.0, "the parent Journey did advance");
     assert_eq!(snap(&child), child_after_child_writes);
     assert_eq!(visible_ids(owner), strs(&["m-u1", "f-u1", "f-a1", "p-late-a"]));
-    assert_eq!(visible_ids(&child), strs(&["child-new-u1", "child-new-a1"]));
+    assert_eq!(visible_ids(&child).len(), 5);
 }
 
 // 4 (historical flavour). Intent semantics: same intent+anchor replays; same intent+different anchor
@@ -324,11 +330,11 @@ fn historical_same_intent_different_anchor_is_rejected_or_replayed() {
     let before = snap(owner);
     put_j(owner, "p-late-u", "user", "MARK-parent-late-user", max_seq(owner) + 1);
     assert_ne!(snap(owner), before);
-    // AUDIT: replay with the SAME intent + SAME (now stale) anchor still succeeds because the
-    // stored-intent lookup runs before anchor revalidation.
+    // Replay with the SAME intent + SAME (now stale) anchor is only an idempotent return of the child that
+    // already exists; it never re-reads parent state and never creates a second child.
     assert_eq!(hfork_anchor(&w, owner, anchor.clone(), "same").unwrap(), first);
     // A NEW intent with the stale anchor is rejected by revalidation.
-    let err = hfork_anchor(&w, owner, anchor, "fresh").unwrap_err().to_string();
+    let err = hfork_anchor(&w, owner, anchor.clone(), "fresh").unwrap_err().to_string();
     assert!(err.contains("journey_anchor_changed"), "{err}");
 
     // Exactly one child + one intent row exists for this owner.
@@ -340,6 +346,16 @@ fn historical_same_intent_different_anchor_is_rejected_or_replayed() {
         .query_row("SELECT COUNT(*) FROM agent_sessions WHERE parent_session_id=?1", [owner], |r| r.get(0))
         .unwrap();
     assert_eq!((intents, children), (1, 1));
+
+    // A deleted child is an explicit error, never a silent re-create; a different anchor is still a conflict.
+    let child = child_of(&first);
+    c.execute("DELETE FROM agent_sessions WHERE session_id=?1", [&child]).unwrap();
+    let err = hfork_anchor(&w, owner, anchor.clone(), "same").unwrap_err().to_string();
+    assert!(err.contains("historical_fork_child_missing"), "{err}");
+    let err = hfork_anchor(&w, owner, anchor_json(owner, "f-u1"), "same").unwrap_err().to_string();
+    assert!(err.contains("historical_fork_intent_conflict"), "{err}");
+    let children: i64 = c.query_row("SELECT COUNT(*) FROM agent_sessions WHERE parent_session_id=?1", [owner], |r| r.get(0)).unwrap();
+    assert_eq!(children, 0, "replay must not re-create a deleted child");
 }
 
 // 5. Child Journey owner-open after runtime removal + restart-style re-registration.
@@ -405,7 +421,8 @@ fn child_journey_owner_open_after_runtime_removal_and_restart() {
     assert_eq!(c.active_branch_id, "main");
     assert!(c.tasks.contains_key("ct1") && !c.branches.contains_key("f1") && !c.tasks.contains_key("ft1"));
     assert_eq!(visible_ids(owner), strs(&["m-u1", "f-u1", "f-a1"]));
-    assert_eq!(visible_ids(&child), strs(&["child-new-u1", "child-new-a1"]));
+    assert_eq!(visible_ids(&child).len(), 5);
+    assert!(visible_ids(&child).iter().all(|id| !id.ends_with(":m-a1")));
 }
 
 // 6. Depth-2 fork scoping: P -> C -> G.
@@ -418,9 +435,9 @@ fn depth2_fork_scoping() {
     let (_app, w) = window(&state);
     let c = child_of(&hfork(&w, p, "f-a1", "d2-pc").unwrap());
     give_child_journey(&c);
-    assert_eq!(visible_ids(&c), strs(&["child-new-u1", "child-new-a1"]));
+    assert_eq!(visible_ids(&c).len(), 5);
 
-    // G forks C at C's last row (6 rows: 4 copied + 2 new).
+    // G forks C at C's last row (5 rows: 3 inherited + 2 new).
     let g = child_of(&hfork(&w, &c, "child-new-a1", "d2-cg").unwrap());
     assert!(g.starts_with(&format!("{c}-history-")), "{g}");
     assert_eq!(parent_of(&g).as_deref(), Some(c.as_str()));
@@ -432,12 +449,12 @@ fn depth2_fork_scoping() {
     // Ids are minted from the DIRECT source's ids: G rows look like `G:C:m-u1`, never `G:m-u1`.
     assert!(rows(&g)[0].0.starts_with(&format!("{g}:{c}:")), "{:?}", rows(&g)[0]);
 
-    // AUDIT: G again has no Journey, so it re-exposes the 4 copied rows that C's own Journey hides.
-    assert!(journey_of(&g).is_none());
-    assert!(members(&g).is_empty());
-    assert_eq!(visible_ids(&g).len(), 6);
-    assert_eq!(visible_ids(&c).len(), 2);
-    assert!(visible_ids(&g).contains(&format!("{g}:{c}:m-a1")));
+    // G has its own Journey; the parent's hidden row is gone at depth 2 as well.
+    assert!(journey_of(&g).is_some());
+    assert_eq!(members(&g).len(), 5);
+    assert_eq!(visible_ids(&g).len(), 5);
+    assert_eq!(visible_ids(&c).len(), 5);
+    assert!(rows(&g).iter().all(|r| r.2 != "MARK-inactive-assistant"));
 
     // Intents are scoped per owner: P owns one, C owns one, G none.
     {
@@ -456,8 +473,116 @@ fn depth2_fork_scoping() {
     put_j(&c, "c-late-a", "assistant", "MARK-child-late", max_seq(&c) + 1);
     assert_eq!(snap(&g), g_before);
     assert_eq!(visible_ids(&g), g_visible);
-    assert_eq!(visible_ids(&c), strs(&["child-new-u1", "child-new-a1", "c-late-a"]));
+    assert_eq!(visible_ids(&c).len(), 6);
     assert_eq!(visible_ids(p), strs(&["m-u1", "f-u1", "f-a1", "p-late-a"]));
+}
+
+// 6b. Depth 3 with history hidden INSIDE a child: P -> C (own fork hides inherited rows) -> G -> H.
+#[test]
+fn depth3_hidden_history_is_never_reexposed() {
+    let _sandbox = test_helpers::test_env::sandbox();
+    let p = "osagent-jfo-depth3";
+    let state = agent_core::state::AgentAppState::new();
+    seed_journey_parent(&state, p);
+    let (_app, w) = window(&state);
+    let c = child_of(&hfork(&w, p, "f-a1", "d3-pc").unwrap());
+    assert_eq!(visible_ids(&c).len(), 3);
+
+    // C forks its own Journey branch at its first inherited row: the later inherited rows become hidden in C.
+    {
+        let mut conn = database::db::get_connection().unwrap();
+        svc::SessionJourneyApplicationService::create_fork(
+            &mut conn,
+            svc::CreateForkRequest {
+                session_id: c.clone(),
+                expected_revision: 0,
+                fork_id: "cf".into(),
+                task_id: "cft".into(),
+                task_name: "child fork".into(),
+                anchor_message_id: Some(format!("{c}:m-u1")),
+            },
+        )
+        .unwrap();
+    }
+    put_j(&c, "c-f-u", "user", "MARK-c-fork-user", max_seq(&c) + 1);
+    put_j(&c, "c-f-a", "assistant", "MARK-c-fork-assistant", max_seq(&c) + 1);
+    assert_eq!(visible_ids(&c), vec![format!("{c}:m-u1"), "c-f-u".to_string(), "c-f-a".to_string()]);
+
+    // The inherited-but-now-hidden rows cannot be anchors.
+    let err = hfork(&w, &c, &format!("{c}:f-a1"), "d3-hidden").unwrap_err().to_string();
+    assert!(err.contains("historical_fork_anchor_not_visible"), "{err}");
+
+    let g = child_of(&hfork(&w, &c, "c-f-a", "d3-cg").unwrap());
+    assert_eq!(rows(&g).len(), 3);
+    assert_eq!(visible_ids(&g).len(), 3);
+    assert!(rows(&g).iter().all(|r| r.2 != "MARK-fork-user" && r.2 != "MARK-fork-assistant" && r.2 != "MARK-inactive-assistant"));
+
+    let h = child_of(&hfork(&w, &g, &format!("{g}:c-f-a"), "d3-gh").unwrap());
+    assert!(h.starts_with(&format!("{g}-history-")), "{h}");
+    assert_eq!(rows(&h).len(), 3);
+    assert_eq!(visible_ids(&h).len(), 3);
+    assert_eq!(members(&h).len(), 3);
+    assert!(rows(&h).iter().all(|r| r.2 != "MARK-fork-user" && r.2 != "MARK-fork-assistant" && r.2 != "MARK-inactive-assistant"));
+    assert_eq!(parent_of(&h).as_deref(), Some(g.as_str()));
+}
+
+// 6c. A parent without a Journey is copied unchanged and its child stays Journey-less (legacy).
+#[test]
+fn legacy_parent_child_is_unchanged() {
+    let _sandbox = test_helpers::test_env::sandbox();
+    let p = "osagent-jfo-legacy";
+    let state = agent_core::state::AgentAppState::new();
+    tauri::async_runtime::block_on(state.register_session(agent_core::state::AgentSession::new(
+        p.into(),
+        agent_core::definitions::sde_agent(),
+    )));
+    {
+        let c = database::db::get_connection().unwrap();
+        agent_core::foundation::persistence::session_snapshots::ensure_tables_with(&c).unwrap();
+        c.execute(
+            "INSERT INTO agent_sessions(session_id,created_at,updated_at) VALUES(?1,'2026-10-13T00:00:00Z','2026-10-13T00:00:00Z')",
+            [p],
+        )
+        .unwrap();
+    }
+    put(p, "l-u1", "user", "legacy-user", 1);
+    put(p, "l-a1", "assistant", "legacy-assistant", 2);
+    put(p, "l-u2", "user", "legacy-user-2", 3);
+    let (_app, w) = window(&state);
+    let child = child_of(&hfork(&w, p, "l-a1", "legacy-1").unwrap());
+    assert_eq!(rows(&child).into_iter().map(|r| r.0).collect::<Vec<_>>(), ["l-u1", "l-a1"].iter().map(|m| format!("{child}:{m}")).collect::<Vec<_>>());
+    assert!(journey_of(&child).is_none());
+    let c = database::db::get_connection().unwrap();
+    let has_table: i64 = c.query_row("SELECT COUNT(*) FROM sqlite_master WHERE name='session_journey_memberships'", [], |r| r.get(0)).unwrap();
+    if has_table > 0 {
+        assert!(members(&child).is_empty());
+    }
+}
+
+// 6d. The canonical snapshot flags rows the provider cannot see so the UI never offers them as forkable.
+#[test]
+fn snapshot_marks_provider_hidden_user_rows() {
+    let _sandbox = test_helpers::test_env::sandbox();
+    let p = "osagent-jfo-snapshot";
+    let state = agent_core::state::AgentAppState::new();
+    seed_journey_parent(&state, p);
+    put(p, "m-u2", "user", "MARK-hidden-main-user", max_seq(p) + 1);
+    {
+        let c = database::db::get_connection().unwrap();
+        c.execute(
+            "INSERT INTO session_journey_memberships(session_id,message_id,sequence,branch_id,task_id) VALUES(?1,'m-u2',?2,'main',NULL)",
+            rusqlite::params![p, max_seq(p)],
+        )
+        .unwrap();
+    }
+    let (_app, w) = window(&state);
+    let snapshot = invoke(&w, "journey_owner_open", json!({"ownerSessionId":p})).unwrap();
+    let flag = |id: &str| -> Option<bool> {
+        snapshot["nodes"].as_array().unwrap().iter().find(|n| n["anchor"]["durableMessageId"] == id).map(|n| n["providerVisible"].as_bool().unwrap())
+    };
+    assert_eq!(flag("m-u1"), Some(true));
+    assert_eq!(flag("f-u1"), Some(true));
+    assert_eq!(flag("m-u2"), Some(false));
 }
 
 // 7. Main session and fork child are distinct owners at runtime, in storage and in authority checks.
@@ -496,7 +621,8 @@ fn main_and_fork_distinct_owners() {
     assert_eq!(pj.branches.keys().cloned().collect::<Vec<_>>(), strs(&["f1", "main"]));
     assert_eq!(cj.branches.keys().cloned().collect::<Vec<_>>(), strs(&["main"]));
     assert!(members(p).iter().all(|m| !m.0.starts_with(&c)));
-    assert!(members(&c).iter().all(|m| m.0 == "child-new-u1" || m.0 == "child-new-a1"));
+    assert!(members(&c).iter().all(|m| m.0 == "child-new-u1" || m.0 == "child-new-a1" || m.0.starts_with(&format!("{c}:"))));
+    assert!(members(&c).iter().all(|m| !m.0.ends_with(":m-a1")));
 
     // Cross-owner authority is refused and leaves both aggregates untouched.
     let (ps0, cs0) = (snap(p), snap(&c));
@@ -519,4 +645,96 @@ fn main_and_fork_distinct_owners() {
     .to_string();
     assert!(err.contains("journey_owner_mismatch"), "{err}");
     assert_eq!((snap(p), snap(&c)), (ps0, cs0));
+}
+
+// ---- F5/V4: compaction floor and tool-pair validation are computed over the provider-visible rows only. ----
+
+/// A row of the parent's `main` branch after the fork anchor: durable but hidden from the fork's provider view.
+fn put_hidden(session: &str, id: &str, role: &str, content: &str, seq: i64, tool_call_id: Option<&str>, compact_from: Option<i64>) {
+    put(session, id, role, content, seq);
+    let c = database::db::get_connection().unwrap();
+    c.execute("UPDATE agent_messages SET tool_call_id=?3,compact_from_sequence=?4 WHERE session_id=?1 AND id=?2", rusqlite::params![session, id, tool_call_id, compact_from]).unwrap();
+    c.execute(
+        "INSERT INTO session_journey_memberships(session_id,message_id,sequence,branch_id,task_id) VALUES(?1,?2,?3,'main',NULL)",
+        rusqlite::params![session, id, seq],
+    )
+    .unwrap();
+}
+
+fn put_visible_meta(session: &str, id: &str, role: &str, content: &str, seq: i64, tool_call_id: Option<&str>, compact_from: Option<i64>) {
+    put_j(session, id, role, content, seq);
+    let c = database::db::get_connection().unwrap();
+    c.execute("UPDATE agent_messages SET tool_call_id=?3,compact_from_sequence=?4 WHERE session_id=?1 AND id=?2", rusqlite::params![session, id, tool_call_id, compact_from]).unwrap();
+}
+
+const UNPAIRED: &str = "historical_fork_unpaired_tool_prefix";
+
+fn fork_owner(owner: &str) -> (agent_core::state::AgentAppState, tauri::App<MockRuntime>, tauri::WebviewWindow<MockRuntime>) {
+    let state = agent_core::state::AgentAppState::new();
+    seed_journey_parent(&state, owner);
+    let (app, w) = window(&state);
+    (state, app, w)
+}
+
+#[test]
+fn hidden_compaction_row_is_not_a_floor() {
+    let _sandbox = test_helpers::test_env::sandbox();
+    let p = "osagent-jfo-f5-hidden-floor";
+    let (_s, _app, w) = fork_owner(p);
+    // A hidden compaction whose floor lies past the endpoint would erase the visible unpaired call if it counted.
+    put_hidden(p, "h-cmp", "user", "MARK-hidden-compaction", 5, None, Some(100));
+    put_visible_meta(p, "f-tc", "tool_call", "MARK-visible-call", 6, Some("tc-1"), None);
+    let err = hfork(&w, p, "f-tc", "f5-a").unwrap_err().to_string();
+    assert!(err.contains(UNPAIRED), "{err}");
+}
+
+#[test]
+fn visible_compaction_row_is_a_floor() {
+    let _sandbox = test_helpers::test_env::sandbox();
+    let p = "osagent-jfo-f5-visible-floor";
+    let (_s, _app, w) = fork_owner(p);
+    // The unpaired call predates the visible compaction floor, so only the tail is validated.
+    put_visible_meta(p, "f-tc", "tool_call", "MARK-old-call", 5, Some("tc-old"), None);
+    put_visible_meta(p, "f-cmp", "user", "MARK-visible-compaction", 6, None, Some(6));
+    put_j(p, "f-u2", "user", "MARK-after-compaction", 7);
+    let c = child_of(&hfork(&w, p, "f-u2", "f5-b").unwrap());
+    assert!(rows(&c).iter().any(|r| r.2 == "MARK-visible-compaction"));
+    assert_eq!(visible_ids(&c).len(), rows(&c).len());
+}
+
+#[test]
+fn visible_call_with_hidden_result_is_rejected() {
+    let _sandbox = test_helpers::test_env::sandbox();
+    let p = "osagent-jfo-f5-call-hidden-result";
+    let (_s, _app, w) = fork_owner(p);
+    put_visible_meta(p, "f-tc", "tool_call", "MARK-visible-call", 5, Some("tc-2"), None);
+    put_hidden(p, "h-tr", "tool_result", "MARK-hidden-result", 6, Some("tc-2"), None);
+    put_j(p, "f-u2", "user", "MARK-after", 7);
+    let err = hfork(&w, p, "f-u2", "f5-c").unwrap_err().to_string();
+    assert!(err.contains(UNPAIRED), "{err}");
+}
+
+#[test]
+fn hidden_call_with_visible_result_is_rejected() {
+    let _sandbox = test_helpers::test_env::sandbox();
+    let p = "osagent-jfo-f5-hidden-call-result";
+    let (_s, _app, w) = fork_owner(p);
+    put_hidden(p, "h-tc", "tool_call", "MARK-hidden-call", 5, Some("tc-3"), None);
+    put_visible_meta(p, "f-tr", "tool_result", "MARK-visible-result", 6, Some("tc-3"), None);
+    let err = hfork(&w, p, "f-tr", "f5-d").unwrap_err().to_string();
+    assert!(err.contains(UNPAIRED), "{err}");
+}
+
+#[test]
+fn fully_hidden_tool_pair_is_accepted_and_not_inherited() {
+    let _sandbox = test_helpers::test_env::sandbox();
+    let p = "osagent-jfo-f5-hidden-pair";
+    let (_s, _app, w) = fork_owner(p);
+    put_hidden(p, "h-tc", "tool_call", "MARK-hidden-call", 5, Some("tc-4"), None);
+    put_hidden(p, "h-tr", "tool_result", "MARK-hidden-result", 6, Some("tc-4"), None);
+    put_j(p, "f-u2", "user", "MARK-after-pair", 7);
+    let c = child_of(&hfork(&w, p, "f-u2", "f5-e").unwrap());
+    assert!(rows(&c).iter().all(|r| r.2 != "MARK-hidden-call" && r.2 != "MARK-hidden-result" && r.2 != "MARK-inactive-assistant"));
+    assert!(rows(&c).iter().any(|r| r.2 == "MARK-after-pair"));
+    assert_eq!(visible_ids(&c).len(), rows(&c).len());
 }

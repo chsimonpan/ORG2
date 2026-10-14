@@ -68,6 +68,7 @@ pub mod journey_lifecycle;
 pub mod journey_application_service;
 pub mod journey_context_visibility;
 pub mod journey_review_queue;
+pub mod journey_review_runtime;
 pub mod journey_embedding;
 pub mod journey_runtime_persistence;
 

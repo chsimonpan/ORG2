@@ -377,9 +377,21 @@ pub(crate) fn spawn_background_workers(app: &tauri::App) {
         }
     });
 
+    // Durable Journey review executor: one consumer, woken by the close-fork command, resolving the
+    // provider per job from the owner session's persisted runtime. Stopped from the exit handler.
+    tauri::async_runtime::spawn(async {
+        let _ = tokio::task::spawn_blocking(
+            agent_core::core::session::journey_review_queue::JourneyReviewExecutorHandle::ensure_schema_at_startup,
+        )
+        .await;
+        agent_core::core::session::journey_review_queue::JourneyReviewExecutorHandle::start_global(
+            std::sync::Arc::new(agent_core::core::session::journey_review_runtime::PersistedConfigReviewResolver),
+        );
+        tracing::info!("[journey-review] executor started");
+    });
+
     // Durable Journey embedding producer: pinned explicit provider (same space as
-    // `memory_search`) plus an embedding-only worker. Deliberately does not start the
-    // LLM review executor.
+    // `memory_search`) plus an embedding-only worker. The review executor above is separate.
     {
         let config_handle = app.handle().clone();
         match crate::journey_embedding_provider::register(std::sync::Arc::new(move || {

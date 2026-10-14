@@ -21,3 +21,17 @@ it.each(["owner","unmount"])("drops late authority on %s",async mode=>{
  await dispatch(()=>resolve({childSessionId:"A-history-child",parentSessionId:"A"}));expect(done).not.toHaveBeenCalled();if(mode==="owner")await root.unmount();
 });
 it("rejects foreign-source anchors without an invoke",async()=>{const root=createSmokeRoot();try{await root.render(createElement(JourneyHistoricalForkControls,{ownerSessionId:"A",anchor:{...anchor,sourceSessionId:"B"},onCommitted:vi.fn()}));expect(root.container.querySelector("button")!.disabled).toBe(true);expect(invoke).not.toHaveBeenCalled();}finally{await root.unmount();}});
+it("disables the fork and never invokes for an endpoint the provider cannot see",async()=>{
+ const root=createSmokeRoot();
+ try{await root.render(createElement(JourneyHistoricalForkControls,{ownerSessionId:"A",anchor,forkable:false,onCommitted:vi.fn()}));
+ const button=root.container.querySelector("button")!;expect(button.disabled).toBe(true);expect(root.container.querySelector("[role=status]")).not.toBeNull();
+ await dispatch(()=>button.click());expect(invoke).not.toHaveBeenCalled();
+ }finally{await root.unmount();}
+});
+it("renews the intent after the earlier child was deleted so the next attempt is a new fork",async()=>{
+ const root=createSmokeRoot(),done=vi.fn();vi.mocked(invoke).mockRejectedValueOnce("historical_fork_child_missing").mockResolvedValue({childSessionId:"A-new-child",parentSessionId:"A"});
+ try{await root.render(createElement(JourneyHistoricalForkControls,{ownerSessionId:"A",anchor,onCommitted:done}));const click=()=>root.container.querySelector("button")!.click();
+ await dispatch(click);const first=vi.mocked(invoke).mock.calls[0];expect(root.container.querySelector('[role="alert"]')!.textContent).toContain("no longer exists");
+ await dispatch(click);expect(vi.mocked(invoke).mock.calls[1][1]).not.toEqual(first[1]);expect(done).toHaveBeenCalledWith("A-new-child");
+ }finally{await root.unmount();}
+});

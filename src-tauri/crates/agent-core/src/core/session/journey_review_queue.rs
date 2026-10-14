@@ -26,6 +26,14 @@ use crate::providers::traits::LLMProvider;
 const RECOVERY_TICK: Duration = Duration::from_secs(30);
 const STALE_LEASE_SECS: u64 = 5 * 60;
 const MAX_JOBS_PER_WAKE: usize = 4;
+/// A job is claimed at most this many times between explicit retries.
+pub const MAX_CLAIM_ATTEMPTS: u32 = 3;
+const ERROR_MAX_CHARS: usize = 300;
+/// Model ceiling sent for review calls. Anthropic requires `max_tokens`; this is the
+/// provider ceiling, not a task-specific cap.
+pub const REVIEW_OUTPUT_CEILING: u32 = 64_000;
+/// One streaming provider call of a review stage may not hold the single executor longer than this.
+pub const REVIEW_STAGE_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 
 /// Narrow host boundary: foreground application services can wake a worker
 /// without knowing whether the host is Tauri, a test harness, or another UI.
@@ -54,6 +62,8 @@ pub fn notify_review_queue() {
     }
 }
 
+static GLOBAL_EXECUTOR: OnceLock<JourneyReviewExecutorHandle> = OnceLock::new();
+
 #[derive(Clone)]
 pub struct JourneyReviewExecutorHandle {
     inner: Arc<JourneyReviewExecutorInner>,
@@ -73,15 +83,116 @@ trait ExecutorJobRunner: Send + Sync {
     async fn run_one(&self) -> bool;
 }
 
-struct DurableReviewJobRunner;
+type ConnGuard = Box<dyn std::ops::DerefMut<Target = Connection> + Send>;
+type ConnOpener = Arc<dyn Fn() -> Result<ConnGuard, QueueError> + Send + Sync>;
+
+/// Resolves the provider for one claimed job from the owner session's persisted
+/// runtime. The returned provider must already be bound to `expected`; the
+/// executor never substitutes another model, account or protocol.
+#[async_trait]
+pub trait JourneyReviewProviderResolver: Send + Sync {
+    async fn resolve(
+        &self,
+        session_id: &str,
+        expected: &RuntimeProvenance,
+    ) -> Result<Arc<dyn JourneyUnboundedReviewProvider>, String>;
+
+    fn stage_timeout(&self) -> Duration {
+        REVIEW_STAGE_TIMEOUT
+    }
+}
+
+fn resolver_slot() -> &'static RwLock<Option<Arc<dyn JourneyReviewProviderResolver>>> {
+    static SLOT: OnceLock<RwLock<Option<Arc<dyn JourneyReviewProviderResolver>>>> = OnceLock::new();
+    SLOT.get_or_init(|| RwLock::new(None))
+}
+
+pub fn install_review_provider_resolver(resolver: Arc<dyn JourneyReviewProviderResolver>) {
+    if let Ok(mut slot) = resolver_slot().write() {
+        *slot = Some(resolver);
+    }
+}
+
+struct GlobalResolver;
+
+#[async_trait]
+impl JourneyReviewProviderResolver for GlobalResolver {
+    async fn resolve(
+        &self,
+        session_id: &str,
+        expected: &RuntimeProvenance,
+    ) -> Result<Arc<dyn JourneyUnboundedReviewProvider>, String> {
+        let installed = resolver_slot().read().ok().and_then(|slot| slot.clone());
+        match installed {
+            Some(resolver) => resolver.resolve(session_id, expected).await,
+            None => resolve_pinned_review(expected),
+        }
+    }
+}
+
+fn global_gate() -> Arc<tokio::sync::Mutex<()>> {
+    static GATE: OnceLock<Arc<tokio::sync::Mutex<()>>> = OnceLock::new();
+    GATE.get_or_init(|| Arc::new(tokio::sync::Mutex::new(()))).clone()
+}
+
+fn cancel_registry() -> &'static Mutex<std::collections::HashMap<String, CancellationToken>> {
+    static REG: OnceLock<Mutex<std::collections::HashMap<String, CancellationToken>>> = OnceLock::new();
+    REG.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+struct CancelRegistration(String);
+
+impl CancelRegistration {
+    fn new(job_id: &str) -> (Self, CancellationToken) {
+        let token = CancellationToken::new();
+        if let Ok(mut reg) = cancel_registry().lock() {
+            reg.insert(job_id.to_string(), token.clone());
+        }
+        (Self(job_id.to_string()), token)
+    }
+}
+
+impl Drop for CancelRegistration {
+    fn drop(&mut self) {
+        if let Ok(mut reg) = cancel_registry().lock() {
+            reg.remove(&self.0);
+        }
+    }
+}
+
+fn signal_cancel(job_id: &str) -> bool {
+    cancel_registry()
+        .lock()
+        .ok()
+        .and_then(|reg| reg.get(job_id).cloned())
+        .map(|token| token.cancel())
+        .is_some()
+}
+
+struct DurableReviewJobRunner {
+    open: ConnOpener,
+    resolver: Arc<dyn JourneyReviewProviderResolver>,
+    gate: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl DurableReviewJobRunner {
+    fn production() -> Self {
+        Self {
+            open: Arc::new(|| {
+                crate::foundation::db_bridge::get_connection()
+                    .map(|conn| Box::new(conn) as ConnGuard)
+                    .map_err(|_| QueueError::Storage("Cannot open the review queue database.".into()))
+            }),
+            resolver: Arc::new(GlobalResolver),
+            gate: global_gate(),
+        }
+    }
+}
 
 #[async_trait]
 impl ExecutorJobRunner for DurableReviewJobRunner {
     async fn run_one(&self) -> bool {
-        if run_durable_job().await {
-            return true;
-        }
-        run_durable_embedding_job().await
+        run_durable_job(&self.open, self.resolver.as_ref(), &self.gate).await
     }
 }
 
@@ -90,7 +201,7 @@ impl JourneyReviewExecutorHandle {
     /// composition root is intentional; database claims also protect against
     /// a second process or an accidental second handle.
     pub fn spawn() -> Self {
-        Self::spawn_with_runner(Arc::new(DurableReviewJobRunner))
+        Self::spawn_with_runner(Arc::new(DurableReviewJobRunner::production()))
     }
 
     fn spawn_with_runner(runner: Arc<dyn ExecutorJobRunner>) -> Self {
@@ -125,6 +236,28 @@ impl JourneyReviewExecutorHandle {
             }) {
             Ok(()) => {}
             Err(error) => tracing::error!(error = %error, "[journey-review] 审核队列表初始化失败"),
+        }
+    }
+
+    /// Desktop composition root entry: schema + orphan recovery, resolver, notifier, one executor.
+    /// Idempotent; must run inside a tokio runtime.
+    pub fn start_global(resolver: Arc<dyn JourneyReviewProviderResolver>) -> Self {
+        GLOBAL_EXECUTOR
+            .get_or_init(|| {
+                Self::ensure_schema_at_startup();
+                install_review_provider_resolver(resolver);
+                let handle = Self::spawn();
+                install_review_queue_notifier(Arc::new(handle.clone()));
+                handle.wake();
+                handle
+            })
+            .clone()
+    }
+
+    /// Request shutdown of the executor started by [`Self::start_global`], if any.
+    pub fn request_global_shutdown() {
+        if let Some(handle) = GLOBAL_EXECUTOR.get() {
+            handle.request_shutdown();
         }
     }
 
@@ -169,6 +302,7 @@ pub enum ReviewJobState {
     Running,
     Ready,
     Failed,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -283,6 +417,9 @@ impl ReviewJobRepository {
             .validate_for_queue()
             .map_err(QueueError::Invalid)?;
         if let Some(existing) = Self::get(conn, review_id)? {
+            if existing.session_id != journey.session_id || existing.fork_id != review.fork_id {
+                return Err(QueueError::Conflict("The review id already belongs to another session or fork.".into()));
+            }
             return Ok(existing);
         }
         let job = ReviewJob {
@@ -341,9 +478,21 @@ impl ReviewJobRepository {
         worker_id: &str,
         stale_after_secs: u64,
     ) -> Result<Option<ReviewJob>, QueueError> {
-        Self::ensure_schema(conn)?;
+        // The connection may be a pooled one shared with foreground work: fail fast here, then give back its original wait.
+        let previous: i64 = conn.query_row("PRAGMA busy_timeout", [], |r| r.get(0)).unwrap_or(0);
         conn.busy_timeout(Duration::from_secs(1))
             .map_err(|e| QueueError::Storage(e.to_string()))?;
+        let result = Self::claim_inner(conn, worker_id, stale_after_secs);
+        let _ = conn.busy_timeout(Duration::from_millis(previous.max(0) as u64));
+        result
+    }
+
+    fn claim_inner(
+        conn: &mut Connection,
+        worker_id: &str,
+        stale_after_secs: u64,
+    ) -> Result<Option<ReviewJob>, QueueError> {
+        Self::ensure_schema(conn)?;
         let cutoff = now()
             .parse::<u64>()
             .unwrap_or(0)
@@ -357,7 +506,15 @@ impl ReviewJobRepository {
             [cutoff],
         )
         .map_err(|e| QueueError::Storage(e.to_string()))?;
-        let review_id: Option<String> = tx.query_row("SELECT review_id FROM session_journey_review_jobs WHERE state='queued' ORDER BY created_at LIMIT 1", [], |r| r.get(0)).optional().map_err(|e| QueueError::Storage(e.to_string()))?;
+        let busy: Option<i64> = tx
+            .query_row("SELECT 1 FROM session_journey_review_jobs WHERE state='running' LIMIT 1", [], |r| r.get(0))
+            .optional()
+            .map_err(|e| QueueError::Storage(e.to_string()))?;
+        if busy.is_some() {
+            tx.commit().map_err(|e| QueueError::Storage(e.to_string()))?;
+            return Ok(None);
+        }
+        let review_id: Option<String> = tx.query_row("SELECT review_id FROM session_journey_review_jobs WHERE state='queued' AND attempt < ?1 ORDER BY created_at LIMIT 1", [MAX_CLAIM_ATTEMPTS], |r| r.get(0)).optional().map_err(|e| QueueError::Storage(e.to_string()))?;
         let Some(review_id) = review_id else {
             tx.commit()
                 .map_err(|e| QueueError::Storage(e.to_string()))?;
@@ -389,30 +546,78 @@ impl ReviewJobRepository {
         .map_err(|e| QueueError::Storage(format!("无法恢复遗留审核任务：{e}")))
     }
 
+    /// Queued jobs that were claimed `MAX_CLAIM_ATTEMPTS` times without reaching a
+    /// terminal state (crash loops, repeated lease expiry).
+    pub fn exhausted(conn: &Connection) -> Result<Vec<ReviewJob>, QueueError> {
+        Self::ensure_schema(conn)?;
+        let mut stmt = conn
+            .prepare(&format!("SELECT {JOB_COLUMNS} FROM session_journey_review_jobs WHERE state='queued' AND attempt >= ?1 ORDER BY created_at"))
+            .map_err(|e| QueueError::Storage(format!("Cannot list exhausted review jobs: {e}")))?;
+        let rows = stmt
+            .query_map([MAX_CLAIM_ATTEMPTS], row_job)
+            .map_err(|e| QueueError::Storage(format!("Cannot list exhausted review jobs: {e}")))?;
+        rows.map(|row| row.map_err(|e| QueueError::Storage(e.to_string()))).collect()
+    }
+
+    pub fn list_for_session(conn: &Connection, session_id: &str) -> Result<Vec<ReviewJob>, QueueError> {
+        Self::ensure_schema(conn)?;
+        let mut stmt = conn
+            .prepare(&format!("SELECT {JOB_COLUMNS} FROM session_journey_review_jobs WHERE session_id=?1 ORDER BY created_at, job_id"))
+            .map_err(|e| QueueError::Storage(format!("Cannot list review jobs: {e}")))?;
+        let rows = stmt
+            .query_map([session_id], row_job)
+            .map_err(|e| QueueError::Storage(format!("Cannot list review jobs: {e}")))?;
+        rows.map(|row| row.map_err(|e| QueueError::Storage(e.to_string()))).collect()
+    }
+
+    pub fn get_by_job(conn: &Connection, job_id: &str) -> Result<Option<ReviewJob>, QueueError> {
+        Self::ensure_schema(conn)?;
+        conn.query_row(&format!("SELECT {JOB_COLUMNS} FROM session_journey_review_jobs WHERE job_id=?1"), [job_id], row_job)
+            .optional()
+            .map_err(|e| QueueError::Storage(format!("Cannot read review job: {e}")))
+    }
+
     pub fn complete(conn: &Connection, job_id: &str) -> Result<(), QueueError> {
-        Self::transition(conn, job_id, "running", "ready", None)
+        Self::transition(conn, job_id, &["running"], "ready", None, false)
     }
     pub fn fail(conn: &Connection, job_id: &str, error: &str) -> Result<(), QueueError> {
-        Self::transition(conn, job_id, "running", "failed", Some(error))
+        Self::transition(conn, job_id, &["queued", "running"], "failed", Some(error), false)
     }
+    pub fn cancel(conn: &Connection, job_id: &str, reason: &str) -> Result<(), QueueError> {
+        Self::transition(conn, job_id, &["queued", "running"], "cancelled", Some(reason), false)
+    }
+    /// An explicit retry starts a fresh attempt budget.
     pub fn retry(conn: &Connection, job_id: &str) -> Result<(), QueueError> {
-        Self::transition(conn, job_id, "failed", "queued", None)
+        Self::transition(conn, job_id, &["failed", "cancelled"], "queued", None, true)
     }
     fn transition(
         conn: &Connection,
         id: &str,
-        from: &str,
+        from: &[&str],
         to: &str,
         error: Option<&str>,
+        reset_attempts: bool,
     ) -> Result<(), QueueError> {
-        let n = conn.execute("UPDATE session_journey_review_jobs SET state=?1,error=?2,finished_at=CASE WHEN ?1 IN ('ready','failed') THEN ?3 ELSE finished_at END WHERE job_id=?4 AND state=?5", params![to,error,now(),id,from]).map_err(|e| QueueError::Storage(e.to_string()))?;
+        let from_list = from.iter().map(|f| format!("'{f}'")).collect::<Vec<_>>().join(",");
+        let n = conn
+            .execute(
+                &format!("UPDATE session_journey_review_jobs SET state=?1,error=?2,\
+                 attempt=CASE WHEN ?5 THEN 0 ELSE attempt END,\
+                 started_at=CASE WHEN ?1='queued' THEN NULL ELSE started_at END,\
+                 finished_at=CASE WHEN ?1 IN ('ready','failed','cancelled') THEN ?3 WHEN ?1='queued' THEN NULL ELSE finished_at END \
+                 WHERE job_id=?4 AND state IN ({from_list})"),
+                params![to, error, now(), id, reset_attempts],
+            )
+            .map_err(|e| QueueError::Storage(e.to_string()))?;
         if n == 1 {
             Ok(())
         } else {
-            Err(QueueError::Conflict("审核任务状态已改变。".into()))
+            Err(QueueError::Conflict("The review job state has changed.".into()))
         }
     }
 }
+
+const JOB_COLUMNS: &str = "job_id,review_id,fork_id,session_id,frozen_start_sequence,frozen_end_sequence,exact_anchor_message_id,revision,state,attempt,error,model_id,account_id,protocol,created_at,started_at,finished_at";
 
 fn row_job(r: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewJob> {
     let state: String = r.get(8)?;
@@ -430,6 +635,7 @@ fn row_job(r: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewJob> {
             "running" => ReviewJobState::Running,
             "ready" => ReviewJobState::Ready,
             "failed" => ReviewJobState::Failed,
+            "cancelled" => ReviewJobState::Cancelled,
             _ => ReviewJobState::Failed,
         },
         attempt: r.get::<_, i64>(9)? as u32,
@@ -520,14 +726,7 @@ struct PreparedReviewJob {
     job: ReviewJob,
     transcript: String,
     provenance: RuntimeProvenance,
-}
-
-#[cfg(not(test))]
-async fn run_durable_embedding_job()->bool{crate::core::session::journey_embedding::run_pinned_embedding_job().await}
-
-#[cfg(test)]
-async fn run_durable_embedding_job() -> bool {
-    false
+    rejected: bool,
 }
 
 async fn run_executor(inner: Arc<JourneyReviewExecutorInner>) {
@@ -535,10 +734,26 @@ async fn run_executor(inner: Arc<JourneyReviewExecutorInner>) {
         if inner.cancel.is_cancelled() {
             return;
         }
+        let mut backlog = false;
         for _ in 0..MAX_JOBS_PER_WAKE {
-            if inner.cancel.is_cancelled() || !inner.runner.run_one().await {
+            backlog = false;
+            if inner.cancel.is_cancelled() {
+                return;
+            }
+            // Dropping the in-flight job on shutdown leaves it `running`; the next
+            // startup requeues it (bounded by MAX_CLAIM_ATTEMPTS).
+            let more = tokio::select! {
+                _ = inner.cancel.cancelled() => return,
+                more = inner.runner.run_one() => more,
+            };
+            if !more {
                 break;
             }
+            backlog = true;
+        }
+        if backlog {
+            // The per-turn quota was used up by real work. Re-arm instead of idling for a whole recovery tick.
+            inner.wake.notify_one();
         }
         tokio::select! {
             _ = inner.cancel.cancelled() => return,
@@ -551,103 +766,238 @@ async fn run_executor(inner: Arc<JourneyReviewExecutorInner>) {
 /// Returns false only when no job was claimed. Every failure is committed as
 /// a job failure and logged without content, so a bad provider cannot kill
 /// the executor loop or leak a transcript into diagnostics.
-async fn run_durable_job() -> bool {
-    let prepared = match tokio::task::spawn_blocking(|| {
-        let mut conn = crate::foundation::db_bridge::get_connection()
-            .map_err(|_| QueueError::Storage("无法打开审核队列数据库。".into()))?;
+async fn run_durable_job(
+    open: &ConnOpener,
+    resolver: &dyn JourneyReviewProviderResolver,
+    gate: &Arc<tokio::sync::Mutex<()>>,
+) -> bool {
+    // Single flight: only one review job is processed at a time in this process.
+    let _flight = gate.lock().await;
+    let open_prepare = Arc::clone(open);
+    let prepared = match tokio::task::spawn_blocking(move || {
+        let mut conn = open_prepare()?;
+        for job in ReviewJobRepository::exhausted(&conn)? {
+            let reason = format!("Attempt limit reached ({MAX_CLAIM_ATTEMPTS} claims without completing). Retry to start over.");
+            if let Err(error) = commit_failed_review(&mut conn, &job.job_id, &job.session_id, &job.review_id, &reason, false) {
+                tracing::warn!(job_id = %job.job_id, error = %error, "[journey-review] cannot fail exhausted job");
+            }
+        }
         let Some(job) =
             ReviewJobRepository::claim(&mut conn, "journey-review-executor", STALE_LEASE_SECS)?
         else {
             return Ok::<Option<PreparedReviewJob>, QueueError>(None);
         };
-        let transcript = frozen_transcript(&conn, &job)?;
-        Ok(Some(PreparedReviewJob {
-            provenance: RuntimeProvenance {
-                model_id: job.model_id.clone(),
-                account_id: job.account_id.clone(),
-                protocol: job.protocol.clone(),
-            },
-            job,
-            transcript,
-        }))
+        if let Err(reason) = validate_ownership(&conn, &job) {
+            tracing::warn!(job_id = %job.job_id, "[journey-review] ownership validation failed");
+            if let Err(error) = commit_failed_review(&mut conn, &job.job_id, &job.session_id, &job.review_id, &reason, false) {
+                tracing::warn!(job_id = %job.job_id, error = %error, "[journey-review] cannot record ownership failure");
+            }
+            return Ok(Some(PreparedReviewJob { provenance: provenance_of(&job), job, transcript: String::new(), rejected: true }));
+        }
+        let transcript = match frozen_transcript(&conn, &job) {
+            Ok(transcript) => transcript,
+            Err(error) => {
+                let reason = sanitize_reason("Cannot read the frozen fork transcript", &error.to_string(), "");
+                let _ = commit_failed_review(&mut conn, &job.job_id, &job.session_id, &job.review_id, &reason, false);
+                return Ok(Some(PreparedReviewJob { provenance: provenance_of(&job), job, transcript: String::new(), rejected: true }));
+            }
+        };
+        Ok(Some(PreparedReviewJob { provenance: provenance_of(&job), job, transcript, rejected: false }))
     })
     .await
     {
         Ok(Ok(Some(job))) => job,
         Ok(Ok(None)) => return false,
         Ok(Err(error)) => {
-            tracing::warn!(error = %error, "[journey-review] 无法认领审核任务");
+            tracing::warn!(error = %error, "[journey-review] cannot claim a review job");
             return false;
         }
         Err(error) => {
-            tracing::warn!(error = %error, "[journey-review] 审核数据库任务异常");
+            tracing::warn!(error = %error, "[journey-review] review database task failed");
             return false;
         }
     };
+    if prepared.rejected {
+        return true;
+    }
 
-    let result = run_prepared_review(&prepared).await;
+    let (registration, cancel) = CancelRegistration::new(&prepared.job.job_id);
+    // A cancel that landed between claim and registration found no token: re-check before spending a provider call.
+    let still_running = {
+        let open_check = Arc::clone(open);
+        let check_id = prepared.job.job_id.clone();
+        tokio::task::spawn_blocking(move || open_check().map(|conn| !job_not_running(&conn, &check_id)).unwrap_or(true))
+            .await
+            .unwrap_or(true)
+    };
+    if !still_running {
+        drop(registration);
+        return true;
+    }
+    let result = run_prepared_review(&prepared, resolver, &cancel).await;
+    drop(registration);
+    if cancel.is_cancelled() {
+        // The cancel command already committed `cancelled`; a late result must not publish.
+        return true;
+    }
     let job_id = prepared.job.job_id.clone();
     let session_id = prepared.job.session_id.clone();
     let review_id = prepared.job.review_id.clone();
+    let open_commit = Arc::clone(open);
+    let transcript = prepared.transcript.clone();
     let commit = tokio::task::spawn_blocking(move || {
-        let mut conn = crate::foundation::db_bridge::get_connection()
-            .map_err(|_| QueueError::Storage("无法打开审核队列数据库。".into()))?;
+        let mut conn = open_commit()?;
         match result {
             Ok(draft) => match commit_ready_review(&mut conn, &prepared.job, draft) {
                 Ok(()) => Ok(()),
+                Err(QueueError::Conflict(_)) if job_not_running(&conn, &job_id) => Ok(()),
                 Err(error) => {
-                    tracing::warn!(job_id = %job_id, error = %error, "[journey-review] 审核结果校验或提交失败");
-                    commit_failed_review(&mut conn, &job_id, &session_id, &review_id)
+                    tracing::warn!(job_id = %job_id, "[journey-review] review result failed validation or publication");
+                    let reason = sanitize_reason("Review result rejected", &error.to_string(), &transcript);
+                    commit_failed_review(&mut conn, &job_id, &session_id, &review_id, &reason, true)
                 }
             },
-            Err(()) => commit_failed_review(&mut conn, &job_id, &session_id, &review_id),
+            Err(reason) => commit_failed_review(&mut conn, &job_id, &session_id, &review_id, &reason, true),
         }
     })
     .await;
     match commit {
         Ok(Ok(())) => {}
-        Ok(Err(error)) => tracing::warn!(error = %error, "[journey-review] 无法提交审核结果"),
-        Err(error) => tracing::warn!(error = %error, "[journey-review] 审核提交任务异常"),
+        Ok(Err(QueueError::Conflict(_))) => {}
+        Ok(Err(error)) => tracing::warn!(error = %error, "[journey-review] cannot commit the review outcome"),
+        Err(error) => tracing::warn!(error = %error, "[journey-review] review commit task failed"),
     }
     true
 }
 
-async fn run_prepared_review(prepared: &PreparedReviewJob) -> Result<ReviewDraftAnnotation, ()> {
-    let provider = match resolve_pinned_review(&prepared.provenance) {
+fn provenance_of(job: &ReviewJob) -> RuntimeProvenance {
+    RuntimeProvenance {
+        model_id: job.model_id.clone(),
+        account_id: job.account_id.clone(),
+        protocol: job.protocol.clone(),
+    }
+}
+
+fn job_not_running(conn: &Connection, job_id: &str) -> bool {
+    !matches!(
+        ReviewJobRepository::get_by_job(conn, job_id),
+        Ok(Some(job)) if job.state == ReviewJobState::Running
+    )
+}
+
+/// Single line, no transcript echo, at most `ERROR_MAX_CHARS` characters. Any run of
+/// `REDACT_WINDOW` or more characters that also occurs in the transcript is replaced.
+fn sanitize_reason(prefix: &str, detail: &str, transcript: &str) -> String {
+    const REDACT_WINDOW: usize = 24;
+    let detail: Vec<char> = detail.chars().take(ERROR_MAX_CHARS * 8).collect();
+    let mut covered = vec![false; detail.len()];
+    if detail.len() >= REDACT_WINDOW && transcript.chars().count() >= REDACT_WINDOW {
+        let source: Vec<char> = transcript.chars().collect();
+        let hash = |window: &[char]| {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            window.hash(&mut hasher);
+            hasher.finish()
+        };
+        let known: std::collections::HashSet<u64> = source.windows(REDACT_WINDOW).map(hash).collect();
+        for (start, window) in detail.windows(REDACT_WINDOW).enumerate() {
+            if known.contains(&hash(window)) {
+                covered[start..start + REDACT_WINDOW].iter_mut().for_each(|c| *c = true);
+            }
+        }
+    }
+    let mut detail_text = String::new();
+    let mut in_redaction = false;
+    for (c, hidden) in detail.iter().zip(&covered) {
+        if *hidden {
+            if !in_redaction {
+                detail_text.push_str("[redacted]");
+            }
+            in_redaction = true;
+        } else {
+            in_redaction = false;
+            detail_text.push(*c);
+        }
+    }
+    let detail = detail_text;
+    let single: String = format!("{prefix}: {detail}")
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let single = single.split_whitespace().collect::<Vec<_>>().join(" ");
+    if single.chars().count() <= ERROR_MAX_CHARS {
+        single
+    } else {
+        let mut cut: String = single.chars().take(ERROR_MAX_CHARS - 1).collect();
+        cut.push('…');
+        cut
+    }
+}
+
+/// The owner session, the fork and a still-queued review must exist before any provider call.
+fn validate_ownership(conn: &Connection, job: &ReviewJob) -> Result<(), String> {
+    let session: Option<i64> = conn
+        .query_row("SELECT 1 FROM agent_sessions WHERE session_id=?1", [&job.session_id], |r| r.get(0))
+        .optional()
+        .map_err(|e| format!("Ownership check failed: {e}"))?;
+    if session.is_none() {
+        return Err("The owner session no longer exists.".into());
+    }
+    let journey = SqliteJourneyRepository::load(conn, &job.session_id)
+        .map_err(|e| format!("Ownership check failed: {e}"))?
+        .ok_or("The owner session has no Journey.")?;
+    if !journey.branches.contains_key(&job.fork_id) {
+        return Err("The fork no longer exists.".into());
+    }
+    match journey.reviews.get(&job.review_id) {
+        Some(review) if review.fork_id == job.fork_id && review.state == crate::core::session::journey_lifecycle::ReviewState::Queued => Ok(()),
+        Some(_) => Err("The review is no longer queued.".into()),
+        None => Err("The review no longer exists.".into()),
+    }
+}
+
+async fn run_prepared_review(
+    prepared: &PreparedReviewJob,
+    resolver: &dyn JourneyReviewProviderResolver,
+    cancel: &CancellationToken,
+) -> Result<ReviewDraftAnnotation, String> {
+    let transcript = prepared.transcript.as_str();
+    let stage_timeout = resolver.stage_timeout();
+    // Resolution is awaited under the same cancel/timeout guard as the provider stages: a hung resolver
+    // must neither pin the process-wide single-flight gate nor ignore a user cancel.
+    let resolved = tokio::select! {
+        _ = cancel.cancelled() => return Err("Cancelled.".to_string()),
+        _ = tokio::time::sleep(stage_timeout) => return Err(format!("Provider resolution timed out after {} s with no result; retry the review.", stage_timeout.as_secs())),
+        out = resolver.resolve(&prepared.job.session_id, &prepared.provenance) => out,
+    };
+    let provider = match resolved {
         Ok(provider) => provider,
         Err(error) => {
-            tracing::warn!(job_id = %prepared.job.job_id, error = %error, "[journey-review] 严格 provider 解析失败");
-            return Err(());
+            tracing::warn!(job_id = %prepared.job.job_id, "[journey-review] strict provider resolution failed");
+            return Err(sanitize_reason("Provider resolution failed", &error, transcript));
         }
     };
     let model = SideQueryReviewModel {
         provider: provider.as_ref(),
         resolved: prepared.provenance.clone(),
     };
-    let extract = model
-        .run(
-            chinese_prompt("side-query 提取", &prepared.transcript, &prepared.job.exact_anchor_message_id),
-            &prepared.provenance,
-        )
-        .await
-        .map_err(|error| tracing::warn!(job_id = %prepared.job.job_id, error = %error, "[journey-review] 提取调用失败"))?;
-    let critic = model
-        .run(
-            chinese_prompt("grill-me 批判遗漏、矛盾和证据不足", &extract.to_string(), &prepared.job.exact_anchor_message_id),
-            &prepared.provenance,
-        )
-        .await
-        .map_err(|error| tracing::warn!(job_id = %prepared.job.job_id, error = %error, "[journey-review] 批判调用失败"))?;
-    let revised = model
-        .run(
-            chinese_prompt("根据批判生成短 capsule annotation", &format!("提取：{extract}\n批判：{critic}"), &prepared.job.exact_anchor_message_id),
-            &prepared.provenance,
-        )
-        .await
-        .map_err(|error| tracing::warn!(job_id = %prepared.job.job_id, error = %error, "[journey-review] 修订调用失败"))?;
-    parse_draft(revised, &prepared.job, prepared.provenance.clone()).map_err(|_| {
-        tracing::warn!(job_id = %prepared.job.job_id, "[journey-review] 模型返回无效审核结构");
-    })
+    let anchor = &prepared.job.exact_anchor_message_id;
+    let stage = |name: &'static str, prompt: String| {
+        let model = &model;
+        let provenance = &prepared.provenance;
+        async move {
+            tokio::select! {
+                _ = cancel.cancelled() => Err("Cancelled.".to_string()),
+                _ = tokio::time::sleep(stage_timeout) => Err(format!("{name} call timed out after {} s with no result; retry the review.", stage_timeout.as_secs())),
+                out = model.run(prompt, provenance) => out.map_err(|error| sanitize_reason(&format!("{name} call failed"), &error, transcript)),
+            }
+        }
+    };
+    let extract = stage("Extract", chinese_prompt("side-query 提取", transcript, anchor)).await?;
+    let critic = stage("Critic", chinese_prompt("grill-me 批判遗漏、矛盾和证据不足", &extract.to_string(), anchor)).await?;
+    let revised = stage("Revise", chinese_prompt("根据批判生成短 capsule annotation", &format!("提取：{extract}\n批判：{critic}"), anchor)).await?;
+    parse_draft(revised, &prepared.job, prepared.provenance.clone())
+        .map_err(|error| sanitize_reason("The model returned an invalid review structure", &error, transcript))
 }
 
 fn commit_ready_review(
@@ -660,14 +1010,25 @@ fn commit_ready_review(
     if annotation.is_empty() {
         return Err(QueueError::Invalid("审核结论不能为空。".into()));
     }
-    let current = SessionJourneyApplicationService::snapshot(conn, &job.session_id)
-        .map_err(|error| QueueError::Conflict(error.to_string()))?;
-    let branch = current
-        .snapshot
+    // Review readiness, the immutable handoff capsule, its embedding outbox
+    // row, and queue completion are one durable publication boundary. A crash
+    // can therefore leave either the prior running job or the complete ready
+    // result, never a ready review without a capsule.
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| QueueError::Storage(format!("无法开启审核发布事务：{error}")))?;
+    // Read the aggregate only inside the immediate transaction: an unrelated Journey revision bump
+    // between the provider stages and publication must not discard a finished (paid) review. The domain
+    // calls below still reject the publication if the review is no longer queued or the fork is gone.
+    let mut journey = SqliteJourneyRepository::load(&tx, &job.session_id)
+        .map_err(|error| QueueError::Conflict(error.to_string()))?
+        .ok_or_else(|| QueueError::Conflict("审核对应的会话旅程不存在。".into()))?;
+    let parent_branch_id = journey
         .branches
         .get(&job.fork_id)
-        .ok_or_else(|| QueueError::Invalid("审核分叉不存在。".into()))?;
-    let parent_branch_id = branch.parent_branch_id.clone();
+        .ok_or_else(|| QueueError::Invalid("审核分叉不存在。".into()))?
+        .parent_branch_id
+        .clone();
     let capsule = HandoffCapsule {
         fork_id: job.fork_id.clone(),
         review_id: job.review_id.clone(),
@@ -683,23 +1044,10 @@ fn commit_ready_review(
         generated_at: Some(now()),
         provenance: draft.provenance.clone(),
     };
-
-    // Review readiness, the immutable handoff capsule, its embedding outbox
-    // row, and queue completion are one durable publication boundary. A crash
-    // can therefore leave either the prior running job or the complete ready
-    // result, never a ready review without a capsule.
-    let tx = conn
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|error| QueueError::Storage(format!("无法开启审核发布事务：{error}")))?;
-    let mut journey = SqliteJourneyRepository::load(&tx, &job.session_id)
-        .map_err(|error| QueueError::Conflict(error.to_string()))?
-        .ok_or_else(|| QueueError::Conflict("审核对应的会话旅程不存在。".into()))?;
-    if journey.revision != current.revision {
-        return Err(QueueError::Conflict("审核发布前会话旅程已变化。".into()));
-    }
+    let base_revision = journey.revision;
     journey
         .mark_review_ready(
-            current.revision,
+            base_revision,
             &job.review_id,
             draft.provenance,
             annotation.clone(),
@@ -708,7 +1056,7 @@ fn commit_ready_review(
     journey
         .publish_handoff_capsule(journey.revision, &job.fork_id, capsule)
         .map_err(|error| QueueError::Conflict(error.to_string()))?;
-    SqliteJourneyRepository::compare_and_store_in_transaction(&tx, &journey, current.revision)
+    SqliteJourneyRepository::compare_and_store_in_transaction(&tx, &journey, base_revision)
         .map_err(|error| QueueError::Conflict(error.to_string()))?;
     crate::core::session::journey_embedding::enqueue(
         &tx,
@@ -730,25 +1078,81 @@ fn commit_failed_review(
     job_id: &str,
     session_id: &str,
     review_id: &str,
+    reason: &str,
+    only_if_running: bool,
 ) -> Result<(), QueueError> {
-    let tx = conn
+    let mut tx = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|error| QueueError::Storage(format!("无法开启审核失败事务：{error}")))?;
-    let job = ReviewJobRepository::get(&tx, review_id)?
-        .filter(|job| job.job_id == job_id && job.session_id == session_id)
-        .ok_or_else(|| QueueError::Conflict("审核失败任务不存在。".into()))?;
-    let mut journey = SqliteJourneyRepository::load(&tx, session_id)
+        .map_err(|error| QueueError::Storage(format!("Cannot open the review failure transaction: {error}")))?;
+    let job = ReviewJobRepository::get_by_job(&tx, job_id)?
+        .filter(|job| job.review_id == review_id && job.session_id == session_id)
+        .ok_or_else(|| QueueError::Conflict("The failed review job does not exist.".into()))?;
+    // A finished attempt may report only for itself: after cancel or retry the job is no longer the attempt that ran.
+    if only_if_running && job.state != ReviewJobState::Running {
+        return Err(QueueError::Conflict("The review attempt is no longer running.".into()));
+    }
+    // The job failure and its visible reason are the primary record. A Journey-side problem (missing/changed
+    // aggregate) is rolled back in a savepoint and must never leave the job running with no error.
+    {
+        let savepoint = tx
+            .savepoint()
+            .map_err(|error| QueueError::Storage(format!("Cannot open the review failure savepoint: {error}")))?;
+        match fail_journey_review_if_queued(&savepoint, session_id, review_id) {
+            Ok(()) => savepoint
+                .commit()
+                .map_err(|error| QueueError::Storage(format!("Cannot commit the review failure savepoint: {error}")))?,
+            Err(error) => {
+                tracing::warn!(job_id = %job.job_id, error = %error, "[journey-review] Journey review state could not be marked failed; failing the job only");
+                drop(savepoint);
+            }
+        }
+    }
+    ReviewJobRepository::fail(&tx, &job.job_id, reason)?;
+    tx.commit()
+        .map_err(|error| QueueError::Storage(format!("Cannot commit the review failure: {error}")))
+}
+
+/// Journey review -> `failed` (retryable) when it is still waiting for a result.
+/// A missing Journey or an already-terminal review leaves the aggregate untouched.
+fn fail_journey_review_if_queued(tx: &Connection, session_id: &str, review_id: &str) -> Result<(), QueueError> {
+    let Some(mut journey) = SqliteJourneyRepository::load(tx, session_id)
         .map_err(|error| QueueError::Conflict(error.to_string()))?
-        .ok_or_else(|| QueueError::Conflict("审核对应的会话旅程不存在。".into()))?;
+    else {
+        return Ok(());
+    };
+    let queued = journey
+        .reviews
+        .get(review_id)
+        .map(|review| review.state == crate::core::session::journey_lifecycle::ReviewState::Queued)
+        .unwrap_or(false);
+    if !queued {
+        return Ok(());
+    }
     let previous_revision = journey.revision;
     journey
         .fail_review(previous_revision, review_id)
         .map_err(|error| QueueError::Conflict(error.to_string()))?;
-    SqliteJourneyRepository::compare_and_store_in_transaction(&tx, &journey, previous_revision)
-        .map_err(|error| QueueError::Conflict(error.to_string()))?;
-    ReviewJobRepository::fail(&tx, &job.job_id, "审核模型调用失败，请显式重试。")?;
+    SqliteJourneyRepository::compare_and_store_in_transaction(tx, &journey, previous_revision)
+        .map_err(|error| QueueError::Conflict(error.to_string()))
+}
+
+/// User cancel of a queued or running review. One transaction: job -> `cancelled`
+/// and the Journey review -> `failed` (retryable). A running provider call is aborted
+/// through its token; a late result cannot publish because the job is no longer running.
+pub fn cancel_review_job(conn: &mut Connection, session_id: &str, job_id: &str) -> Result<ReviewJob, QueueError> {
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| QueueError::Storage(format!("Cannot open the review cancel transaction: {error}")))?;
+    let job = ReviewJobRepository::get_by_job(&tx, job_id)?
+        .filter(|job| job.session_id == session_id)
+        .ok_or_else(|| QueueError::Invalid("The review job does not exist.".into()))?;
+    fail_journey_review_if_queued(&tx, session_id, &job.review_id)?;
+    ReviewJobRepository::cancel(&tx, job_id, "Cancelled by user. Retry to run it again.")?;
     tx.commit()
-        .map_err(|error| QueueError::Storage(format!("无法提交审核失败事务：{error}")))
+        .map_err(|error| QueueError::Storage(format!("Cannot commit the review cancel: {error}")))?;
+    signal_cancel(job_id);
+    ReviewJobRepository::get_by_job(conn, job_id)?
+        .ok_or_else(|| QueueError::Conflict("The review job disappeared.".into()))
 }
 
 pub struct ReviewWorker;
@@ -806,7 +1210,7 @@ impl ReviewWorker {
                 Ok(Some(draft))
             }
             Err(error) => {
-                commit_failed_review(conn, &job.job_id, &job.session_id, &job.review_id)?;
+                commit_failed_review(conn, &job.job_id, &job.session_id, &job.review_id, &sanitize_reason("Review worker failed", &error, ""), false)?;
                 Err(QueueError::Invalid(format!("审核 worker 失败：{error}")))
             }
         }
@@ -1397,3 +1801,7 @@ fn parse_draft(
         critic_notes: list("批判")?,
     })
 }
+
+#[cfg(test)]
+#[path = "journey_review_queue_integration_tests.rs"]
+mod integration_tests;

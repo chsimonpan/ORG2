@@ -47,6 +47,19 @@ describe("compaction prefs wire schemas", () => {
     expect(parsed.idle.lastAttempt?.tokensAfter).toBeNull();
   });
 
+  it("accepts lastAttempt: null (a session that never attempted) and rejects an omitted key", () => {
+    const { lastAttempt: _drop, ...idleWithout } = wire.idle;
+    expect(
+      CompactionPrefsViewSchema.parse({
+        ...wire,
+        idle: { ...idleWithout, lastAttempt: null },
+      }).idle.lastAttempt
+    ).toBeNull();
+    expect(() =>
+      CompactionPrefsViewSchema.parse({ ...wire, idle: idleWithout })
+    ).toThrow();
+  });
+
   it("rejects unknown states so a backend/UI drift fails loudly", () => {
     expect(() =>
       CompactionPrefsViewSchema.parse({

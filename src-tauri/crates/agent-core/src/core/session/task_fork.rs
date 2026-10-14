@@ -842,6 +842,16 @@ pub fn child_write_block(conn: &Connection, session_id: &str) -> Result<Option<S
 pub async fn summarizer_from_persisted_config(
     session_id: &str,
 ) -> Result<SideQuerySummarizer, String> {
+    let (provider, model, account) = provider_from_persisted_config(session_id).await?;
+    SideQuerySummarizer::new(provider, model, account)
+}
+
+/// The provider, exact model and account (if the credential owner is an account) that a session's
+/// persisted configuration resolves to. Shared by the Task-fork summarizer and the Journey review
+/// executor so neither can drift into a default model or a fallback.
+pub async fn provider_from_persisted_config(
+    session_id: &str,
+) -> Result<(Arc<dyn crate::providers::traits::LLMProvider>, String, Option<String>), String> {
     let sid = session_id.to_string();
     let (record, workspace) = tokio::task::spawn_blocking(move || {
         let record = crate::session::persistence::get_session(&sid).map_err(err)?;
@@ -889,7 +899,7 @@ pub async fn summarizer_from_persisted_config(
     .map_err(|e| {
         format!("task_fork_session_config_invalid: 无法用持久配置构建 provider（{model}）：{e}")
     })?;
-    SideQuerySummarizer::new(Arc::from(provider), model, account)
+    Ok((Arc::from(provider), model, account))
 }
 
 // ───────────────────────── create ─────────────────────────
