@@ -80,16 +80,16 @@ impl JourneyUnboundedReviewProvider for Provider {
             tokio::time::sleep(Duration::from_millis(s.delay_ms)).await;
         }
         let args = if matches!(mode, Mode::Garbage) {
-            serde_json::json!({"结论": "缺字段"})
+            serde_json::json!({"conclusion": "缺字段"})
         } else {
             serde_json::json!({
-                "目标": "核对分叉结论", "结论": "可以继续主分支", "未决项": ["补测边界"], "确认项": ["证据已覆盖"],
-                "证据 message IDs": [format!("{}-f3", self.session), format!("{}-f5", self.session)],
-                "是否可能无价值": false, "批判": ["无额外遗漏"]
+                "objective": "核对分叉结论", "conclusion": "可以继续主分支", "open_items": ["补测边界"], "confirmed_items": ["证据已覆盖"],
+                "evidence_message_ids": [format!("{}-f3", self.session), format!("{}-f5", self.session)],
+                "possibly_worthless": false, "critique": ["无额外遗漏"]
             })
         };
         let mut response = LLMResponse::text("");
-        response.tool_calls.push(ToolCallRequest { id: "review-call".into(), name: "提交分叉审核".into(), arguments: args, thought_signature: None });
+        response.tool_calls.push(ToolCallRequest { id: "review-call".into(), name: "submit_fork_review".into(), arguments: args, thought_signature: None });
         Ok(response)
     }
 }

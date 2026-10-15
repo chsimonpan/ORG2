@@ -663,7 +663,7 @@ impl RuntimeProvenance {
 }
 
 pub fn chinese_prompt(stage: &str, transcript: &str, anchor: &str) -> String {
-    format!("你是中文审核 worker。阶段：{stage}。只能依据冻结分叉区间消息；精确父锚点为 {anchor}。不得读取锚点之后的父分支续写、其他锚点兄弟分叉或臆造证据。输出严格 JSON，不要 Markdown。\n冻结内容：\n{transcript}")
+    format!("你是中文审核 worker。阶段：{stage}。只能依据冻结分叉区间消息；精确父锚点为 {anchor}。不得读取锚点之后的父分支续写、其他锚点兄弟分叉或臆造证据。必须调用 submit_fork_review 工具提交结构化结果，不要输出 Markdown 或纯文本。证据 message IDs 只能取冻结内容里每行“@”之前的完整 message ID 原文（不含“@”和序号），不得引用父锚点、其他分支或自行编造的 ID。\n冻结内容：\n{transcript}")
 }
 
 #[async_trait]
@@ -698,28 +698,54 @@ impl ReviewModel for SideQueryReviewModel<'_> {
         }
         let config=review_side_query_config(provenance);
         if config.max_tokens.is_some(){return Err("Journey review must not add output cap".into());}
-        let tools=vec![serde_json::json!({"type":"function","function":{"name":config.structured.tool_name,"parameters":config.structured.schema}})];
+        let tool_def=serde_json::json!({"type":"function","function":{"name":config.structured.tool_name,"description":"Emit structured output","parameters":config.structured.schema}});
+        let forced=serde_json::json!({crate::core::side_query::TOOL_CHOICE_OVERRIDE_KEY:{"type":"tool","name":REVIEW_TOOL_NAME}});
+        let tool_sets=[vec![tool_def.clone(),forced],vec![tool_def]];
         let messages=vec![serde_json::json!({"role":"user","content":prompt})];
-        for _ in 0..2{let response=self.provider.review_unbounded(&messages,&tools,&provenance.model_id,0.0).await?;
-          if let Some(call)=response.tool_calls.iter().find(|call|call.name=="提交分叉审核"){return Ok(call.arguments.clone());}}
+        for (i,tools) in tool_sets.iter().enumerate(){let response=match self.provider.review_unbounded(&messages,tools,&provenance.model_id,0.0).await{Ok(r)=>r,
+            Err(e) if i==0&&e.contains("tool_choice")=>continue,Err(e)=>return Err(e)};
+          if let Some(call)=response.tool_calls.iter().find(|call|call.name==REVIEW_TOOL_NAME){return Ok(wire_to_domain(&call.arguments));}}
         Err("Journey review missing structured output".into())
     }
 }
 
-fn review_side_query_config(_provenance: &RuntimeProvenance) -> JourneyReviewConfig {
-    let schema = serde_json::json!({
-        "type": "object",
-        "required": ["目标", "结论", "未决项", "确认项", "证据 message IDs", "是否可能无价值", "批判"],
-        "properties": {
-            "目标": {"type": "string"}, "结论": {"type": "string"},
-            "未决项": {"type": "array", "items": {"type": "string"}},
-            "确认项": {"type": "array", "items": {"type": "string"}},
-            "证据 message IDs": {"type": "array", "items": {"type": "string"}},
-            "是否可能无价值": {"type": "boolean"},
-            "批判": {"type": "array", "items": {"type": "string"}}
+/// Provider tool names and schema property names must be ASCII (`^[a-zA-Z0-9_-]{1,128}$` / `^[a-zA-Z0-9_.-]{1,64}$`
+/// on Anthropic). The domain contract keeps its Chinese keys; this table maps wire name -> domain key at the adapter boundary.
+const REVIEW_TOOL_NAME: &str = "submit_fork_review";
+const REVIEW_WIRE_FIELDS: [(&str, &str, &str); 7] = [
+    ("objective", "目标", "string"),
+    ("conclusion", "结论", "string"),
+    ("open_items", "未决项", "string_array"),
+    ("confirmed_items", "确认项", "string_array"),
+    ("evidence_message_ids", "证据 message IDs", "string_array"),
+    ("possibly_worthless", "是否可能无价值", "boolean"),
+    ("critique", "批判", "string_array"),
+];
+
+fn wire_to_domain(arguments: &Value) -> Value {
+    let mut out = serde_json::Map::new();
+    if let Some(object) = arguments.as_object() {
+        for (wire, domain, _) in REVIEW_WIRE_FIELDS {
+            if let Some(value) = object.get(wire) {
+                out.insert(domain.to_string(), value.clone());
+            }
         }
-    });
-    JourneyReviewConfig {max_tokens:None,structured:StructuredOutput {tool_name:"提交分叉审核".into(),schema}}
+    }
+    Value::Object(out)
+}
+
+fn review_side_query_config(_provenance: &RuntimeProvenance) -> JourneyReviewConfig {
+    let mut properties = serde_json::Map::new();
+    for (wire, _, kind) in REVIEW_WIRE_FIELDS {
+        let schema = match kind {
+            "string_array" => serde_json::json!({"type": "array", "items": {"type": "string"}}),
+            other => serde_json::json!({"type": other}),
+        };
+        properties.insert(wire.to_string(), schema);
+    }
+    let required: Vec<&str> = REVIEW_WIRE_FIELDS.iter().map(|(wire, _, _)| *wire).collect();
+    let schema = serde_json::json!({"type": "object", "required": required, "properties": properties});
+    JourneyReviewConfig {max_tokens:None,structured:StructuredOutput {tool_name:REVIEW_TOOL_NAME.into(),schema}}
 }
 
 struct PreparedReviewJob {
@@ -1299,6 +1325,35 @@ mod tests {
         })
     }
 
+    fn valid_wire_annotation() -> Value {
+        serde_json::json!({
+            "objective": "核对分叉结论",
+            "conclusion": "可以继续主分支",
+            "open_items": ["补测边界"],
+            "confirmed_items": ["证据已覆盖"],
+            "evidence_message_ids": ["f3", "f5"],
+            "possibly_worthless": false,
+            "critique": ["无额外遗漏"]
+        })
+    }
+
+    #[test]
+    fn review_tool_wire_names_satisfy_provider_patterns_and_map_back_to_the_domain_contract() {
+        let config = review_side_query_config(&provenance());
+        let name = &config.structured.tool_name;
+        assert!(!name.is_empty() && name.len() <= 128 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'), "tool name {name}");
+        let properties = config.structured.schema["properties"].as_object().unwrap();
+        assert_eq!(properties.len(), 7);
+        for key in properties.keys() {
+            assert!(!key.is_empty() && key.len() <= 64 && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-'), "property {key}");
+        }
+        for required in config.structured.schema["required"].as_array().unwrap() {
+            assert!(properties.contains_key(required.as_str().unwrap()));
+        }
+        assert_eq!(wire_to_domain(&valid_wire_annotation()), valid_annotation());
+        assert_eq!(wire_to_domain(&serde_json::json!({"objective": "x", "unknown": 1})), serde_json::json!({"目标": "x"}));
+    }
+
     #[test]
     fn review_side_query_has_no_explicit_token_budget() {
         assert_eq!(review_side_query_config(&provenance()).max_tokens, None);
@@ -1328,8 +1383,8 @@ mod tests {
                 content: None,
                 tool_calls: vec![ToolCallRequest {
                     id: "review-call".into(),
-                    name: "提交分叉审核".into(),
-                    arguments: valid_annotation(),
+                    name: REVIEW_TOOL_NAME.into(),
+                    arguments: valid_wire_annotation(),
                     thought_signature: None,
                 }],
                 finish_reason: crate::providers::traits::finish_reason::STOP.into(),
@@ -1354,7 +1409,7 @@ mod tests {
       async fn review_unbounded(&self,_messages:&[Value],_tools:&[Value],_model:&str,_temperature:f32)->Result<LLMResponse,String>{
         self.observed.lock().unwrap().push(None);
         if self.retry_once&&self.calls.fetch_add(1,Ordering::SeqCst)==0{return Ok(LLMResponse::text(""));}
-        let mut response=LLMResponse::text("");response.tool_calls.push(ToolCallRequest{id:"review-call".into(),name:"提交分叉审核".into(),arguments:valid_annotation(),thought_signature:None});Ok(response)
+        let mut response=LLMResponse::text("");response.tool_calls.push(ToolCallRequest{id:"review-call".into(),name:REVIEW_TOOL_NAME.into(),arguments:valid_wire_annotation(),thought_signature:None});Ok(response)
       }
     }
     #[tokio::test]
@@ -1496,6 +1551,8 @@ mod tests {
         assert!(prompt.contains("只能依据冻结分叉区间消息"));
         assert!(prompt.contains("不得读取锚点之后的父分支续写"));
         assert!(prompt.contains("anchor"));
+        assert!(prompt.contains("submit_fork_review"));
+        assert!(prompt.contains("“@”之前的完整 message ID"));
     }
 
     #[test]
