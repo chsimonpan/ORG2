@@ -225,14 +225,32 @@ pub async fn run_scheduled_compaction(
     // does (idempotent fast-path when already live) instead of bouncing the
     // user with "send a message first".
     let session = if matches!(trigger, CompactionTrigger::Idle { .. }) {
-        // A background trigger must never spin up a runtime for a session
-        // the user is not using (MCP servers, workspace init, ...).
+        // Scheme A: lazy initialize runtime on idle, but only if the session has
+        // idle compaction enabled (is tracked in idle_monitor). A background
+        // trigger must never spin up a runtime for an unrelated session
+        // (MCP servers, workspace init, ...).
         match state.get_session(&session_id).await {
             Some(session) if session.get_runtime().await.is_some() => session,
             _ => {
-                return Ok(ManualCompactCommandResult::status(
-                    ManualCompactStatus::NoRuntime,
-                ))
+                // Check if this session is opted-in to idle compaction.
+                if crate::core::session::compaction_prefs::idle_monitor::live_view(&session_id)
+                    .is_some()
+                {
+                    // Idle-enabled session with no runtime: lazy init like Manual does.
+                    match prepare_session_for_scheduler_maintenance(state, &session_id).await {
+                        Ok(session) => session,
+                        Err(err) => {
+                            return Ok(ManualCompactCommandResult::failed(format!(
+                                "session runtime init failed (idle): {err}"
+                            )))
+                        }
+                    }
+                } else {
+                    // Session is not opted-in to idle compaction, don't wake it up.
+                    return Ok(ManualCompactCommandResult::status(
+                        ManualCompactStatus::NoRuntime,
+                    ))
+                }
             }
         }
     } else {
@@ -706,4 +724,80 @@ mod runtime_ownership_tests {
             .unwrap()
             .is_none());
     }
-}
+
+    #[tokio::test]
+    async fn idle_trigger_lazy_initializes_runtime_when_idle_prefs_enabled() {
+        let _sandbox = test_helpers::test_env::sandbox();
+        let conn = database::db::get_connection().expect("sandbox database");
+        crate::persistence::test_schema::ensure_agent_sessions_schema(&conn);
+        unified_persistence::init(&conn).expect("session schema");
+
+        // Create and persist a session without initializing its runtime.
+        let state = AgentAppState::new();
+        let session_id = "test-idle-lazy-init";
+        let workspace_root = std::env::temp_dir();
+        let session_identity = core_types::session::SessionIdentity {
+            id: session_id.to_string(),
+            workspace_root: workspace_root.clone(),
+            account_id: "test-account".to_string(),
+            model: "test-model".to_string(),
+            native_harness_type: core_types::session::NativeHarnessType::DesktopTauri,
+        };
+        unified_persistence::record_session(
+            &session_identity.id,
+            &session_identity.workspace_root,
+            &session_identity.account_id,
+            &session_identity.model,
+            session_identity.native_harness_type,
+        )
+        .expect("record session");
+
+        // Enable idle compaction for this session so it gets registered in idle_monitor.
+        let idle_prefs = crate::core::session::compaction_prefs::CompactionPrefs {
+            session_id: session_id.to_string(),
+            idle_minutes: Some(1),
+            weighted_threshold_millitokens: None,
+        };
+        crate::core::session::compaction_prefs::mod::upsert_idle_prefs(&idle_prefs)
+            .expect("set idle prefs");
+        crate::core::session::compaction_prefs::idle_monitor::configure(&idle_prefs);
+
+        // Session must not be in memory or have a runtime yet.
+        assert!(state.get_session(session_id).await.is_none());
+
+        // Trigger idle compaction. Because idle prefs are enabled, Scheme A should
+        // lazily initialize the runtime instead of returning NoRuntime.
+        let result = run_scheduled_compaction(
+            &state,
+            session_id,
+            None,
+            CompactionTrigger::Idle { epoch_ms: 0 },
+        )
+        .await
+        .expect("compaction call succeeded");
+
+        // We expect the job to run (and likely return NoRuntime or TooShort since
+        // the session has no history), but NOT because runtime init failed.
+        // The key assertion is that runtime was initialized.
+        match result.status {
+            ManualCompactStatus::NoRuntime => {
+                panic!("Runtime initialization should have happened; got NoRuntime")
+            }
+            _ => {
+                // Any other status (Compacted, TooShort, AlreadyCompact, Skipped, Failed, ...)
+                // means runtime init was attempted. We're testing the init path, not the
+                // compaction outcome.
+            }
+        }
+
+        // Verify that the session is now in memory with a runtime.
+        let session = state
+            .get_session(session_id)
+            .await
+            .expect("session loaded in memory");
+        assert!(
+            session.get_runtime().await.is_some(),
+            "Runtime should be initialized by lazy init"
+        );
+    }
+
