@@ -9,6 +9,7 @@ describe("Rust agent event lifecycle classification", () => {
     "agent:setup_repo_update",
     "agent:heartbeat",
     "agent:computer_use_aborted",
+    "agent:compaction_prefs_changed",
   ])("keeps asynchronous side-channel event %s turn-neutral", (eventType) => {
     expect(isRustAgentTurnNeutralEvent(eventType)).toBe(true);
   });

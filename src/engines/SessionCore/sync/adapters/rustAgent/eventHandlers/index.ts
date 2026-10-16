@@ -330,6 +330,7 @@ export async function dispatchAgentEvent(
     // resurrect a completed turn as running.
     case "agent:queue_status":
     case "agent:snapshot_created":
+    case "agent:compaction_prefs_changed":
     case "agent:computer_use_entered":
     case "agent:computer_use_exited":
     case "agent:computer_use_aborted":

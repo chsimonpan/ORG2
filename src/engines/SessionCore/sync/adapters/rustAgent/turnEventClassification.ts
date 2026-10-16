@@ -36,6 +36,9 @@ const TURN_NEUTRAL_EVENTS = new Set([
   "agent:setup_repo_update",
   "agent:heartbeat",
   "agent:snapshot_created",
+  // Idle/manual compaction prefs refresh: broadcast by maintenance work
+  // outside any turn; treating it as activity strands the session running.
+  "agent:compaction_prefs_changed",
   "agent:computer_use_entered",
   "agent:computer_use_exited",
   "agent:computer_use_aborted",
