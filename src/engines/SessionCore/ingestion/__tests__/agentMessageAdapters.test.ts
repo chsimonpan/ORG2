@@ -588,3 +588,25 @@ it("preserves a durable failed tool result without rewriting its output", () => 
   });
   expect(event.displayStatus).toBe("failed");
 });
+
+describe("persisted user turn-intent id", () => {
+  it("carries the persisted turnIntentId onto the user event and native item", () => {
+    const event = persistedMessageToSessionEvent(
+      makeRow({ role: "user", content: "same", turnIntentId: "intent-7" }),
+      SESSION_ID
+    );
+    expect((event.result as { turnIntentId?: string }).turnIntentId).toBe(
+      "intent-7"
+    );
+    const [item] = projectNativeConversationItems([event]);
+    expect(item).toMatchObject({ kind: "message", turnId: "intent-7" });
+  });
+
+  it("leaves legacy rows without an id untouched", () => {
+    const event = persistedMessageToSessionEvent(
+      makeRow({ role: "user", content: "same", turnIntentId: null }),
+      SESSION_ID
+    );
+    expect(event.result).not.toHaveProperty("turnIntentId");
+  });
+});

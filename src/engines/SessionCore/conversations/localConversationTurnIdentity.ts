@@ -15,6 +15,28 @@ export function conversationTurnIdOf(event: SessionEvent): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+/**
+ * The canonical transcript as it stood before `turnIntentId` was submitted.
+ *
+ * On recovery the canonical timeline can already contain the settled turn:
+ * its id-carrying user row followed by that turn's own replies. Removing only
+ * the user row would leave the replies behind as "known" history, so the
+ * native suffix could never prove them new. Queue heads run FIFO, so nothing
+ * after this turn's first id-carrying event belongs to an earlier turn.
+ * Rows without an id (legacy) are never matched; identical text is irrelevant.
+ */
+export function timelineBeforeTurn(
+  timeline: readonly SessionEvent[],
+  turnIntentId: string
+): SessionEvent[] {
+  const start = timeline.findIndex(
+    (event) =>
+      event.source === "user" && conversationTurnIdOf(event) === turnIntentId
+  );
+  const prior = start < 0 ? timeline : timeline.slice(0, start);
+  return prior.filter((event) => conversationTurnIdOf(event) !== turnIntentId);
+}
+
 export interface ProviderRequestIdentity {
   text: string;
   images: readonly string[];

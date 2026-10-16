@@ -113,6 +113,21 @@ function sliceProviderNativeTail(
 ): SessionEvent[] | null {
   const beforeItems = projectNativeConversationItems(before);
   const afterItems = projectNativeConversationItems(after);
+  // A native user row that carries this turn's private id is direct proof of
+  // the anchor. In-turn compaction replaces the effective prefix with a fresh
+  // summary, so the semantic-prefix proof below cannot hold there; the id
+  // still does. Text is never used to identify the turn on this path.
+  const idAnchor = afterItems.findIndex(
+    (item) =>
+      item.kind === "message" &&
+      item.role === "user" &&
+      item.turnId === turnIntentId
+  );
+  // Only a portable reply after the anchor settles here; a reply-less
+  // (failed/closed) turn keeps the stricter prefix proof and its recovery.
+  if (idAnchor >= 0 && idAnchor < afterItems.length - 1) {
+    return nativeTailAfterUser(after, afterItems, idAnchor, turnIntentId);
+  }
   if (!nativeConversationItemsArePrefix(beforeItems, afterItems)) {
     if (logMismatch) {
       log.warn(
@@ -139,8 +154,17 @@ function sliceProviderNativeTail(
     return null;
   }
 
+  return nativeTailAfterUser(after, appendedItems, userIndex, turnIntentId);
+}
+
+function nativeTailAfterUser(
+  after: readonly SessionEvent[],
+  items: ReturnType<typeof projectNativeConversationItems>,
+  userIndex: number,
+  turnIntentId: string
+): SessionEvent[] {
   const tailEventIds = new Set(
-    appendedItems.slice(userIndex + 1).map(sourceEventIdOfNativeItem)
+    items.slice(userIndex + 1).map(sourceEventIdOfNativeItem)
   );
   if (tailEventIds.size === 0) return [];
   const tail = after.filter(
@@ -150,7 +174,7 @@ function sliceProviderNativeTail(
   // The canonical user timestamp may predate a queued/retried native send.
   // Preserve the provider's actual user-append boundary using the existing
   // lifecycle event, which is excluded from native role/tool materialization.
-  const nativeUser = appendedItems[userIndex];
+  const nativeUser = items[userIndex];
   if (tail.length > 0 && Number.isFinite(Date.parse(nativeUser.createdAt))) {
     const id = `convturn-${turnIntentId}-native-start`;
     tail.unshift({

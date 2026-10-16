@@ -376,6 +376,42 @@ pub fn save_user_msg(
     shared::save_user_msg(SESSION_TABLE_PREFIX, session_id, content, images)
 }
 
+/// Stamp the accepted turn-intent id on a persisted `user` row. First write
+/// wins: a replayed id-stable input keeps its original association.
+pub fn set_user_msg_turn_intent(
+    session_id: &str,
+    message_id: &str,
+    turn_intent_id: &str,
+) -> SqliteResult<()> {
+    if turn_intent_id.is_empty() {
+        return Ok(());
+    }
+    with_sessions_writer(|| -> SqliteResult<()> {
+        let conn = get_connection()?;
+        conn.execute(
+            "UPDATE agent_messages SET turn_intent_id = ?3
+             WHERE session_id = ?1 AND id = ?2 AND role = 'user'
+               AND turn_intent_id IS NULL",
+            params![session_id, message_id, turn_intent_id],
+        )?;
+        Ok(())
+    })
+}
+
+/// Turn-intent ids of a session's `user` rows, keyed by message id.
+pub fn load_user_msg_turn_intents(session_id: &str) -> SqliteResult<HashMap<String, String>> {
+    let conn = get_connection()?;
+    let mut stmt = conn.prepare(
+        "SELECT id, turn_intent_id FROM agent_messages
+         WHERE session_id = ?1 AND role = 'user' AND turn_intent_id IS NOT NULL
+           AND turn_intent_id <> ''",
+    )?;
+    let rows = stmt.query_map([session_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    rows.collect()
+}
+
 /// Persist an at-least-once user input under a stable id. Replays return the
 /// same id without inserting a second transcript row.
 pub fn save_user_msg_with_id(
@@ -1720,6 +1756,29 @@ mod tests {
             [session_id],
         )
         .expect("seed session row");
+    }
+
+    #[test]
+    fn user_turn_intent_is_stamped_once_and_survives_compaction() {
+        let _sandbox = test_env::sandbox();
+        let session_id = "turn-intent-stamp";
+        seed_session_for_message_tests(session_id);
+        let conn = get_connection().unwrap();
+        crate::persistence::session_snapshots::ensure_tables_with(&conn).unwrap();
+        let first = save_user_msg(session_id, "same words", None).unwrap();
+        let second = save_user_msg(session_id, "same words", None).unwrap();
+        let assistant = save_assistant_msg(session_id, "ok", "m").unwrap();
+        set_user_msg_turn_intent(session_id, &first, "intent-1").unwrap();
+        set_user_msg_turn_intent(session_id, &second, "intent-2").unwrap();
+        // First write wins; assistant rows are never stamped.
+        set_user_msg_turn_intent(session_id, &first, "intent-x").unwrap();
+        set_user_msg_turn_intent(session_id, &assistant, "intent-3").unwrap();
+        set_user_msg_turn_intent(session_id, &second, "").unwrap();
+        append_compact_boundary(session_id, "summary", 1, Some(10), Some(2)).unwrap();
+        let ids = load_user_msg_turn_intents(session_id).unwrap();
+        assert_eq!(ids.len(), 2);
+        assert_eq!(ids.get(&first).map(String::as_str), Some("intent-1"));
+        assert_eq!(ids.get(&second).map(String::as_str), Some("intent-2"));
     }
 
     #[test]

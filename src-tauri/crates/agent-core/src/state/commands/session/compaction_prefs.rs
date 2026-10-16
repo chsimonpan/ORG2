@@ -23,7 +23,7 @@ pub struct IdleView {
     pub minutes_min: u32,
     pub minutes_max: u32,
     /// disabled | unsupported | waiting_activity | waiting | busy | in_flight |
-    /// attempted | due | overdue
+    /// attempted | due (a missed slot reports `waiting` for the next slot)
     pub state: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_activity_ms: Option<i64>,
@@ -103,6 +103,7 @@ async fn build_view(state: &AgentAppState, session_id: &str) -> Result<Compactio
         last_activity_ms: last_activity,
         last_attempt_epoch_ms: attempt_epoch,
         busy,
+        deferred_due_ms: None,
         now_ms,
     });
     let (state_tag, next_due_ms) = if unsupported.is_some() && !stored.idle_enabled {
@@ -117,7 +118,7 @@ async fn build_view(state: &AgentAppState, session_id: &str) -> Result<Compactio
             Decision::Busy => ("busy", None),
             Decision::Wait { due_ms } => ("waiting", Some(due_ms)),
             Decision::Fire { .. } => ("due", None),
-            Decision::SkipOverdue { .. } => ("overdue", None),
+            Decision::Defer { due_ms } => ("waiting", Some(due_ms)),
         }
     };
 

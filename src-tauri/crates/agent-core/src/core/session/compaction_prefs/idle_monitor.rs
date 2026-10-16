@@ -22,6 +22,8 @@ struct Entry {
     last_activity_ms: Option<i64>,
     persisted_activity_ms: Option<i64>,
     last_attempt_epoch_ms: Option<i64>,
+    /// D1 merged slot for the current epoch's missed due time (in memory).
+    deferred_due_ms: Option<i64>,
     in_flight: bool,
 }
 
@@ -72,6 +74,7 @@ fn note_turn_activity_at(shared: &Shared, session_id: &str, now_ms: i64) {
         match entries.get_mut(session_id) {
             Some(entry) => {
                 entry.last_activity_ms = Some(now_ms);
+                entry.deferred_due_ms = None;
                 true
             }
             None => false,
@@ -113,6 +116,7 @@ fn configure_in(shared: &Shared, prefs: &CompactionPrefs) {
                     last_activity_ms: prefs.last_activity_ms,
                     persisted_activity_ms: prefs.last_activity_ms,
                     last_attempt_epoch_ms: attempt_epoch,
+                    deferred_due_ms: None,
                     in_flight: false,
                 });
         } else {
@@ -146,8 +150,6 @@ pub fn live_view(session_id: &str) -> Option<(Option<i64>, Option<i64>, bool)> {
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Evaluation {
     pub fires: Vec<(String, i64)>,
-    /// (session, epoch, due) recorded as `skipped_overdue`.
-    pub overdue: Vec<(String, i64, i64)>,
     pub next_due_ms: Option<i64>,
 }
 
@@ -181,19 +183,20 @@ fn evaluate(shared: &Shared, now_ms: i64, busy: &HashSet<String>) -> Evaluation 
             last_activity_ms: entry.last_activity_ms,
             last_attempt_epoch_ms: entry.last_attempt_epoch_ms,
             busy: busy.contains(id),
+            deferred_due_ms: entry.deferred_due_ms,
             now_ms,
         });
         match decision {
             Decision::Wait { due_ms } => {
                 out.next_due_ms = Some(out.next_due_ms.map_or(due_ms, |cur| cur.min(due_ms)));
             }
+            Decision::Defer { due_ms } => {
+                entry.deferred_due_ms = Some(due_ms);
+                out.next_due_ms = Some(out.next_due_ms.map_or(due_ms, |cur| cur.min(due_ms)));
+            }
             Decision::Fire { epoch_ms } => {
                 entry.in_flight = true;
                 out.fires.push((id.clone(), epoch_ms));
-            }
-            Decision::SkipOverdue { epoch_ms, due_ms } => {
-                entry.last_attempt_epoch_ms = Some(epoch_ms);
-                out.overdue.push((id.clone(), epoch_ms, due_ms));
             }
             Decision::Disabled
             | Decision::WaitForActivity
@@ -202,7 +205,6 @@ fn evaluate(shared: &Shared, now_ms: i64, busy: &HashSet<String>) -> Evaluation 
         }
     }
     out.fires.sort();
-    out.overdue.sort();
     out
 }
 
@@ -256,24 +258,6 @@ async fn run(state: AgentAppState) {
         }
         let evaluation = evaluate(shared, now_ms, &busy);
 
-        for (id, epoch_ms, due_ms) in evaluation.overdue {
-            info!(
-                session_id = %id,
-                overdue_ms = now_ms - due_ms,
-                "[IdleCompaction] skipped: due time long past (suspend/restart)"
-            );
-            record_attempt(
-                &id,
-                IdleAttempt {
-                    epoch_ms,
-                    at_ms: now_ms,
-                    status: "skipped_overdue".into(),
-                    tokens_before: None,
-                    tokens_after: None,
-                },
-            )
-            .await;
-        }
         for (id, epoch_ms) in evaluation.fires {
             tauri::async_runtime::spawn(fire(state.clone(), id, epoch_ms));
         }
@@ -465,22 +449,27 @@ mod tests {
         configure_in(&shared, &prefs("a", 5, Some(0)));
         let busy: HashSet<String> = ["a".to_string()].into();
         let ev = evaluate(&shared, 5 * MIN, &busy);
-        assert!(ev.fires.is_empty() && ev.overdue.is_empty());
+        assert!(ev.fires.is_empty());
         note_turn_activity_at(&shared, "a", 6 * MIN);
         let ev = evaluate(&shared, 6 * MIN, &none());
         assert_eq!(ev.next_due_ms, Some(11 * MIN));
     }
 
     #[test]
-    fn overdue_after_restart_is_recorded_once_and_never_fires() {
+    fn overdue_after_restart_waits_for_next_slot_and_fires_once() {
+        // D1 (user decision 2026-10-16): no fire at restart; the missed
+        // attempt merges into the next idle due slot and fires exactly once.
         let shared = Shared::new();
         configure_in(&shared, &prefs("a", 59, Some(0)));
         let now = 10_000 * MIN;
         let ev = evaluate(&shared, now, &none());
         assert!(ev.fires.is_empty());
-        assert_eq!(ev.overdue, vec![("a".to_string(), 0, 59 * MIN)]);
-        let again = evaluate(&shared, now + MIN, &none());
-        assert!(again.fires.is_empty() && again.overdue.is_empty());
+        let next = 59 * MIN * (10_000 / 59 + 1);
+        assert_eq!(ev.next_due_ms, Some(next));
+        let at_next = evaluate(&shared, next, &none());
+        assert_eq!(at_next.fires, vec![("a".to_string(), 0)]);
+        let again = evaluate(&shared, next + MIN, &none());
+        assert!(again.fires.is_empty());
     }
 
     #[test]

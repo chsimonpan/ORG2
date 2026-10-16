@@ -155,6 +155,14 @@ pub fn ensure_tables_with(conn: &Connection) -> SqliteResult<()> {
         conn,
         "ALTER TABLE agent_messages ADD COLUMN compact_tokens_after INTEGER",
     );
+    // Private ORG2 turn-intent id of the accepted user turn that wrote this
+    // `user` row. Never model-facing; lets the frontend locate a turn's own
+    // anchor in native history (including after in-turn compaction) without
+    // comparing message text.
+    try_migrate(
+        conn,
+        "ALTER TABLE agent_messages ADD COLUMN turn_intent_id TEXT",
+    );
     try_migrate(
         conn,
         "ALTER TABLE agent_sessions ADD COLUMN workspace_path TEXT",

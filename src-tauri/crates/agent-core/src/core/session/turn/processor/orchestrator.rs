@@ -140,6 +140,18 @@ impl UnifiedMessageProcessor {
                 })
             }
             .map_err(|err| format!("Failed to save user message: {}", err))?;
+            // Carry the accepted turn's private id on the native user row so
+            // the frontend settles this exact turn by id, not by text, even
+            // after in-turn compaction rewrites the effective history.
+            if let Err(err) = tokio::task::block_in_place(|| {
+                unified_persistence::set_user_msg_turn_intent(
+                    session_id,
+                    &message_id,
+                    &context.turn_intent_id,
+                )
+            }) {
+                tracing::warn!(session_id, error = %err, "[unified_processor] failed to stamp user turn intent");
+            }
 
             if let Some(handle) = self.app_handle.as_ref() {
                 let event_result = tokio::task::block_in_place(|| {

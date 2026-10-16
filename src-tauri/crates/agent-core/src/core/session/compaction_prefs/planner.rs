@@ -2,9 +2,10 @@
 //! wall-clock `now_ms` so suspend/resume and restarts are handled by comparing
 //! wall time, and tests can exercise the whole matrix deterministically.
 
-/// A wake later than `due + GRACE` means the provider cache has most likely
-/// expired already (suspend, app was closed); compacting then would pay a full
-/// uncached summarization for no cache benefit, so the attempt is skipped.
+/// A wake later than `due + GRACE` missed its idle slot (suspend, app was
+/// closed). The missed attempt is not dropped and not run at wake time: it is
+/// merged into the next idle due slot (`due + k * interval`, first slot after
+/// now), which fires once like an ordinary due attempt.
 pub const OVERDUE_GRACE_MS: i64 = 2 * 60 * 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,6 +16,9 @@ pub struct PlanInput {
     pub last_attempt_epoch_ms: Option<i64>,
     /// Scheduler has an active job or queued work for the session.
     pub busy: bool,
+    /// Merged slot chosen when this epoch's due time was missed (D1). Owned
+    /// by the monitor; `None` until a miss is observed.
+    pub deferred_due_ms: Option<i64>,
     pub now_ms: i64,
 }
 
@@ -29,7 +33,10 @@ pub enum Decision {
     Busy,
     Wait { due_ms: i64 },
     Fire { epoch_ms: i64 },
-    SkipOverdue { epoch_ms: i64, due_ms: i64 },
+    /// Due time was missed (suspend/closed app): wait for the next idle slot
+    /// instead of firing now or dropping the attempt. The caller remembers
+    /// `due_ms` as `deferred_due_ms` for this epoch.
+    Defer { due_ms: i64 },
 }
 
 pub fn due_ms(last_activity_ms: i64, idle_minutes: u32) -> i64 {
@@ -53,13 +60,25 @@ pub fn plan(input: PlanInput) -> Decision {
     if input.now_ms < due {
         return Decision::Wait { due_ms: due };
     }
-    if input.now_ms > due.saturating_add(OVERDUE_GRACE_MS) {
-        return Decision::SkipOverdue {
-            epoch_ms,
-            due_ms: due,
-        };
+    if input.now_ms <= due.saturating_add(OVERDUE_GRACE_MS) {
+        return Decision::Fire { epoch_ms };
     }
-    Decision::Fire { epoch_ms }
+    // Missed slot. A previously chosen merged slot fires inside its own grace
+    // window; otherwise (first miss, or the merged slot was missed too) pick
+    // the next slot strictly after now. All missed slots collapse into one.
+    if let Some(deferred) = input.deferred_due_ms.filter(|d| *d > due) {
+        if input.now_ms < deferred {
+            return Decision::Wait { due_ms: deferred };
+        }
+        if input.now_ms <= deferred.saturating_add(OVERDUE_GRACE_MS) {
+            return Decision::Fire { epoch_ms };
+        }
+    }
+    let interval = (input.idle_minutes.max(1) as i64).saturating_mul(60_000);
+    let missed = (input.now_ms.saturating_sub(due) / interval).saturating_add(1);
+    Decision::Defer {
+        due_ms: due.saturating_add(missed.saturating_mul(interval)),
+    }
 }
 
 #[cfg(test)]
@@ -75,6 +94,7 @@ mod tests {
             last_activity_ms: Some(1_000_000),
             last_attempt_epoch_ms: None,
             busy: false,
+            deferred_due_ms: None,
             now_ms: 1_000_000,
         }
     }
@@ -127,18 +147,70 @@ mod tests {
     }
 
     #[test]
-    fn wake_after_suspend_beyond_grace_skips_instead_of_firing() {
+    fn wake_after_suspend_beyond_grace_defers_to_next_idle_slot() {
+        // D1 (user decision 2026-10-16): a missed slot is neither skipped nor
+        // run at wake time; it waits for the next idle due slot.
         let input = PlanInput {
             now_ms: 1_000_000 + 59 * MIN + OVERDUE_GRACE_MS + 1,
             ..base()
         };
         assert_eq!(
             plan(input),
-            Decision::SkipOverdue {
-                epoch_ms: 1_000_000,
-                due_ms: 1_000_000 + 59 * MIN
+            Decision::Defer {
+                due_ms: 1_000_000 + 2 * 59 * MIN
             }
         );
+        let deferred = Some(1_000_000 + 2 * 59 * MIN);
+        let before_slot = PlanInput {
+            deferred_due_ms: deferred,
+            now_ms: 1_000_000 + 2 * 59 * MIN - 1,
+            ..base()
+        };
+        assert_eq!(
+            plan(before_slot),
+            Decision::Wait {
+                due_ms: 1_000_000 + 2 * 59 * MIN
+            }
+        );
+        let at_next_slot = PlanInput {
+            deferred_due_ms: deferred,
+            now_ms: 1_000_000 + 2 * 59 * MIN,
+            ..base()
+        };
+        assert_eq!(plan(at_next_slot), Decision::Fire { epoch_ms: 1_000_000 });
+    }
+
+    #[test]
+    fn many_missed_slots_merge_into_one_next_slot() {
+        let input = PlanInput {
+            now_ms: 1_000_000 + 59 * MIN * 10 + 5 * MIN,
+            ..base()
+        };
+        assert_eq!(
+            plan(input),
+            Decision::Defer {
+                due_ms: 1_000_000 + 59 * MIN * 11
+            }
+        );
+        // Missing the merged slot too re-merges into the following one.
+        let missed_again = PlanInput {
+            deferred_due_ms: Some(1_000_000 + 59 * MIN * 11),
+            now_ms: 1_000_000 + 59 * MIN * 11 + OVERDUE_GRACE_MS + 1,
+            ..base()
+        };
+        assert_eq!(
+            plan(missed_again),
+            Decision::Defer {
+                due_ms: 1_000_000 + 59 * MIN * 12
+            }
+        );
+        // After the merged attempt is recorded, the epoch never refires.
+        let after = PlanInput {
+            last_attempt_epoch_ms: Some(1_000_000),
+            now_ms: 1_000_000 + 59 * MIN * 30,
+            ..base()
+        };
+        assert_eq!(plan(after), Decision::AlreadyAttempted);
     }
 
     #[test]

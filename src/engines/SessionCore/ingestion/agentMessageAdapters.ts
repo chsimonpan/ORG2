@@ -62,6 +62,11 @@ export interface PersistedMessage {
   compactFromSequence?: number | null;
   compactTokensBefore?: number | null;
   compactTokensAfter?: number | null;
+  /**
+   * Private ORG2 turn-intent id of the accepted user turn that wrote this
+   * `user` row (agent_load_messages). Absent on legacy rows and non-user rows.
+   */
+  turnIntentId?: string | null;
 }
 
 // ============================================
@@ -292,6 +297,9 @@ export function persistedMessageToSessionEvent(
       message: { content: msg.content, role: "user" },
       ...(displayImages && displayImages.length > 0
         ? { images: displayImages }
+        : {}),
+      ...(typeof msg.turnIntentId === "string" && msg.turnIntentId.length > 0
+        ? { turnIntentId: msg.turnIntentId }
         : {}),
     };
   } else if (msg.role === "assistant") {

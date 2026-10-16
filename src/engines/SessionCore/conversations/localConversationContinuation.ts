@@ -44,7 +44,10 @@ import {
   prepareConversationTurn,
   runCreatedConversationTurn,
 } from "./localConversationTurnDispatch";
-import { conversationTurnIdOf } from "./localConversationTurnIdentity";
+import {
+  conversationTurnIdOf,
+  timelineBeforeTurn,
+} from "./localConversationTurnIdentity";
 import {
   nativeConversationItemsAreProviderPortablePrefix,
   projectNativeConversationItems,
@@ -281,9 +284,10 @@ export async function recoverLocalConversationTurn(
     );
   }
 
-  const timeline = params.timeline.filter(
-    (event) => conversationTurnIdOf(event) !== params.turnIntentId
-  );
+  // The canonical timeline may already hold this settled turn (user row now
+  // carries its turnIntentId, followed by its replies); recover from the
+  // transcript as it stood before the turn.
+  const timeline = timelineBeforeTurn(params.timeline, params.turnIntentId);
   const { events } = await loadAuthoritativeSessionEvents(
     params.runnerSessionId
   );

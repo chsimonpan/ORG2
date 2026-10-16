@@ -470,3 +470,69 @@ describe("native settled tail lifecycle boundary", () => {
     ).toThrow("unresolved native output suffix");
   });
 });
+
+describe("native settled tail anchored by persisted turnIntentId", () => {
+  const withIntent = (e: SessionEvent, turnIntentId: string): SessionEvent => ({
+    ...e,
+    result: { ...(e.result as object), turnIntentId },
+  });
+  const summary = {
+    ...event("boundary", "system", "[Conversation summary] earlier turns"),
+    actionType: "context_compacted",
+    functionName: "context_compacted",
+  } as SessionEvent;
+
+  it("settles a turn whose native history was compacted inside the turn", async () => {
+    const prompt = withIntent(event("u-2", "user", "Explain it."), "intent-2");
+    const reply = event("a-2", "assistant", "Here it is.", "assistant");
+    // Effective native frame after in-turn compaction: summary + this turn.
+    mocks.reconcile.mockResolvedValueOnce([summary, prompt, reply]);
+    const settled = await loadSettledTail(
+      "runner",
+      before,
+      "intent-2",
+      { text: "Explain it.", images: [] },
+      "completed"
+    );
+    expect(settled.agentTail.map((e) => e.id)).toContain("a-2");
+  });
+
+  it("does not mistake an earlier identical prompt for this turn", async () => {
+    const earlier = withIntent(event("u-1", "user", "same"), "intent-1");
+    const earlierReply = event("a-1", "assistant", "first", "assistant");
+    const priorTimeline = [...before, earlier, earlierReply];
+    // The second identical-text turn has not reached native history yet.
+    mocks.reconcile.mockResolvedValue([summary, earlier, earlierReply]);
+    mocks.recover.mockResolvedValue([summary, earlier, earlierReply]);
+    await expect(
+      loadSettledTail(
+        "runner",
+        priorTimeline,
+        "intent-2",
+        { text: "same", images: [] },
+        "completed"
+      )
+    ).rejects.toThrow("missing its native transcript anchor");
+
+    const second = withIntent(event("u-2", "user", "same"), "intent-2");
+    const secondReply = event("a-2", "assistant", "second", "assistant");
+    mocks.reconcile.mockResolvedValueOnce([
+      summary,
+      earlier,
+      earlierReply,
+      second,
+      secondReply,
+    ]);
+    const settled = await loadSettledTail(
+      "runner",
+      priorTimeline,
+      "intent-2",
+      { text: "same", images: [] },
+      "completed"
+    );
+    expect(settled.agentTail.map((e) => e.id)).toEqual(
+      expect.arrayContaining(["a-2"])
+    );
+    expect(settled.agentTail.map((e) => e.id)).not.toContain("a-1");
+  });
+});

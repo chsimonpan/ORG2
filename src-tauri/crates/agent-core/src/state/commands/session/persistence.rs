@@ -23,7 +23,18 @@ use super::common::review_session_ids;
 pub async fn agent_load_messages(session_id: String) -> Result<Vec<serde_json::Value>, String> {
     shared::spawn_blocking_cmd(move || {
         let messages = session_persistence::load_messages(&session_id)?;
-        messages.into_iter().map(shared::to_json_value).collect()
+        let intents = session_persistence::load_user_msg_turn_intents(&session_id)?;
+        messages
+            .into_iter()
+            .map(|message| {
+                let intent = intents.get(&message.id).cloned();
+                let mut value = shared::to_json_value(message)?;
+                if let (Some(intent), Some(obj)) = (intent, value.as_object_mut()) {
+                    obj.insert("turnIntentId".to_string(), serde_json::Value::String(intent));
+                }
+                Ok(value)
+            })
+            .collect()
     })
     .await
 }
