@@ -57,3 +57,18 @@ export async function cancelJourneyReviewJob(ownerSessionId: string, jobId: stri
   const job = await invoke<ReviewJobView>("journey_review_cancel", { ownerSessionId, request: { sessionId: ownerSessionId, jobId } });
   return checkJob(job, ownerSessionId);
 }
+
+export interface JourneyTitleEntry{nodeId:string;title:string;status:"ok"|"error"|"stale"|"pending";lastError:string|null;model:string;thread?:string;parentThread?:string;threadName?:string;summary?:string}
+export interface JourneyTitles{ownerSessionId:string;titles:JourneyTitleEntry[];pending:number}
+function checkTitles(r:JourneyTitles,ownerSessionId:string):JourneyTitles{
+ if(!r||r.ownerSessionId!==ownerSessionId||!Array.isArray(r.titles)||!Number.isSafeInteger(r.pending))throw Error("Journey titles owner/shape mismatch");return r;
+}
+export async function loadJourneyTitles(ownerSessionId:string):Promise<JourneyTitles>{
+ if(!ownerSessionId||ownerSessionId.startsWith("cli:"))throw Error("Journey titles owner invalid");
+ return checkTitles(await invoke<JourneyTitles>("journey_titles_snapshot",{ownerSessionId}),ownerSessionId);
+}
+/** Explicit user gesture: model-writes titles for new/changed/errored nodes only. */
+export async function generateJourneyTitles(ownerSessionId:string):Promise<JourneyTitles>{
+ if(!ownerSessionId||ownerSessionId.startsWith("cli:"))throw Error("Journey titles owner invalid");
+ return checkTitles(await invoke<JourneyTitles>("journey_titles_generate",{ownerSessionId}),ownerSessionId);
+}

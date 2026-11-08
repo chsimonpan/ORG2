@@ -85,6 +85,75 @@ fn read_boundary_preview(conn:&rusqlite::Connection,owner:&str,anchor:&DurableAn
  }
 }
 
+
+// ---- Journey node titles: durable, model-written, no fallback. Node id = "{owner}:{branch}:{message_id}". ----
+#[derive(Debug,Serialize)]#[serde(rename_all="camelCase")]
+pub struct JourneyTitleEntry{pub node_id:String,pub title:String,pub status:String,pub last_error:Option<String>,pub model:String,pub thread:String,pub parent_thread:String,pub thread_name:String,pub summary:String}
+#[derive(Debug,Serialize)]#[serde(rename_all="camelCase")]
+pub struct JourneyTitlesResponse{pub owner_session_id:String,pub titles:Vec<JourneyTitleEntry>,pub pending:usize}
+fn node_id(owner:&str,msg:&str)->String{format!("{owner}:session:{owner}:{msg}")}
+fn title_nodes(owner:&str)->Result<Vec<(String,String)>,String>{
+ let rows=agent_core::session::persistence::load_messages(owner).map_err(|e|e.to_string())?;
+ if rows.len()>10000{return Err("journey_snapshot_limit".into());}
+ Ok(rows.into_iter().filter(|r|r.role=="user"&&r.compact_from_sequence.is_none()&&!r.content.trim().is_empty())
+  .map(|r|(node_id(owner,&r.id),r.content)).collect())
+}
+fn titles_response(owner:&str,nodes:&[(String,String)],conn:&rusqlite::Connection)->Result<JourneyTitlesResponse,String>{
+ use agent_core::core::session::journey_titles as jt;
+ let stored=jt::load(conn,owner).map_err(|e|e.to_string())?;
+ let (rows,pending)=jt::reconcile(nodes,&stored);
+ let titles=rows.into_iter().map(|r|JourneyTitleEntry{node_id:r.node_id,title:r.title,status:r.status,last_error:r.last_error,model:r.model,thread:r.thread,parent_thread:r.parent_thread,thread_name:r.thread_name,summary:r.summary}).collect();
+ Ok(JourneyTitlesResponse{owner_session_id:owner.into(),titles,pending})
+}
+#[tauri::command]
+pub async fn journey_titles_snapshot(owner_session_id:String,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<JourneyTitlesResponse,String>{
+ if owner_session_id.is_empty()||owner_session_id.starts_with("cli:"){return Err("journey_source_not_canonical".into());}
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_not_registered".into());}
+ let nodes=title_nodes(&owner_session_id)?;let conn=database::db::get_connection().map_err(|e|e.to_string())?;
+ titles_response(&owner_session_id,&nodes,&conn)
+}
+/// Generates titles for new/changed/errored nodes only, in one batched model call. Failure is recorded per node
+/// (status=error + reason); no placeholder title is ever written.
+#[tauri::command]
+pub async fn journey_titles_generate(owner_session_id:String,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<JourneyTitlesResponse,String>{
+ use agent_core::core::session::journey_titles as jt;
+ if owner_session_id.is_empty()||owner_session_id.starts_with("cli:"){return Err("journey_source_not_canonical".into());}
+ if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_not_registered".into());}
+ let _lease=journey_mutation_lease(&owner_session_id,&state).await.ok();
+ let rows=agent_core::session::persistence::load_messages(&owner_session_id).map_err(|e|e.to_string())?;
+ if rows.len()>10000{return Err("journey_snapshot_limit".into());}
+ let nodes:Vec<(String,String)>=rows.iter().filter(|r|r.role=="user"&&r.compact_from_sequence.is_none()&&!r.content.trim().is_empty()).map(|r|(node_id(&owner_session_id,&r.id),r.content.clone())).collect();
+ let existing={let conn=database::db::get_connection().map_err(|e|e.to_string())?;jt::load(&conn,&owner_session_id).map_err(|e|e.to_string())?};
+ let pending=jt::pending_nodes(&nodes,&existing);
+ if !pending.is_empty(){
+  use agent_core::core::session::journey_retrieval as jr;
+  let session=state.get_session(&owner_session_id).await.ok_or_else(||"journey_owner_not_registered".to_string())?;
+  // Retrieval corpus: the owner's visible transcript (user + assistant text), never other sessions.
+  let corpus:Vec<(String,String,String)>=rows.iter().filter(|r|(r.role=="user"||r.role=="assistant")&&r.compact_from_sequence.is_none()&&!r.content.trim().is_empty()).map(|r|(r.id.clone(),r.role.clone(),r.content.clone())).collect();
+  let msg_of=|nid:&str|nid.rsplit(':').next().unwrap_or("").to_string();
+  let account={let conn=database::db::get_connection().map_err(|e|e.to_string())?;jr::session_account_id(&conn,&owner_session_id)};
+  let cred=jr::resolve_zenmux_credential(account.as_deref(),jr::TITLE_EMBED_MODEL,&jr::zenmux_base_only).map_err(|e|e.to_string());
+  let client=reqwest::Client::new();
+  let mut working=existing.clone();
+  for batch in jt::batches(&pending){
+   let order:Vec<String>=nodes.iter().map(|(id,_)|id.clone()).collect();
+   let skel=jt::thread_skeleton(&working,&order);
+   let titled=working.values().filter(|r|r.status=="ok").map(|r|format!("{} [{}]: {}",r.node_id.rsplit(':').next().unwrap_or(""),r.thread,r.title)).collect::<Vec<_>>().join("\n");
+   let prior=if skel.is_empty(){titled}else{format!("Threads:\n{skel}\nTitles:\n{titled}")};
+   let prior_opt=(!prior.is_empty()).then_some(prior.as_str());
+   let outcome=match &cred{
+    Err(e)=>Err(e.clone()),
+    Ok(c)=>{let triples:Vec<(String,String,String)>=batch.iter().map(|(id,t)|(id.clone(),msg_of(id),t.clone())).collect();
+     match jr::retrieve_for_nodes(&client,c,&triples,&corpus).await{
+      Ok(ctx)=>jt::generate_with_session_model(&state,&session,prior_opt,&batch,&ctx).await,
+      Err(e)=>Err(e)}}};
+   let conn=database::db::get_connection().map_err(|e|e.to_string())?;
+   for row in jt::rows_for_outcome(&batch,&working,&outcome){jt::upsert(&conn,&owner_session_id,&row).map_err(|e|e.to_string())?;working.insert(row.node_id.clone(),row);}
+  }
+ }
+ let nodes=title_nodes(&owner_session_id)?;let conn=database::db::get_connection().map_err(|e|e.to_string())?;
+ titles_response(&owner_session_id,&nodes,&conn)
+}
 #[tauri::command]
 pub async fn journey_domain_snapshot(owner_session_id:String,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<agent_core::core::session::journey_application_service::JourneySnapshotResponse,String>{if state.get_session(&owner_session_id).await.is_none(){return Err("journey_owner_not_registered".into());}let conn=database::db::get_connection().map_err(|e|e.to_string())?;agent_core::core::session::journey_application_service::SessionJourneyApplicationService::snapshot(&conn,&owner_session_id).map_err(|e|e.to_string())}
 
@@ -299,6 +368,13 @@ fn historical_fork_commit(owner:&str,request:&HistoricalRuntimeForkRequest)->Res
   SqliteJourneyRepository::compare_and_store_in_transaction(&tx,&SessionJourney::new(child.clone(),"main"),0).map_err(|e|e.to_string())?;
   tx.execute("INSERT INTO session_journey_memberships(session_id,message_id,sequence,branch_id,task_id) SELECT session_id,id,sequence,'main',NULL FROM agent_messages WHERE session_id=?1 AND sequence>=0",params![child]).map_err(|e|e.to_string())?;
  }
+ // Titles: only inheritable rows (ok + identical text) for the copied pre-fork user nodes; nothing else is shared.
+ {let mut st=tx.prepare("SELECT id,content FROM agent_messages WHERE session_id=?1 AND role='user' AND compact_from_sequence IS NULL AND TRIM(content)<>''").map_err(|e|e.to_string())?;
+  let prefix=format!("{child}:");
+  let pairs:Vec<(String,String,String)>=st.query_map(params![child],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).map_err(|e|e.to_string())?
+   .filter_map(|r|r.ok()).filter_map(|(cid,text)|{let pid=cid.strip_prefix(&prefix)?.to_string();Some((node_id(owner,&pid),node_id(&child,&cid),text))}).collect();
+  drop(st);
+  agent_core::core::session::journey_titles::inherit_into_child(&tx,owner,&child,&pairs).map_err(|e|e.to_string())?;}
  tx.execute("INSERT INTO historical_runtime_fork_intents VALUES(?1,?2,?3,?4,?1)",params![owner,request.intent_id,anchor_json,child]).map_err(|e|e.to_string())?;
  Ok(HistoricalRuntimeForkResponse{child_session_id:child,parent_session_id:owner.into()})
  })()?;
