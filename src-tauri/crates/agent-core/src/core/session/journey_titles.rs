@@ -277,8 +277,20 @@ pub fn reconcile(nodes: &[(String, String)], stored: &BTreeMap<String, TitleRow>
     (out, pending)
 }
 
-/// Generates titles with the session's OWN runtime model/account (same selection a side query of that session uses).
+/// Generates titles with the fixed cheap title model (gpt-6-luna), not the session model.
 /// Returns (titles by node id, model). Any failure is returned as Err; no placeholder is produced.
+pub const TITLE_MODEL_SUFFIX: &str = "gpt-6-luna";
+
+/// First enabled key that lists the title model; returns (model id as the key names it, key id).
+fn find_title_model_account() -> Result<(String, String), String> {
+    for k in key_vault::key_store::KEY_SERVICE.list_keys() {
+        if !k.enabled { continue; }
+        let hit = k.enabled_models.iter().chain(k.available_models.iter()).find(|m| m.ends_with(TITLE_MODEL_SUFFIX));
+        if let Some(m) = hit { return Ok((m.clone(), k.id.clone())); }
+    }
+    Err(format!("journey_title_model_unavailable: no enabled account serves {TITLE_MODEL_SUFFIX}"))
+}
+
 pub async fn generate_with_session_model(
     state: &crate::state::AgentAppState,
     session: &crate::state::AgentSession,
@@ -290,38 +302,29 @@ pub async fn generate_with_session_model(
     use crate::core::side_query::{self, SideQueryConfig, StructuredOutput};
     use crate::providers::traits::{LLMProvider, SideQueryExecution};
     use std::sync::Arc;
-    let runtime = match session.get_runtime().await {
-        Some(r) => r,
-        None => {
-            // Historical session without a live runtime: initialize like a message send (no turn run); failure is reported.
-            crate::state::commands::session::identity::ensure_runtime_for_session(state, &session.id).await?
-        }
-    };
+    // Titles are short batch output: always use the cheap fixed model, never the session model.
+    // No fallback: if no enabled account serves it, the failure is reported to the caller.
+    let _ = state;
+    let (title_model, title_account) = find_title_model_account()?;
+    let reliability = crate::config::ReliabilityConfig::default();
     let label: &'static str = "journey_titles";
-    let inner: Arc<dyn LLMProvider> = match runtime.provider.side_query_execution() {
-        SideQueryExecution::SharedSession => {
-            runtime.provider.set_session_context(&session.id);
-            runtime.provider.clone()
-        }
-        SideQueryExecution::IsolatedSession => {
-            let workspace = runtime.workspace_state.read().clone();
-            let p = crate::providers::factory::create_provider_with_selection_preflight(
-                &runtime.model,
-                runtime.account_id.as_deref(),
-                runtime.provider.credential_source(),
-                &runtime.resolved.reliability,
-                runtime.native_harness_type,
-                Some(workspace),
-            )
-            .await
-            .map_err(|e| format!("Failed to create session-model provider: {e}"))?;
-            let p: Arc<dyn LLMProvider> = Arc::from(p);
-            p.set_session_context(&format!("{}:{label}", session.id));
-            p
-        }
+    let inner: Arc<dyn LLMProvider> = {
+        let p = crate::providers::factory::create_provider_with_selection_preflight(
+            &title_model,
+            Some(&title_account),
+            None,
+            &reliability,
+            None,
+            None,
+        )
+        .await
+        .map_err(|e| format!("Failed to create title provider ({title_model}): {e}"))?;
+        let p: Arc<dyn LLMProvider> = Arc::from(p);
+        p.set_session_context(&format!("{}:{label}", session.id));
+        p
     };
     let provider = crate::session::auxiliary_usage::AuxiliaryUsageProvider::owned(
-        inner, &session.id, label, runtime.account_id.as_deref(),
+        inner, &session.id, label, Some(title_account.as_str()),
     );
     let mut body = String::new();
     if let Some(s) = previous_summary.filter(|s| !s.trim().is_empty()) {
@@ -350,10 +353,10 @@ pub async fn generate_with_session_model(
                         "required":["title","thread"]}}},
                     "required":["events"],"additionalProperties":false}),
             }),
-            account_id: runtime.account_id.clone(),
+            account_id: Some(title_account.clone()),
             ..SideQueryConfig::default()
         },
-        &runtime.model,
+        &title_model,
     )
     .await?;
     let titles_val = result
@@ -368,7 +371,7 @@ pub async fn generate_with_session_model(
         if !ids.contains(k.as_str()) { continue; }
         if let Some(ev) = parse_event(v) { out.insert(k.clone(), ev); }
     }
-    Ok((out, runtime.model.clone()))
+    Ok((out, title_model.clone()))
 }
 
 fn clean(v: Option<&serde_json::Value>, max: usize) -> String {
