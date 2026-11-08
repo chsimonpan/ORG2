@@ -334,7 +334,12 @@ export async function recoverLocalConversationTurn(
       agentTail: finished.agentTail,
     };
   } catch (error) {
-    if (error instanceof QueuedConversationRecoveryPendingError) throw error;
+    if (
+      error instanceof QueuedConversationRecoveryPendingError ||
+      error instanceof QueuedConversationRecoveryBlockedError
+    ) {
+      throw error;
+    }
     throw new QueuedConversationRecoveryPendingError(
       error instanceof Error ? error.message : String(error)
     );
