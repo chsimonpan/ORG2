@@ -146,7 +146,18 @@ pub async fn journey_titles_generate(owner_session_id:String,state:tauri::State<
     Err(e)=>Err(e.clone()),
     Ok(c)=>{let triples:Vec<(String,String,String)>=batch.iter().map(|(id,t)|(id.clone(),msg_of(id),t.clone())).collect();
      match jr::retrieve_for_nodes(&client,c,&triples,&corpus).await{
-      Ok(ctx)=>jt::generate_with_session_model(&state,&session,prior_opt,&batch,&ctx,&batch.iter().filter_map(|(id,_)|replies.get(&msg_of(id)).map(|r|(id.clone(),r.clone()))).collect()).await,
+      Ok(ctx)=>{
+       let rep_for=|b:&[(String,String)]|->std::collections::BTreeMap<String,String>{b.iter().filter_map(|(id,_)|replies.get(&msg_of(id)).map(|r|(id.clone(),r.clone()))).collect()};
+       let mut res=jt::generate_with_session_model(&state,&session,prior_opt,&batch,&ctx,&rep_for(&batch)).await;
+       // One retry for nodes the model skipped (batch succeeded but omitted them). Only those nodes are re-asked.
+       if let Ok((titles,model))=&mut res{
+        let missing:Vec<(String,String)>=batch.iter().filter(|(id,_)|!titles.contains_key(id)).cloned().collect();
+        if !missing.is_empty(){
+         if let Ok((more,_))=jt::generate_with_session_model(&state,&session,prior_opt,&missing,&ctx,&rep_for(&missing)).await{titles.extend(more);}
+         let _=model;
+        }
+       }
+       res}
       Err(e)=>Err(e)}}};
    let conn=database::db::get_connection().map_err(|e|e.to_string())?;
    for row in jt::rows_for_outcome(&batch,&working,&outcome){jt::upsert(&conn,&owner_session_id,&row).map_err(|e|e.to_string())?;working.insert(row.node_id.clone(),row);}
