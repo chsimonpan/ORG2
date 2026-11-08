@@ -130,6 +130,7 @@ pub async fn journey_titles_generate(owner_session_id:String,state:tauri::State<
   let session=state.get_session(&owner_session_id).await.ok_or_else(||"journey_owner_not_registered".to_string())?;
   // Retrieval corpus: the owner's visible transcript (user + assistant text), never other sessions.
   let corpus:Vec<(String,String,String)>=rows.iter().filter(|r|(r.role=="user"||r.role=="assistant")&&r.compact_from_sequence.is_none()&&!r.content.trim().is_empty()).map(|r|(r.id.clone(),r.role.clone(),r.content.clone())).collect();
+  let replies=jt::reply_excerpts(&rows.iter().filter(|r|r.compact_from_sequence.is_none()).map(|r|(r.id.clone(),r.role.clone(),r.content.clone())).collect::<Vec<_>>(),400);
   let msg_of=|nid:&str|nid.rsplit(':').next().unwrap_or("").to_string();
   let account={let conn=database::db::get_connection().map_err(|e|e.to_string())?;jr::session_account_id(&conn,&owner_session_id)};
   let cred=jr::resolve_zenmux_credential(account.as_deref(),jr::TITLE_EMBED_MODEL,&jr::zenmux_base_only).map_err(|e|e.to_string());
@@ -145,7 +146,7 @@ pub async fn journey_titles_generate(owner_session_id:String,state:tauri::State<
     Err(e)=>Err(e.clone()),
     Ok(c)=>{let triples:Vec<(String,String,String)>=batch.iter().map(|(id,t)|(id.clone(),msg_of(id),t.clone())).collect();
      match jr::retrieve_for_nodes(&client,c,&triples,&corpus).await{
-      Ok(ctx)=>jt::generate_with_session_model(&state,&session,prior_opt,&batch,&ctx).await,
+      Ok(ctx)=>jt::generate_with_session_model(&state,&session,prior_opt,&batch,&ctx,&batch.iter().filter_map(|(id,_)|replies.get(&msg_of(id)).map(|r|(id.clone(),r.clone()))).collect()).await,
       Err(e)=>Err(e)}}};
    let conn=database::db::get_connection().map_err(|e|e.to_string())?;
    for row in jt::rows_for_outcome(&batch,&working,&outcome){jt::upsert(&conn,&owner_session_id,&row).map_err(|e|e.to_string())?;working.insert(row.node_id.clone(),row);}
