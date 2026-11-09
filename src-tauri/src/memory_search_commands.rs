@@ -6,6 +6,14 @@ use agent_core::core::session::journey_canonical::{DurableAnchor,resolve_with_co
 use agent_core::core::session::journey_lifecycle::{SessionJourney,SqliteJourneyRepository};
 pub(crate) const MODEL:&str="qwen/qwen3-vl-embedding";
 pub(crate) const SOURCE:&str="openai:https://zenmux.ai/api/v1:qwen/qwen3-vl-embedding:1024";
+/// Vector-space identity for a configured embedding. The default model keeps its legacy fingerprint so existing vectors stay valid; any other model/dimension is a distinct space and is never mixed.
+pub(crate) fn space_of(model:&str,dims:usize)->String{if model==MODEL&&dims==1024{SOURCE.to_string()}else{format!("openai:{model}:{dims}")}}
+pub(crate) fn configured_space(config:&agent_core::integrations::config::EmbeddingConfig)->Result<(String,usize,String),String>{
+ if config.provider!="embedding_api"{return Err("memory_query_config_fingerprint_mismatch".into());}
+ let model=config.model.clone().filter(|m|!m.trim().is_empty()).ok_or("memory_query_config_fingerprint_mismatch")?;
+ let dims=config.dimensions.filter(|d|*d>0).ok_or("memory_query_config_fingerprint_mismatch")?;
+ let source=space_of(&model,dims);Ok((model,dims,source))
+}
 /// Hard ceiling on index rows scanned per query. Above it the query fails explicitly (`memory_search_candidate_limit`); it never silently searches a subset.
 pub(crate) const MAX_CANDIDATES:usize=2000;
 /// Only the cosine top-K reach the rerank provider (K = the `top_n` ceiling), bounding provider payload and cost.
@@ -28,8 +36,9 @@ pub async fn memory_index_status(owner_session_id:String,state:tauri::State<'_,a
 #[tauri::command]
 pub async fn memory_search(owner_session_id:String,query:String,query_vector:Option<Vec<f32>>,embedding_source:Option<String>,top_n:usize,state:tauri::State<'_,agent_core::state::AgentAppState>)->Result<Vec<MemorySearchHit>,String>{
  require_registered_owner(&owner_session_id,&state).await?;
- let query_vector=match query_vector { Some(v)=>{if embedding_source.as_deref()!=Some(SOURCE){return Err("memory_embedding_fingerprint_mismatch".into());}v},None=>embed_query(&query,&state).await? };
- if query_vector.len()!=1024||query_vector.iter().any(|x|!x.is_finite()){return Err("memory_embedding_fingerprint_mismatch".into());}
+ let (cfg_model,cfg_dims,cfg_source)=configured_space(&state.integrations.snapshot().embedding)?;
+ let query_vector=match query_vector { Some(v)=>{if embedding_source.as_deref()!=Some(cfg_source.as_str()){return Err("memory_embedding_fingerprint_mismatch".into());}v},None=>embed_query(&query,&state).await? };
+ if query_vector.len()!=cfg_dims||query_vector.iter().any(|x|!x.is_finite()){return Err("memory_embedding_fingerprint_mismatch".into());}
  if top_n>100{return Err("memory_search_limit".into());}
  let mut hits={
  let c=database::db::get_connection().map_err(|e|e.to_string())?;
@@ -38,7 +47,7 @@ pub async fn memory_search(owner_session_id:String,query:String,query_vector:Opt
  let mut hits=Vec::new();
  for row in rows{if hits.len()>=MAX_CANDIDATES{return Err("memory_search_candidate_limit".into());}
  let(id,content,blob,model,source,dimensions,kind,fork,review)=row.map_err(|e|e.to_string())?;
- if model!=MODEL||source!=SOURCE||dimensions!=1024||blob.len()!=4096{return Err("memory_persisted_fingerprint_mismatch".into());}
+ if model!=cfg_model||source!=cfg_source||dimensions!=cfg_dims as i64||blob.len()!=cfg_dims*4{return Err("memory_persisted_fingerprint_mismatch".into());}
  let vector:Vec<f32>=blob.chunks_exact(4).map(|b|f32::from_le_bytes(b.try_into().unwrap())).collect();
  if vector.iter().any(|x|!x.is_finite()){return Err("memory_nonfinite_vector".into());}
  let dot:f32=vector.iter().zip(&query_vector).map(|(a,b)|a*b).sum();
@@ -83,23 +92,37 @@ async fn embed_query(query:&str,state:&agent_core::state::AgentAppState)->Result
 /// Single embedding transport shared by query-time search and the durable index producer, so both live in one vector space.
 pub(crate) async fn embed_text(query:&str,config:&agent_core::integrations::config::EmbeddingConfig)->Result<Vec<f32>,String>{
  use key_vault::key_store::{KEY_SERVICE,HealthStatus};
- if config.provider!="embedding_api"||config.model.as_deref()!=Some(MODEL)||config.dimensions!=Some(1024){return Err("memory_query_config_fingerprint_mismatch".into());}
+ let (model,dims,_)=configured_space(config)?;
  if query.trim().is_empty(){return Err("memory_empty_query".into());}
- let mut keys=KEY_SERVICE.list_keys();keys.retain(|k| k.enabled&&k.health_status==HealthStatus::Valid&&k.enabled_models.iter().any(|m|m==MODEL)&&k.last_validated_at.is_some_and(|t|{let age=chrono::Utc::now().signed_duration_since(t).num_seconds();(0..=86400).contains(&age)}));keys.sort_by(|a,b|a.id.cmp(&b.id));
- let key=keys.into_iter().find(|k| k.base_url.as_deref().is_some_and(allowed_embedding_base)).ok_or("memory_query_credential_unavailable")?;
+ // Credential = any enabled, healthy Key Vault account that advertises the configured embedding model.
+ // No fixed base-url allowlist and no 24h revalidation window; only an explicit auth failure demotes a key (health != Valid).
+ let mut keys=KEY_SERVICE.list_keys();keys.retain(|k| k.enabled&&k.health_status==HealthStatus::Valid&&k.base_url.as_deref().is_some_and(|b|!b.trim().is_empty())&&k.api_key.as_deref().is_some_and(|v|!v.trim().is_empty())&&k.enabled_models.iter().chain(k.available_models.iter()).any(|m|m==&model));keys.sort_by(|a,b|a.id.cmp(&b.id));
+ let key=keys.into_iter().next().ok_or("memory_query_credential_unavailable")?;
  let base=key.base_url.as_deref().ok_or("memory_query_base_unavailable")?;
  let secret=key.api_key.as_deref().filter(|k|!k.trim().is_empty()).ok_or("memory_query_credential_unavailable")?;
- let response=reqwest::Client::new().post(format!("{}/embeddings",base.trim_end_matches('/'))).bearer_auth(secret).json(&serde_json::json!({"model":MODEL,"input":query,"encoding_format":"float","dimensions":1024})).send().await.map_err(|_|"memory_query_transport_failed")?;
+ let response=reqwest::Client::new().post(format!("{}/embeddings",base.trim_end_matches('/'))).bearer_auth(secret).json(&serde_json::json!({"model":model,"input":query,"encoding_format":"float","dimensions":dims})).send().await.map_err(|_|"memory_query_transport_failed")?;
  if !response.status().is_success(){return Err("memory_query_transport_status".into());}
  let body:serde_json::Value=response.json().await.map_err(|_|"memory_query_response_invalid")?;
  let rows=body["data"].as_array().ok_or("memory_query_response_invalid")?;if rows.len()!=1{return Err("memory_query_response_invalid".into());}
- let values=rows[0]["embedding"].as_array().ok_or("memory_query_response_invalid")?;if values.len()!=1024{return Err("memory_query_dimension_mismatch".into());}
+ let values=rows[0]["embedding"].as_array().ok_or("memory_query_response_invalid")?;if values.len()!=dims{return Err("memory_query_dimension_mismatch".into());}
  let vector:Vec<f32>=values.iter().map(|v|v.as_f64().map(|v|v as f32).filter(|v|v.is_finite()).ok_or("memory_query_nonfinite")).collect::<Result<_,_>>()?;
  Ok(vector)
 }
-fn allowed_embedding_base(base:&str)->bool{
- if base=="https://zenmux.ai/api/v1"{return true;}
- // Test-only loopback protocol mock; not a runtime fallback or alternate space.
- #[cfg(test)] {return base.starts_with("http://127.0.0.1:")&&base.ends_with("/api/v1");}
- #[cfg(not(test))] false
+
+#[cfg(test)]
+mod configured_space_tests{
+ use super::*;
+ use agent_core::integrations::config::EmbeddingConfig;
+ fn cfg(provider:&str,model:Option<&str>,dims:Option<usize>)->EmbeddingConfig{let mut c=EmbeddingConfig::default();c.provider=provider.into();c.model=model.map(Into::into);c.dimensions=dims;c}
+ #[test]fn default_model_keeps_legacy_fingerprint(){assert_eq!(configured_space(&cfg("embedding_api",Some(MODEL),Some(1024))).unwrap().2,SOURCE);}
+ #[test]fn other_model_or_dimension_is_a_distinct_space(){
+  let a=configured_space(&cfg("embedding_api",Some("text-embedding-3-small"),Some(1024))).unwrap().2;
+  let b=configured_space(&cfg("embedding_api",Some("text-embedding-3-small"),Some(768))).unwrap().2;
+  assert_ne!(a,SOURCE);assert_ne!(a,b);
+ }
+ #[test]fn unset_or_disabled_config_is_rejected(){
+  assert!(configured_space(&cfg("auto",None,None)).is_err());
+  assert!(configured_space(&cfg("embedding_api",None,Some(1024))).is_err());
+  assert!(configured_space(&cfg("embedding_api",Some(MODEL),None)).is_err());
+ }
 }

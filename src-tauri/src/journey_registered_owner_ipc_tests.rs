@@ -137,7 +137,7 @@ fn memory_search_registered_execution_contract(){
  for (sid,id,text) in [(owner,"a","alpha"),(owner,"b","beta"),("foreign","c","secret")]{c.execute("INSERT INTO session_journey_embedding_index(source_id,source_kind,session_id,fork_id,review_id,content,embedding,embedding_model,embedding_source,embedding_dimensions) VALUES(?1,'confirmed_fact',?2,'f','r',?3,?4,'qwen/qwen3-vl-embedding',?5,1024)",rusqlite::params![id,sid,text,blob,source]).unwrap();}drop(c);
  let app=mock_builder().manage(state.clone()).invoke_handler(tauri::generate_handler![crate::memory_search_commands::memory_search,agent_core::definitions::commands::integrations_update_patch]).build(mock_context(noop_assets())).unwrap();
  let w=tauri::WebviewWindowBuilder::new(&app,"main",Default::default()).build().unwrap();
- invoke(&w,"integrations_update_patch",json!({"patch":{"rerank":{"provider":"disabled"}}})).unwrap();
+ invoke(&w,"integrations_update_patch",json!({"patch":{"embedding":{"provider":"embedding_api","model":"qwen/qwen3-vl-embedding","dimensions":1024},"rerank":{"provider":"disabled"}}})).unwrap();
  let body=json!({"ownerSessionId":owner,"query":"q","queryVector":v,"embeddingSource":source,"topN":2});
  let hits=invoke(&w,"memory_search",body.clone()).unwrap();assert_eq!(hits.as_array().unwrap().len(),2);assert_eq!(hits[0]["sourceId"],"a");assert_eq!(hits[1]["sourceId"],"b");
  let mut wrong=body.clone();wrong["queryVector"]=json!([1.0]);assert!(invoke(&w,"memory_search",wrong).is_err());
@@ -223,7 +223,7 @@ fn memory_search_candidate_hard_caps_registered_contract(){
  insert(&c,owner,0..MAX_RERANK_CANDIDATES+20);insert(&c,"foreign-owner",0..3);drop(c);
  let app=mock_builder().manage(state).invoke_handler(tauri::generate_handler![crate::memory_search_commands::memory_search,agent_core::definitions::commands::integrations_update_patch]).build(mock_context(noop_assets())).unwrap();let w=tauri::WebviewWindowBuilder::new(&app,"main",Default::default()).build().unwrap();
  let mut q=vec![0f32;1024];q[0]=1.;let body=json!({"ownerSessionId":owner,"query":"capq","queryVector":q,"embeddingSource":SOURCE,"topN":2});
- invoke(&w,"integrations_update_patch",json!({"patch":{"rerank":{"provider":"zenmux_api","model":"qwen/qwen3-vl-rerank","baseUrl":format!("{}/api/v1",server.uri())}}})).unwrap();
+ invoke(&w,"integrations_update_patch",json!({"patch":{"embedding":{"provider":"embedding_api","model":"qwen/qwen3-vl-embedding","dimensions":1024},"rerank":{"provider":"zenmux_api","model":"qwen/qwen3-vl-rerank","baseUrl":format!("{}/api/v1",server.uri())}}})).unwrap();
  let hits=invoke(&w,"memory_search",body.clone()).unwrap();let hits=hits.as_array().unwrap();
  { let seen=seen.lock().unwrap();assert_eq!(seen.len(),1);let docs=seen[0]["input"]["documents"].as_array().unwrap();
    assert_eq!(docs.len(),MAX_RERANK_CANDIDATES,"rerank provider gets at most the cap, not every candidate");

@@ -1671,5 +1671,26 @@
     "failed": "无法连接到 ORG2 Market，请重试。",
     "title": "ORG2 Market",
     "launchFailed": "无法启用所选套餐。请刷新套餐，检查钱包余额和用量授权后重试。"
+  },
+  "sessionMemoryModels": {
+    "none": "关闭",
+    "save": "保存",
+    "embedding": {
+      "label": "Embedding 模型",
+      "description": "用于把会话记忆向量化。只列出已在健康的 Key Vault 账号上启用的模型。"
+    },
+    "dimensions": {
+      "label": "向量维度",
+      "description": "模型返回的向量长度。更换模型或维度会形成新的向量空间。"
+    },
+    "rerank": {
+      "label": "Rerank 模型",
+      "description": "用于对召回结果重新排序。关闭则只按向量相似度排序。"
+    },
+    "missing": {
+      "model": "请选择 embedding 模型。",
+      "dimensions": "请填写向量维度。"
+    },
+    "reembedNotice": "模型已更改：旧向量属于另一个空间，不会混用，会随会话更新逐步重新生成。"
   }
 }

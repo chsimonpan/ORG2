@@ -1671,5 +1671,26 @@
     "failed": "Tidak dapat terhubung ke ORG2 Market. Silakan coba lagi.",
     "title": "ORG2 Market",
     "launchFailed": "Tidak dapat mengaktifkan paket yang dipilih. Segarkan katalog dan periksa saldo dompet serta otorisasi penggunaan."
+  },
+  "sessionMemoryModels": {
+    "none": "Disabled",
+    "save": "Save",
+    "embedding": {
+      "label": "Embedding model",
+      "description": "Model used to vectorise session memory. Only models enabled on a healthy Key Vault account are listed."
+    },
+    "dimensions": {
+      "label": "Dimensions",
+      "description": "Vector size the model returns. Changing model or dimensions starts a new vector space."
+    },
+    "rerank": {
+      "label": "Rerank model",
+      "description": "Model used to re-order recalled results. Disabled means vector order only."
+    },
+    "missing": {
+      "model": "Pick an embedding model.",
+      "dimensions": "Set the vector dimensions."
+    },
+    "reembedNotice": "Model changed: existing vectors belong to another space and will not be mixed. They are re-embedded as sessions update."
   }
 }

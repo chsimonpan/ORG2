@@ -38,6 +38,7 @@ import {
 } from "../../KeyVault/shared/InlineCardPrimitives";
 import type { DetailMode } from "../../types";
 import AgentEvolutionPanel from "../Evolution/AgentEvolutionPanel";
+import SessionMemoryModelPanel from "../Memory/SessionMemoryModelPanel";
 import WorkspaceMemoryBrowser from "../Memory/WorkspaceMemoryBrowser";
 import InlineExternalRulesImport from "./InlineExternalRulesImport";
 
@@ -324,7 +325,10 @@ export const RulesMemoryEvolutionTable: React.FC<
       {activeTab === "memory" ? (
         <ScrollPreservation className={DETAIL_PANEL_TOKENS.scrollContentNoTop}>
           <div className={DETAIL_PANEL_TOKENS.contentWidthWithPaddingNoTop}>
-            <WorkspaceMemoryBrowser />
+            <div className="flex flex-col gap-3">
+              <SessionMemoryModelPanel />
+              <WorkspaceMemoryBrowser />
+            </div>
           </div>
         </ScrollPreservation>
       ) : activeTab === "evolution" ? (
